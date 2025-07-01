@@ -3,9 +3,9 @@ use glam::*;
 use wgpu::util::DeviceExt;
 
 use crate::{
-    Gaussian, GaussianCov3dConfig, GaussianCov3dHalfConfig, GaussianCov3dSingleConfig,
-    GaussianShConfig, GaussianShHalfConfig, GaussianShNoneConfig, GaussianShNorm8Config,
-    GaussianShSingleConfig,
+    BufferWrapper, Gaussian, GaussianCov3dConfig, GaussianCov3dHalfConfig,
+    GaussianCov3dSingleConfig, GaussianShConfig, GaussianShHalfConfig, GaussianShNoneConfig,
+    GaussianShNorm8Config, GaussianShSingleConfig,
 };
 
 /// The Gaussians storage buffer.
@@ -46,11 +46,6 @@ impl<G: GaussianPod> GaussiansBuffer<G> {
         });
 
         Self(buffer, std::marker::PhantomData)
-    }
-
-    /// Get the buffer.
-    pub fn buffer(&self) -> &wgpu::Buffer {
-        &self.0
     }
 
     /// Get the number of Gaussians.
@@ -138,6 +133,12 @@ impl<G: GaussianPod> GaussiansBuffer<G> {
             (start * std::mem::size_of::<G>()) as wgpu::BufferAddress,
             bytemuck::cast_slice(pods),
         );
+    }
+}
+
+impl<G: GaussianPod> BufferWrapper for GaussiansBuffer<G> {
+    fn buffer(&self) -> &wgpu::Buffer {
+        &self.0
     }
 }
 

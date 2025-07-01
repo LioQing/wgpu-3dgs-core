@@ -1,6 +1,8 @@
 use glam::*;
 use wgpu::util::DeviceExt;
 
+use crate::BufferWrapper;
+
 /// The model transformation buffer.
 #[derive(Debug, Clone)]
 pub struct ModelTransformBuffer(wgpu::Buffer);
@@ -26,9 +28,10 @@ impl ModelTransformBuffer {
     pub fn update_with_pod(&self, queue: &wgpu::Queue, pod: &ModelTransformPod) {
         queue.write_buffer(&self.0, 0, bytemuck::bytes_of(pod));
     }
+}
 
-    /// Get the buffer.
-    pub fn buffer(&self) -> &wgpu::Buffer {
+impl BufferWrapper for ModelTransformBuffer {
+    fn buffer(&self) -> &wgpu::Buffer {
         &self.0
     }
 }

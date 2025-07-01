@@ -1,6 +1,8 @@
 use glam::*;
 use wgpu::util::DeviceExt;
 
+use crate::BufferWrapper;
+
 /// The Gaussian display modes.
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -72,9 +74,10 @@ impl GaussianTransformBuffer {
     pub fn update_with_pod(&self, queue: &wgpu::Queue, transform: &GaussianTransformPod) {
         queue.write_buffer(&self.0, 0, bytemuck::bytes_of(transform));
     }
+}
 
-    /// Get the buffer.
-    pub fn buffer(&self) -> &wgpu::Buffer {
+impl BufferWrapper for GaussianTransformBuffer {
+    fn buffer(&self) -> &wgpu::Buffer {
         &self.0
     }
 }

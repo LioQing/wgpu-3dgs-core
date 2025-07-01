@@ -10,4 +10,16 @@ pub enum Error {
     PlyVertexPropertyNotFound(String),
     #[error("variable name {0} not found in packages")]
     VarNotFound(String),
+    #[error("{0}")]
+    Wesl(#[from] wesl::Error),
+    #[error(
+        "\
+        buffer count and bind group layout count mismatch: \
+        {buffer_count} != {bind_group_layout_count}\
+        "
+    )]
+    BindGroupLayoutCountMismatch {
+        buffer_count: usize,
+        bind_group_layout_count: usize,
+    },
 }
