@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use crate::{BufferWrapper, Error, GaussianPod};
 
 macro_rules! label_for_components {
@@ -63,14 +65,14 @@ impl ComputeBundle {
         label: Option<&str>,
         device: &wgpu::Device,
         bind_group_layout_descriptors: impl IntoIterator<Item = &'a wgpu::BindGroupLayoutDescriptor<'a>>,
-        resolver: &wesl::Wesl<impl wesl::Resolver>,
         buffers: impl IntoIterator<Item = impl IntoIterator<Item = &'a (impl BufferWrapper + 'a)>>,
+        shader_source: wgpu::ShaderSource,
     ) -> Result<Self, Error> {
         let this = ComputeBundle::new_without_bind_groups(
             label,
             device,
             bind_group_layout_descriptors,
-            resolver,
+            shader_source,
         )?;
 
         let buffers = buffers.into_iter().collect::<Vec<_>>();
@@ -153,7 +155,7 @@ impl ComputeBundle<()> {
         label: Option<&str>,
         device: &wgpu::Device,
         bind_group_layout_descriptors: impl IntoIterator<Item = &'a wgpu::BindGroupLayoutDescriptor<'a>>,
-        resolver: &wesl::Wesl<impl wesl::Resolver>,
+        shader_source: wgpu::ShaderSource,
     ) -> Result<Self, Error> {
         let workgroup_size = device
             .limits()
@@ -185,7 +187,7 @@ impl ComputeBundle<()> {
         );
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: label_for_components!(label, "Shader"),
-            source: wgpu::ShaderSource::Wgsl(resolver.compile("main")?.to_string().into()),
+            source: shader_source,
         });
 
         let compilation_options = wgpu::PipelineCompilationOptions {

@@ -2,6 +2,38 @@ use std::{borrow::Cow, collections::HashMap, path::Path};
 
 use crate::Error;
 
+/// A resolver to provide dynamic entry shader.
+pub struct DynEntryResolver<R: wesl::Resolver> {
+    pub resolver: R,
+    pub shader_source: String,
+}
+
+impl<R: wesl::Resolver> DynEntryResolver<R> {
+    /// The entry shader module path.
+    pub const ENTRY_SHADER_PATH: &'static str = "__entry__";
+
+    /// Create a new compute bundle resolver.
+    pub fn new(resolver: R, shader_source: String) -> Self {
+        Self {
+            resolver,
+            shader_source,
+        }
+    }
+}
+
+impl<R: wesl::Resolver> wesl::Resolver for DynEntryResolver<R> {
+    fn resolve_source<'a>(
+        &'a self,
+        path: &wesl::ModulePath,
+    ) -> Result<Cow<'a, str>, wesl::ResolveError> {
+        if path == &Self::ENTRY_SHADER_PATH.into() {
+            return Ok(Cow::Borrowed(&self.shader_source));
+        }
+
+        self.resolver.resolve_source(path)
+    }
+}
+
 /// A trait to enable the use of `@var(name)` directive in WESL packages.
 pub trait VarDirective: wesl::PkgModule {
     /// Returns all the variable names that can be resolved.
@@ -10,15 +42,13 @@ pub trait VarDirective: wesl::PkgModule {
     }
 }
 
-/// A custom resolver extended from [`wesl::StandardResolver`].
-///
-/// This resolver resolves variable names using the `@var(name)` directive.
-pub struct Resolver {
+/// A resolver extended from [`wesl::StandardResolver`] to support `@var(name)` directive.
+pub struct VarStandardResolver {
     std: wesl::StandardResolver,
     vars: HashMap<&'static str, String>,
 }
 
-impl Resolver {
+impl VarStandardResolver {
     pub fn new(base: impl AsRef<Path>) -> Self {
         Self {
             std: wesl::StandardResolver::new(base),
@@ -53,7 +83,7 @@ impl Resolver {
     }
 }
 
-impl wesl::Resolver for Resolver {
+impl wesl::Resolver for VarStandardResolver {
     fn resolve_source<'a>(
         &'a self,
         path: &wesl::ModulePath,
