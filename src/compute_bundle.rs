@@ -1,6 +1,4 @@
-use std::borrow::Cow;
-
-use crate::{BufferWrapper, Error, GaussianPod};
+use crate::{BufferWrapper, Error, GaussianPod, wesl::DynEntryResolver};
 
 macro_rules! label_for_components {
     ($label:expr, $component:expr) => {
@@ -208,7 +206,7 @@ impl ComputeBundle<()> {
             cache: None,
         });
 
-        log::info!("Compute Bundle created");
+        log::info!("{} created", label.as_deref().unwrap_or("Compute Bundle"));
 
         Ok(Self {
             label: label.map(String::from),
@@ -238,5 +236,142 @@ impl ComputeBundle<()> {
         }
 
         pass.dispatch_workgroups(count.div_ceil(self.workgroup_size()), 1, 1);
+    }
+}
+
+/// A builder for [`ComputeBundle`].
+///
+/// The shader is built with WESL, and the entry point is defined by the template
+/// in [`ComputeBundleBuilder::WESL_TEMPLATE`].
+pub struct ComputeBundleBuilder<'a, R: wesl::Resolver> {
+    label: Option<&'a str>,
+    bind_group_vars: Vec<Vec<&'a str>>,
+    bind_group_layouts: Vec<&'a wgpu::BindGroupLayoutDescriptor<'a>>,
+    compile_options: wesl::CompileOptions,
+    resolver: Option<R>,
+}
+
+impl<'a, R: wesl::Resolver> ComputeBundleBuilder<'a, R> {
+    /// The WESL template.
+    pub const WESL_TEMPLATE: &'static str = include_str!("shader/compute_bundle_template.wesl");
+
+    /// Create a new compute bundle builder.
+    pub fn new() -> Self {
+        Self {
+            label: None,
+            bind_group_vars: Vec::new(),
+            bind_group_layouts: Vec::new(),
+            compile_options: wesl::CompileOptions::default(),
+            resolver: None,
+        }
+    }
+
+    /// Set the label of the compute bundle.
+    pub fn label(mut self, label: impl Into<&'a str>) -> Self {
+        self.label = Some(label.into());
+        self
+    }
+
+    /// Add a bind group layout descriptor.
+    pub fn bind_group_layout(
+        mut self,
+        bind_group_layout: &'a wgpu::BindGroupLayoutDescriptor<'a>,
+    ) -> Self {
+        self.bind_group_layouts.push(bind_group_layout);
+        self
+    }
+
+    /// Set the bind group layout descriptors.
+    pub fn bind_group_layouts(
+        mut self,
+        bind_group_layouts: impl IntoIterator<Item = &'a wgpu::BindGroupLayoutDescriptor<'a>>,
+    ) -> Self {
+        self.bind_group_layouts = bind_group_layouts.into_iter().collect();
+        self
+    }
+
+    /// Set the WESL resolver.
+    pub fn resolver(mut self, resolver: R) -> Self {
+        self.resolver = Some(resolver);
+        self
+    }
+
+    /// Build the compute bundle with bind groups.
+    pub fn build(
+        self,
+        device: &wgpu::Device,
+        buffers: impl IntoIterator<Item = impl IntoIterator<Item = &'a (impl BufferWrapper + 'a)>>,
+    ) -> Result<ComputeBundle<wgpu::BindGroup>, Error> {
+        if self.bind_group_layouts.is_empty() {
+            return Err(Error::MissingBindGroupLayout);
+        }
+
+        let Some(resolver) = self.resolver else {
+            return Err(Error::MissingResolver);
+        };
+
+        let shader_source = wgpu::ShaderSource::Wgsl(
+            wesl::Wesl::new("__entry__") // Base will be replaced by DynEntryResolver
+                .set_custom_resolver(resolver)
+                .set_options(self.compile_options)
+                .compile(DynEntryResolver::<R>::ENTRY_SHADER_PATH)?
+                .to_string()
+                .into(),
+        );
+
+        ComputeBundle::new(
+            self.label,
+            device,
+            self.bind_group_layouts.into_iter().collect::<Vec<_>>(),
+            buffers,
+            shader_source,
+        )
+    }
+
+    /// Build the compute bundle without bind groups.
+    pub fn build_without_bind_groups(
+        self,
+        device: &wgpu::Device,
+    ) -> Result<ComputeBundle<()>, Error> {
+        if self.bind_group_layouts.is_empty() {
+            return Err(Error::MissingBindGroupLayout);
+        }
+
+        let Some(resolver) = self.resolver else {
+            return Err(Error::MissingResolver);
+        };
+
+        let resolver = Self::build_dyn_entry_resolver(resolver, self.bind_group_vars);
+
+        let shader_source = wgpu::ShaderSource::Wgsl(
+            wesl::Wesl::new("__entry__") // Base will be replaced by DynEntryResolver
+                .set_custom_resolver(resolver)
+                .set_options(self.compile_options)
+                .compile(DynEntryResolver::<R>::ENTRY_SHADER_PATH)?
+                .to_string()
+                .into(),
+        );
+
+        ComputeBundle::new_without_bind_groups(
+            self.label,
+            device,
+            self.bind_group_layouts.into_iter().collect::<Vec<_>>(),
+            shader_source,
+        )
+    }
+
+    /// Build the dynamic entry resolver.
+    fn build_dyn_entry_resolver(
+        resolver: R,
+        bind_group_vars: Vec<Vec<&'a str>>,
+    ) -> DynEntryResolver<R> {
+        DynEntryResolver::new(resolver, Self::WESL_TEMPLATE.to_string());
+        unimplemented!("implement entry instantiation")
+    }
+}
+
+impl<R: wesl::Resolver> Default for ComputeBundleBuilder<'_, R> {
+    fn default() -> Self {
+        Self::new()
     }
 }

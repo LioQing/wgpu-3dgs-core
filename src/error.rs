@@ -22,4 +22,8 @@ pub enum Error {
         buffer_count: usize,
         bind_group_layout_count: usize,
     },
+    #[error("Missing bind group layout for compute bundle")]
+    MissingBindGroupLayout,
+    #[error("Missing resolver for compute bundle")]
+    MissingResolver,
 }
