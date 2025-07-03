@@ -245,8 +245,9 @@ impl ComputeBundle<()> {
 /// in [`ComputeBundleBuilder::WESL_TEMPLATE`].
 pub struct ComputeBundleBuilder<'a, R: wesl::Resolver> {
     label: Option<&'a str>,
-    bind_group_vars: Vec<Vec<&'a str>>,
+    bind_group_decls: Vec<Vec<&'a str>>,
     bind_group_layouts: Vec<&'a wgpu::BindGroupLayoutDescriptor<'a>>,
+    main: Option<&'a str>,
     compile_options: wesl::CompileOptions,
     resolver: Option<R>,
 }
@@ -259,8 +260,9 @@ impl<'a, R: wesl::Resolver> ComputeBundleBuilder<'a, R> {
     pub fn new() -> Self {
         Self {
             label: None,
-            bind_group_vars: Vec::new(),
+            bind_group_decls: Vec::new(),
             bind_group_layouts: Vec::new(),
+            main: None,
             compile_options: wesl::CompileOptions::default(),
             resolver: None,
         }
@@ -273,20 +275,52 @@ impl<'a, R: wesl::Resolver> ComputeBundleBuilder<'a, R> {
     }
 
     /// Add a bind group layout descriptor.
+    ///
+    /// The `bind_group_decl` is in the format of `var<{access space}, {mode}> name: {type}`.
     pub fn bind_group_layout(
         mut self,
+        bind_group_decl: Vec<&'a str>,
         bind_group_layout: &'a wgpu::BindGroupLayoutDescriptor<'a>,
     ) -> Self {
+        self.bind_group_decls.push(bind_group_decl);
         self.bind_group_layouts.push(bind_group_layout);
         self
     }
 
     /// Set the bind group layout descriptors.
+    ///
+    /// The `bind_group_decls` are in the format of `var<{access space}, {mode}> name: {type}`.
     pub fn bind_group_layouts(
         mut self,
-        bind_group_layouts: impl IntoIterator<Item = &'a wgpu::BindGroupLayoutDescriptor<'a>>,
+        bind_groups: impl IntoIterator<Item = (Vec<&'a str>, &'a wgpu::BindGroupLayoutDescriptor<'a>)>,
     ) -> Self {
-        self.bind_group_layouts = bind_group_layouts.into_iter().collect();
+        let (bind_group_decls, bind_group_layouts): (Vec<_>, Vec<_>) =
+            bind_groups.into_iter().unzip();
+
+        self.bind_group_decls.extend(bind_group_decls);
+        self.bind_group_layouts.extend(bind_group_layouts);
+
+        self
+    }
+
+    /// Set the main function of the compute shader.
+    ///
+    /// The format is any statements, most likely of `"my_main(arg1, arg2, ...);"`.
+    ///
+    /// `arg1, arg2, ...` can be one of the followings:
+    /// - `index`: The index of the current invocation.
+    /// - `workgroup_size`: The size of the workgroup.
+    /// - Any of the compute builtins:
+    ///     - `local_invocation_id`
+    ///     - `local_invocation_index`
+    ///     - `global_invocation_id`
+    ///     - `workgroup_id`
+    ///     - `num_workgroups`
+    ///     - `subgroup_invocation_id`
+    ///     - `subgroup_size`
+    /// - Any of the bind group variables.
+    pub fn main(mut self, main: &'a str) -> Self {
+        self.main = Some(main);
         self
     }
 
@@ -310,8 +344,14 @@ impl<'a, R: wesl::Resolver> ComputeBundleBuilder<'a, R> {
             return Err(Error::MissingResolver);
         };
 
+        let Some(main) = self.main else {
+            return Err(Error::MissingMainFunction);
+        };
+
+        let resolver = Self::build_dyn_entry_resolver(resolver, self.bind_group_decls, main);
+
         let shader_source = wgpu::ShaderSource::Wgsl(
-            wesl::Wesl::new("__entry__") // Base will be replaced by DynEntryResolver
+            wesl::Wesl::new("placeholder") // Base will be replaced by DynEntryResolver
                 .set_custom_resolver(resolver)
                 .set_options(self.compile_options)
                 .compile(DynEntryResolver::<R>::ENTRY_SHADER_PATH)?
@@ -341,10 +381,14 @@ impl<'a, R: wesl::Resolver> ComputeBundleBuilder<'a, R> {
             return Err(Error::MissingResolver);
         };
 
-        let resolver = Self::build_dyn_entry_resolver(resolver, self.bind_group_vars);
+        let Some(main) = self.main else {
+            return Err(Error::MissingMainFunction);
+        };
+
+        let resolver = Self::build_dyn_entry_resolver(resolver, self.bind_group_decls, main);
 
         let shader_source = wgpu::ShaderSource::Wgsl(
-            wesl::Wesl::new("__entry__") // Base will be replaced by DynEntryResolver
+            wesl::Wesl::new("placeholder") // Base will be replaced by DynEntryResolver
                 .set_custom_resolver(resolver)
                 .set_options(self.compile_options)
                 .compile(DynEntryResolver::<R>::ENTRY_SHADER_PATH)?
@@ -364,9 +408,28 @@ impl<'a, R: wesl::Resolver> ComputeBundleBuilder<'a, R> {
     fn build_dyn_entry_resolver(
         resolver: R,
         bind_group_vars: Vec<Vec<&'a str>>,
+        main: &'a str,
     ) -> DynEntryResolver<R> {
-        DynEntryResolver::new(resolver, Self::WESL_TEMPLATE.to_string());
-        unimplemented!("implement entry instantiation")
+        let bind_group_derivatives = bind_group_vars
+            .into_iter()
+            .enumerate()
+            .map(|(group, vars)| {
+                vars.into_iter()
+                    .enumerate()
+                    .map(|(binding, var)| format!("@group({group}) @binding({binding}) {var};"))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let source = format!(
+            "{}\n\n{}",
+            Self::WESL_TEMPLATE.replace("{{main}}", main),
+            bind_group_derivatives,
+        );
+
+        DynEntryResolver::new(resolver, source)
     }
 }
 
