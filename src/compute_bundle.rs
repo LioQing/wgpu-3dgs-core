@@ -462,7 +462,7 @@ impl<R: wesl::Resolver> Default for ComputeBundleBuilder<'_, R> {
 
 /// A [`ComputeBundleBuilder`] specialized for Gaussian computations.
 ///
-/// The Gaussian bind group will be appended to the end of the bind group layouts,
+/// The Gaussian bind group will be appended to the end of the bind group layouts.
 pub struct GaussianComputeBundleBuilder<'a, R: wesl::Resolver> {
     pub inner: ComputeBundleBuilder<'a, R>,
 }
@@ -475,7 +475,7 @@ impl<'a, R: wesl::Resolver> GaussianComputeBundleBuilder<'a, R> {
 
     /// Build the compute bundle with bind groups.
     pub fn build<G: GaussianPod>(
-        mut self,
+        self,
         device: &wgpu::Device,
         model_transform: &ModelTransformBuffer,
         gaussian_transform: &GaussianTransformBuffer,
@@ -494,11 +494,19 @@ impl<'a, R: wesl::Resolver> GaussianComputeBundleBuilder<'a, R> {
             return Err(Error::MissingMainFunction);
         };
 
-        let resolver = ComputeBundleBuilder::<R>::build_dyn_entry_resolver(
-            resolver,
-            self.inner.bind_group_decls,
-            main,
-        );
+        let bind_group_decls = self
+            .inner
+            .bind_group_decls
+            .into_iter()
+            .chain(std::iter::once(vec![
+                "var<uniform> model_transform: ModelTransform",
+                "var<uniform> gaussian_transform: GaussianTransform",
+                "var<storage, read> gaussians: array<Gaussian>",
+            ]))
+            .collect::<Vec<_>>();
+
+        let resolver =
+            ComputeBundleBuilder::<R>::build_dyn_entry_resolver(resolver, bind_group_decls, main);
 
         let shader_source = wgpu::ShaderSource::Wgsl(
             wesl::Wesl::new("placeholder") // Base will be replaced by DynEntryResolver
@@ -509,13 +517,63 @@ impl<'a, R: wesl::Resolver> GaussianComputeBundleBuilder<'a, R> {
                 .into(),
         );
 
+        let bind_group_layouts = self
+            .inner
+            .bind_group_layouts
+            .into_iter()
+            .chain(std::iter::once(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Gaussian Bind Group Layout"),
+                entries: &[
+                    // Model transform uniform buffer
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    // Gaussian transform uniform buffer
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    // Gaussians storage buffer
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            }))
+            .collect::<Vec<_>>();
+
+        let buffers = buffers
+            .into_iter()
+            .map(|buffers| buffers.into_iter().collect::<Vec<_>>())
+            .chain(std::iter::once(vec![
+                model_transform as &dyn BufferWrapper,
+                gaussian_transform as &dyn BufferWrapper,
+                gaussians as &dyn BufferWrapper,
+            ]));
+
         ComputeBundle::new(
             self.inner.label,
             device,
-            self.inner
-                .bind_group_layouts
-                .into_iter()
-                .collect::<Vec<_>>(),
+            bind_group_layouts,
             buffers,
             shader_source,
         )
