@@ -1,7 +1,5 @@
 use wesl::PkgModule;
 
-use crate::wesl::VarDirective;
-
 pub struct Mod;
 
 impl PkgModule for Mod {
@@ -32,14 +30,8 @@ impl PkgModule for Mod {
     }
 }
 
-impl VarDirective for Mod {
-    fn vars(&self) -> &'static [&'static str] {
-        &["gaussians", "gaussian_transform", "model_transform"]
-    }
-}
-
 macro_rules! submodule {
-    ($name:ident $(, $($vars:ident),* $(,)?)?) => {
+    ($name:ident) => {
         paste::paste! {
             pub mod $name {
                 pub struct Mod;
@@ -61,19 +53,11 @@ macro_rules! submodule {
                         None
                     }
                 }
-
-                $(
-                    impl super::VarDirective for Mod {
-                        fn vars(&self) -> &'static [&'static str] {
-                            &[$(stringify!($vars)),*]
-                        }
-                    }
-                )?
             }
         }
     };
 }
 
-submodule!(gaussian, gaussians);
-submodule!(gaussian_transform, gaussian_transform);
-submodule!(model_transform, model_transform);
+submodule!(gaussian);
+submodule!(gaussian_transform);
+submodule!(model_transform);
