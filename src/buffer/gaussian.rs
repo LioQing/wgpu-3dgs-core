@@ -172,6 +172,14 @@ pub trait GaussianPod: for<'a> From<&'a Gaussian> + bytemuck::NoUninit {
             )
         })
     }
+
+    /// Create the features for [`Wesl`](wesl::Wesl) compilation as a [`HashMap`].
+    fn features_map() -> std::collections::HashMap<String, bool> {
+        Self::features()
+            .iter()
+            .map(|(name, enabled)| (name.to_string(), *enabled))
+            .collect()
+    }
 }
 
 /// Macro to create the POD representation of Gaussian given the configurations.

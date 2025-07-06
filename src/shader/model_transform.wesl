@@ -4,10 +4,10 @@ struct ModelTransform {
     scale: vec3<f32>,
 }
 
-fn model_transform_mat() -> mat4x4<f32> {
-    let pos = @var(model_transform).pos;
-    let quat = @var(model_transform).quat;
-    let scale = @var(model_transform).scale;
+fn model_transform_mat(model_transform: ModelTransform) -> mat4x4<f32> {
+    let pos = model_transform.pos;
+    let quat = model_transform.quat;
+    let scale = model_transform.scale;
 
     let x2 = quat.x + quat.x;
     let y2 = quat.y + quat.y;
@@ -49,9 +49,9 @@ fn model_transform_mat() -> mat4x4<f32> {
     );
 }
 
-fn model_transform_inv_sr_mat() -> mat3x3<f32> {
-    let quat = @var(model_transform).quat;
-    let scale = @var(model_transform).scale;
+fn model_transform_inv_sr_mat(model_transform: ModelTransform) -> mat3x3<f32> {
+    let quat = model_transform.quat;
+    let scale = model_transform.scale;
 
     let x2 = quat.x + quat.x;
     let y2 = quat.y + quat.y;
@@ -89,9 +89,9 @@ fn model_transform_inv_sr_mat() -> mat3x3<f32> {
     );
 }
 
-fn model_scale_rotation_mat() -> mat3x3<f32> {
-    let quat = @var(model_transform).quat;
-    let scale = @var(model_transform).scale;
+fn model_scale_rotation_mat(model_transform: ModelTransform) -> mat3x3<f32> {
+    let quat = model_transform.quat;
+    let scale = model_transform.scale;
 
     let x2 = quat.x + quat.x;
     let y2 = quat.y + quat.y;

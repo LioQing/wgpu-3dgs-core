@@ -1,17 +1,11 @@
-use crate::{
-    BufferWrapper, Error, GaussianPod, GaussianTransformBuffer, GaussiansBuffer,
-    ModelTransformBuffer, wesl::DynEntryResolver,
-};
+use crate::{BufferWrapper, Error, wesl::DynEntryResolver};
 
 macro_rules! label_for_components {
     ($label:expr, $component:expr) => {
-        Some(
-            format!(
-                "{} {}",
-                $label.as_deref().unwrap_or("Compute Bundle"),
-                $component,
-            )
-            .as_str(),
+        format!(
+            "{} {}",
+            $label.as_deref().unwrap_or("Compute Bundle"),
+            $component,
         )
     };
 }
@@ -62,11 +56,6 @@ impl<B> ComputeBundle<B> {
     /// Get the bind group layouts.
     pub fn bind_group_layouts(&self) -> &[wgpu::BindGroupLayout] {
         &self.bind_group_layouts
-    }
-
-    /// Get the bind groups.
-    pub fn bind_groups(&self) -> &[B] {
-        &self.bind_groups
     }
 
     /// Get the compute pipeline.
@@ -123,10 +112,15 @@ impl ComputeBundle {
         })
     }
 
+    /// Get the bind groups.
+    pub fn bind_groups(&self) -> &[wgpu::BindGroup] {
+        &self.bind_groups
+    }
+
     /// Dispatch the compute bundle for `count` instances.
     pub fn dispatch(&self, encoder: &mut wgpu::CommandEncoder, count: u32) {
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: label_for_components!(self.label, "Compute Pass"),
+            label: Some(label_for_components!(self.label, "Compute Pass").as_str()),
             timestamp_writes: None,
         });
 
@@ -150,7 +144,7 @@ impl ComputeBundle {
         buffers: impl IntoIterator<Item = &'a dyn BufferWrapper>,
     ) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: label_for_components!(label, format!("Bind Group {index}")),
+            label: Some(label_for_components!(label, format!("Bind Group {index}")).as_str()),
             layout: bind_group_layout,
             entries: &buffers
                 .into_iter()
@@ -194,7 +188,7 @@ impl ComputeBundle<()> {
             label.as_deref().unwrap_or("compute bundle"),
         );
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: label_for_components!(label, "Pipeline Layout"),
+            label: Some(label_for_components!(label, "Pipeline Layout").as_str()),
             bind_group_layouts: &bind_group_layouts.iter().collect::<Vec<_>>(),
             push_constant_ranges: &[],
         });
@@ -204,7 +198,7 @@ impl ComputeBundle<()> {
             label.as_deref().unwrap_or("compute bundle"),
         );
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: label_for_components!(label, "Shader"),
+            label: Some(label_for_components!(label, "Shader").as_str()),
             source: shader_source,
         });
 
@@ -218,10 +212,10 @@ impl ComputeBundle<()> {
             label.as_deref().unwrap_or("compute bundle"),
         );
         let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: label_for_components!(label, "Pipeline"),
+            label: Some(label_for_components!(label, "Pipeline").as_str()),
             layout: Some(&pipeline_layout),
             module: &shader,
-            entry_point: Some("main"),
+            entry_point: Some("_entry_"),
             compilation_options: compilation_options.clone(),
             cache: None,
         });
@@ -245,7 +239,7 @@ impl ComputeBundle<()> {
         count: u32,
     ) {
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: label_for_components!(self.label, "Compute Pass"),
+            label: Some(label_for_components!(self.label, "Compute Pass").as_str()),
             timestamp_writes: None,
         });
 
@@ -265,7 +259,7 @@ impl ComputeBundle<()> {
 /// in [`ComputeBundleBuilder::WESL_TEMPLATE`].
 pub struct ComputeBundleBuilder<'a, R: wesl::Resolver> {
     pub label: Option<&'a str>,
-    pub bind_group_decls: Vec<Vec<&'a str>>,
+    pub headers: Vec<&'a str>,
     pub bind_group_layouts: Vec<&'a wgpu::BindGroupLayoutDescriptor<'a>>,
     pub main: Option<&'a str>,
     pub compile_options: wesl::CompileOptions,
@@ -280,7 +274,7 @@ impl<'a, R: wesl::Resolver> ComputeBundleBuilder<'a, R> {
     pub fn new() -> Self {
         Self {
             label: None,
-            bind_group_decls: Vec::new(),
+            headers: Vec::new(),
             bind_group_layouts: Vec::new(),
             main: None,
             compile_options: wesl::CompileOptions::default(),
@@ -294,38 +288,54 @@ impl<'a, R: wesl::Resolver> ComputeBundleBuilder<'a, R> {
         self
     }
 
-    /// Add a bind group layout descriptor.
+    /// Add a header to the main entry shader.
+    ///
+    /// These can be constants, functions, imporst, etc.
+    /// The headers are only joined with newlines,
+    /// so anything that is valid WGSL code can be used.
+    pub fn header(mut self, header: &'a str) -> Self {
+        self.headers.push(header);
+        self
+    }
+
+    /// Add the headers to the main entry shader.
+    ///
+    /// These can be constants, functions, imporst, etc.
+    /// The headers are only joined with newlines,
+    /// so anything that is valid WGSL code can be used.
+    pub fn headers(mut self, header: Vec<&'a str>) -> Self {
+        self.headers.extend(header);
+        self
+    }
+
+    /// Add a bind group descriptor.
     ///
     /// The `bind_group_decl` is in the format of `var<{access space}, {mode}> name: {type}`.
-    pub fn bind_group_layout(
+    pub fn bind_group(
         mut self,
-        bind_group_decl: Vec<&'a str>,
         bind_group_layout: &'a wgpu::BindGroupLayoutDescriptor<'a>,
     ) -> Self {
-        self.bind_group_decls.push(bind_group_decl);
         self.bind_group_layouts.push(bind_group_layout);
         self
     }
 
-    /// Set the bind group layout descriptors.
+    /// Add the bind group descriptors.
     ///
     /// The `bind_group_decls` are in the format of `var<{access space}, {mode}> name: {type}`.
-    pub fn bind_group_layouts(
+    pub fn bind_groups(
         mut self,
-        bind_groups: impl IntoIterator<Item = (Vec<&'a str>, &'a wgpu::BindGroupLayoutDescriptor<'a>)>,
+        bind_groups: impl IntoIterator<Item = &'a wgpu::BindGroupLayoutDescriptor<'a>>,
     ) -> Self {
-        let (bind_group_decls, bind_group_layouts): (Vec<_>, Vec<_>) =
-            bind_groups.into_iter().unzip();
-
-        self.bind_group_decls.extend(bind_group_decls);
-        self.bind_group_layouts.extend(bind_group_layouts);
-
+        self.bind_group_layouts.extend(bind_groups);
         self
     }
 
     /// Set the main function of the compute shader.
     ///
     /// The format is any statements, most likely of `"my_main(arg1, arg2, ...);"`.
+    /// Since my_main is likely from another module, you may want to use
+    /// [`ComputeBundleBuilder::header`] to import it by adding a header like
+    /// `"import my_module::my_main;"`.
     ///
     /// `arg1, arg2, ...` can be one of the followings:
     /// - `index`: The index of the current invocation.
@@ -336,11 +346,14 @@ impl<'a, R: wesl::Resolver> ComputeBundleBuilder<'a, R> {
     ///     - `global_invocation_id`
     ///     - `workgroup_id`
     ///     - `num_workgroups`
-    ///     - `subgroup_invocation_id`
-    ///     - `subgroup_size`
-    /// - Any of the bind group variables.
     pub fn main(mut self, main: &'a str) -> Self {
         self.main = Some(main);
+        self
+    }
+
+    /// Set the compile options for the WESL compiler.
+    pub fn compile_options(mut self, options: wesl::CompileOptions) -> Self {
+        self.compile_options = options;
         self
     }
 
@@ -368,7 +381,7 @@ impl<'a, R: wesl::Resolver> ComputeBundleBuilder<'a, R> {
             return Err(Error::MissingMainFunction);
         };
 
-        let resolver = Self::build_dyn_entry_resolver(resolver, self.bind_group_decls, main);
+        let resolver = Self::build_dyn_entry_resolver(resolver, self.headers, main);
 
         let shader_source = wgpu::ShaderSource::Wgsl(
             wesl::Wesl::new("placeholder") // Base will be replaced by DynEntryResolver
@@ -405,7 +418,7 @@ impl<'a, R: wesl::Resolver> ComputeBundleBuilder<'a, R> {
             return Err(Error::MissingMainFunction);
         };
 
-        let resolver = Self::build_dyn_entry_resolver(resolver, self.bind_group_decls, main);
+        let resolver = Self::build_dyn_entry_resolver(resolver, self.headers, main);
 
         let shader_source = wgpu::ShaderSource::Wgsl(
             wesl::Wesl::new("placeholder") // Base will be replaced by DynEntryResolver
@@ -427,27 +440,13 @@ impl<'a, R: wesl::Resolver> ComputeBundleBuilder<'a, R> {
     /// Build the dynamic entry resolver.
     fn build_dyn_entry_resolver(
         resolver: R,
-        bind_group_decls: Vec<Vec<&'a str>>,
+        headers: Vec<&'a str>,
         main: &'a str,
     ) -> DynEntryResolver<R> {
-        let bind_group_derivatives = bind_group_decls
-            .into_iter()
-            .enumerate()
-            .map(|(group, decls)| {
-                decls
-                    .into_iter()
-                    .enumerate()
-                    .map(|(binding, decl)| format!("@group({group}) @binding({binding}) {decl};"))
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-
         let source = format!(
-            "{}\n\n{}",
+            "{}\n{}",
+            headers.join("\n"),
             Self::WESL_TEMPLATE.replace("{{main}}", main),
-            bind_group_derivatives,
         );
 
         DynEntryResolver::new(resolver, source)
@@ -457,125 +456,5 @@ impl<'a, R: wesl::Resolver> ComputeBundleBuilder<'a, R> {
 impl<R: wesl::Resolver> Default for ComputeBundleBuilder<'_, R> {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-/// A [`ComputeBundleBuilder`] specialized for Gaussian computations.
-///
-/// The Gaussian bind group will be appended to the end of the bind group layouts.
-pub struct GaussianComputeBundleBuilder<'a, R: wesl::Resolver> {
-    pub inner: ComputeBundleBuilder<'a, R>,
-}
-
-impl<'a, R: wesl::Resolver> GaussianComputeBundleBuilder<'a, R> {
-    /// Create a new Gaussian compute bundle builder.
-    pub fn new(builder: ComputeBundleBuilder<'a, R>) -> Self {
-        Self { inner: builder }
-    }
-
-    /// Build the compute bundle with bind groups.
-    pub fn build<G: GaussianPod>(
-        self,
-        device: &wgpu::Device,
-        model_transform: &ModelTransformBuffer,
-        gaussian_transform: &GaussianTransformBuffer,
-        gaussians: &GaussiansBuffer<G>,
-        buffers: impl IntoIterator<Item = impl IntoIterator<Item = &'a dyn BufferWrapper>>,
-    ) -> Result<ComputeBundle<wgpu::BindGroup>, Error> {
-        if self.inner.bind_group_layouts.is_empty() {
-            return Err(Error::MissingBindGroupLayout);
-        }
-
-        let Some(resolver) = self.inner.resolver else {
-            return Err(Error::MissingResolver);
-        };
-
-        let Some(main) = self.inner.main else {
-            return Err(Error::MissingMainFunction);
-        };
-
-        let bind_group_decls = self
-            .inner
-            .bind_group_decls
-            .into_iter()
-            .chain(std::iter::once(vec![
-                "var<uniform> model_transform: ModelTransform",
-                "var<uniform> gaussian_transform: GaussianTransform",
-                "var<storage, read> gaussians: array<Gaussian>",
-            ]))
-            .collect::<Vec<_>>();
-
-        let resolver =
-            ComputeBundleBuilder::<R>::build_dyn_entry_resolver(resolver, bind_group_decls, main);
-
-        let shader_source = wgpu::ShaderSource::Wgsl(
-            wesl::Wesl::new("placeholder") // Base will be replaced by DynEntryResolver
-                .set_custom_resolver(resolver)
-                .set_options(self.inner.compile_options)
-                .compile(DynEntryResolver::<R>::ENTRY_SHADER_PATH)?
-                .to_string()
-                .into(),
-        );
-
-        let bind_group_layouts = self
-            .inner
-            .bind_group_layouts
-            .into_iter()
-            .chain(std::iter::once(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("Gaussian Bind Group Layout"),
-                entries: &[
-                    // Model transform uniform buffer
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    // Gaussian transform uniform buffer
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    // Gaussians storage buffer
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 2,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                ],
-            }))
-            .collect::<Vec<_>>();
-
-        let buffers = buffers
-            .into_iter()
-            .map(|buffers| buffers.into_iter().collect::<Vec<_>>())
-            .chain(std::iter::once(vec![
-                model_transform as &dyn BufferWrapper,
-                gaussian_transform as &dyn BufferWrapper,
-                gaussians as &dyn BufferWrapper,
-            ]));
-
-        ComputeBundle::new(
-            self.inner.label,
-            device,
-            bind_group_layouts,
-            buffers,
-            shader_source,
-        )
     }
 }
