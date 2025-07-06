@@ -10,5 +10,5 @@ fn _entry_(
 ) {
     let index = workgroup_id.x * workgroup_size + local_invocation_id.x;
 
-    {{main}}
+    // {{main}}
 }

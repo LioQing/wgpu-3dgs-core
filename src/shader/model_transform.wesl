@@ -1,7 +1,13 @@
+import super::gaussian::Gaussian;
+
 struct ModelTransform {
     pos: vec3<f32>,
     quat: vec4<f32>,
     scale: vec3<f32>,
+}
+
+fn model_to_world(model_transform: ModelTransform, pos: vec3<f32>) -> vec4<f32> {
+    return model_transform_mat(model_transform) * vec4<f32>(pos, 1.0);
 }
 
 fn model_transform_mat(model_transform: ModelTransform) -> mat4x4<f32> {

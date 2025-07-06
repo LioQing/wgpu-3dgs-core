@@ -1,31 +1,44 @@
-use std::borrow::Cow;
+use std::{borrow::Cow, collections::HashMap};
 
-/// A resolver to provide dynamic entry shader.
-pub struct DynEntryResolver<R: wesl::Resolver> {
+/// A resolver to provide dynamic shaders.
+pub struct DynResolver<R: wesl::Resolver> {
     pub resolver: R,
-    pub shader_source: String,
+    pub dyn_shaders: HashMap<wesl::ModulePath, String>,
 }
 
-impl<R: wesl::Resolver> DynEntryResolver<R> {
-    /// The entry shader module path.
-    pub const ENTRY_SHADER_PATH: &'static str = "_entry_";
-
-    /// Create a new compute bundle resolver.
-    pub fn new(resolver: R, shader_source: String) -> Self {
+impl<R: wesl::Resolver> DynResolver<R> {
+    /// Create a new dynamic resolver.
+    pub fn new(resolver: R) -> Self {
         Self {
             resolver,
-            shader_source,
+            dyn_shaders: HashMap::new(),
         }
+    }
+
+    /// Add a dynamic shader.
+    pub fn add_shader(&mut self, path: wesl::ModulePath, source: String) {
+        self.dyn_shaders.insert(path, source);
+    }
+
+    /// Add a dynamic shader.
+    pub fn with_shader(mut self, path: wesl::ModulePath, source: String) -> Self {
+        self.add_shader(path, source);
+        self
+    }
+
+    /// Get a dynamic shader by path.
+    pub fn get_shader(&self, path: &wesl::ModulePath) -> Option<&String> {
+        self.dyn_shaders.get(path)
     }
 }
 
-impl<R: wesl::Resolver> wesl::Resolver for DynEntryResolver<R> {
+impl<R: wesl::Resolver> wesl::Resolver for DynResolver<R> {
     fn resolve_source<'a>(
         &'a self,
         path: &wesl::ModulePath,
     ) -> Result<Cow<'a, str>, wesl::ResolveError> {
-        if path.last() == Some(&Self::ENTRY_SHADER_PATH) {
-            return Ok(Cow::Borrowed(&self.shader_source));
+        if let Some(source) = self.dyn_shaders.get(path) {
+            return Ok(Cow::Borrowed(source));
         }
 
         self.resolver.resolve_source(path)
