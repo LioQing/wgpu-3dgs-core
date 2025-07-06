@@ -10,7 +10,7 @@ pub struct DynEntryResolver<R: wesl::Resolver> {
 
 impl<R: wesl::Resolver> DynEntryResolver<R> {
     /// The entry shader module path.
-    pub const ENTRY_SHADER_PATH: &'static str = "__entry__";
+    pub const ENTRY_SHADER_PATH: &'static str = "_entry_";
 
     /// Create a new compute bundle resolver.
     pub fn new(resolver: R, shader_source: String) -> Self {
@@ -26,7 +26,8 @@ impl<R: wesl::Resolver> wesl::Resolver for DynEntryResolver<R> {
         &'a self,
         path: &wesl::ModulePath,
     ) -> Result<Cow<'a, str>, wesl::ResolveError> {
-        if path == &Self::ENTRY_SHADER_PATH.into() {
+        if path.last() == Some(&Self::ENTRY_SHADER_PATH) {
+            log::info!("{}", self.shader_source);
             return Ok(Cow::Borrowed(&self.shader_source));
         }
 

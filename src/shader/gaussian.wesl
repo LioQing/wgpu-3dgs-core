@@ -15,15 +15,15 @@ struct Gaussian {
     cov3d: array<u32, 3>,
 }
 
-@if(sh_single) fn gaussian_unpack_sh(gaussian_index: u32, sh_index: u32) -> vec3<f32> {
+@if(sh_single) fn gaussian_unpack_sh(gaussian: Gaussian, sh_index: u32) -> vec3<f32> {
     return vec3<f32>(
-        @var(gaussians)[gaussian_index].sh[(sh_index - 1) * 3],
-        @var(gaussians)[gaussian_index].sh[(sh_index - 1) * 3 + 1],
-        @var(gaussians)[gaussian_index].sh[(sh_index - 1) * 3 + 2],
+        gaussian.sh[(sh_index - 1) * 3],
+        gaussian.sh[(sh_index - 1) * 3 + 1],
+        gaussian.sh[(sh_index - 1) * 3 + 2],
     );
 }
 
-@if(sh_half) fn gaussian_unpack_sh(gaussian_index: u32, sh_index: u32) -> vec3<f32> {
+@if(sh_half) fn gaussian_unpack_sh(gaussian: Gaussian, sh_index: u32) -> vec3<f32> {
     let i = (sh_index - 1) * 3;
     let xi = i / 2;
     let yi = (i + 1) / 2;
@@ -31,19 +31,19 @@ struct Gaussian {
     
     if xi == yi {
         return vec3<f32>(
-            unpack2x16float(@var(gaussians)[gaussian_index].sh[xi]),
-            unpack2x16float(@var(gaussians)[gaussian_index].sh[zi]).x,
+            unpack2x16float(gaussian.sh[xi]),
+            unpack2x16float(gaussian.sh[zi]).x,
         );
     } else {
         return vec3<f32>(
-            unpack2x16float(@var(gaussians)[gaussian_index].sh[xi]).y,
-            unpack2x16float(@var(gaussians)[gaussian_index].sh[yi]),
+            unpack2x16float(gaussian.sh[xi]).y,
+            unpack2x16float(gaussian.sh[yi]),
         );
     }
 }
 
-@if(sh_norm8) fn gaussian_unpack_sh(gaussian_index: u32, sh_index: u32) -> vec3<f32> {
-    let minmax = unpack2x16float(@var(gaussians)[gaussian_index].sh[0]);
+@if(sh_norm8) fn gaussian_unpack_sh(gaussian: Gaussian, sh_index: u32) -> vec3<f32> {
+    let minmax = unpack2x16float(gaussian.sh[0]);
 
     let i = (sh_index - 1) * 3;
     let xi = i / 4;
@@ -54,26 +54,26 @@ struct Gaussian {
     let zj = (i + 2) % 4;
     
     let norm = vec3<f32>(
-        unpack4x8unorm(@var(gaussians)[gaussian_index].sh[1 + xi])[xj],
-        unpack4x8unorm(@var(gaussians)[gaussian_index].sh[1 + yi])[yj],
-        unpack4x8unorm(@var(gaussians)[gaussian_index].sh[1 + zi])[zj],
+        unpack4x8unorm(gaussian.sh[1 + xi])[xj],
+        unpack4x8unorm(gaussian.sh[1 + yi])[yj],
+        unpack4x8unorm(gaussian.sh[1 + zi])[zj],
     );
 
     return minmax.x + norm * (minmax.y - minmax.x);
 }
 
-@if(sh_none) fn gaussian_unpack_sh(gaussian_index: u32, sh_index: u32) -> vec3<f32> {
+@if(sh_none) fn gaussian_unpack_sh(gaussian: Gaussian, sh_index: u32) -> vec3<f32> {
     return vec3<f32>(0.0);
 }
 
-@if(cov3d_single) fn gaussian_unpack_cov3d(gaussian_index: u32) -> array<f32, 6> {
-    return @var(gaussians)[gaussian_index].cov3d;
+@if(cov3d_single) fn gaussian_unpack_cov3d(gaussian: Gaussian) -> array<f32, 6> {
+    return gaussian.cov3d;
 }
 
-@if(cov3d_half) fn gaussian_unpack_cov3d(gaussian_index: u32) -> array<f32, 6> {
-    let x = unpack2x16float(@var(gaussians)[gaussian_index].cov3d[0]);
-    let y = unpack2x16float(@var(gaussians)[gaussian_index].cov3d[1]);
-    let z = unpack2x16float(@var(gaussians)[gaussian_index].cov3d[2]);
+@if(cov3d_half) fn gaussian_unpack_cov3d(gaussian: Gaussian) -> array<f32, 6> {
+    let x = unpack2x16float(gaussian.cov3d[0]);
+    let y = unpack2x16float(gaussian.cov3d[1]);
+    let z = unpack2x16float(gaussian.cov3d[2]);
     return array<f32, 6>(
         x.x,
         x.y,
