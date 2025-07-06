@@ -1,4 +1,4 @@
-use crate::{BufferWrapper, Error, wesl::DynEntryResolver};
+use crate::{BufferWrapper, Error, wesl::DynResolver};
 
 macro_rules! label_for_components {
     ($label:expr, $component:expr) => {
@@ -267,6 +267,9 @@ pub struct ComputeBundleBuilder<'a, R: wesl::Resolver> {
 }
 
 impl<'a, R: wesl::Resolver> ComputeBundleBuilder<'a, R> {
+    /// The entry shader path.
+    pub const ENTRY_SHADER_PATH: &'static str = "_entry_";
+
     /// The WESL template.
     pub const WESL_TEMPLATE: &'static str = include_str!("shader/compute_bundle_template.wesl");
 
@@ -387,7 +390,7 @@ impl<'a, R: wesl::Resolver> ComputeBundleBuilder<'a, R> {
             wesl::Wesl::new("placeholder") // Base will be replaced by DynEntryResolver
                 .set_custom_resolver(resolver)
                 .set_options(self.compile_options)
-                .compile(DynEntryResolver::<R>::ENTRY_SHADER_PATH)?
+                .compile(Self::ENTRY_SHADER_PATH)?
                 .to_string()
                 .into(),
         );
@@ -424,7 +427,7 @@ impl<'a, R: wesl::Resolver> ComputeBundleBuilder<'a, R> {
             wesl::Wesl::new("placeholder") // Base will be replaced by DynEntryResolver
                 .set_custom_resolver(resolver)
                 .set_options(self.compile_options)
-                .compile(DynEntryResolver::<R>::ENTRY_SHADER_PATH)?
+                .compile(Self::ENTRY_SHADER_PATH)?
                 .to_string()
                 .into(),
         );
@@ -442,14 +445,20 @@ impl<'a, R: wesl::Resolver> ComputeBundleBuilder<'a, R> {
         resolver: R,
         headers: Vec<&'a str>,
         main: &'a str,
-    ) -> DynEntryResolver<R> {
+    ) -> DynResolver<R> {
         let source = format!(
             "{}\n{}",
             headers.join("\n"),
-            Self::WESL_TEMPLATE.replace("{{main}}", main),
+            Self::WESL_TEMPLATE.replace("// {{main}}", main),
         );
 
-        DynEntryResolver::new(resolver, source)
+        DynResolver::new(resolver).with_shader(
+            wesl::ModulePath {
+                origin: wesl::syntax::PathOrigin::Absolute,
+                components: vec![Self::ENTRY_SHADER_PATH.to_string()],
+            },
+            source,
+        )
     }
 }
 
