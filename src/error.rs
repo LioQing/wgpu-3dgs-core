@@ -26,6 +26,8 @@ pub enum Error {
     MissingBindGroupLayout,
     #[error("Missing resolver for compute bundle")]
     MissingResolver,
-    #[error("Missing main function for compute bundle")]
-    MissingMainFunction,
+    #[error("Missing entry point for compute bundle")]
+    MissingEntryPoint,
+    #[error("Missing main shader for compute bundle")]
+    MissingMainShader,
 }

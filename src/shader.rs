@@ -16,6 +16,7 @@ impl PkgModule for Mod {
             &gaussian::Mod,
             &gaussian_transform::Mod,
             &model_transform::Mod,
+            &compute_bundle::Mod,
         ];
         SUBMODULES
     }
@@ -25,6 +26,7 @@ impl PkgModule for Mod {
             "gaussian" => Some(&gaussian::Mod),
             "gaussian_transform" => Some(&gaussian_transform::Mod),
             "model_transform" => Some(&model_transform::Mod),
+            "compute_bundle" => Some(&compute_bundle::Mod),
             _ => None,
         }
     }
@@ -61,3 +63,4 @@ macro_rules! submodule {
 submodule!(gaussian);
 submodule!(gaussian_transform);
 submodule!(model_transform);
+submodule!(compute_bundle);
