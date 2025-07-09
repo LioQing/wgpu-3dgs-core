@@ -62,6 +62,27 @@ impl<B> ComputeBundle<B> {
     pub fn pipeline(&self) -> &wgpu::ComputePipeline {
         &self.pipeline
     }
+
+    /// Dispatch the compute bundle for `count` instances with provided bind group.
+    pub fn dispatch_with_bind_groups<'a>(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        bind_groups: impl IntoIterator<Item = &'a wgpu::BindGroup>,
+        count: u32,
+    ) {
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some(label_for_components!(self.label, "Compute Pass").as_str()),
+            timestamp_writes: None,
+        });
+
+        pass.set_pipeline(&self.pipeline);
+
+        for (i, group) in bind_groups.into_iter().enumerate() {
+            pass.set_bind_group(i as u32, group, &[]);
+        }
+
+        pass.dispatch_workgroups(count.div_ceil(self.workgroup_size()), 1, 1);
+    }
 }
 
 impl ComputeBundle {
@@ -89,7 +110,7 @@ impl ComputeBundle {
         let buffers = buffers.into_iter().collect::<Vec<_>>();
 
         if buffers.len() != this.bind_group_layouts.len() {
-            return Err(Error::BindGroupLayoutCountMismatch {
+            return Err(Error::BufferBindGroupLayoutCountMismatch {
                 buffer_count: buffers.len(),
                 bind_group_layout_count: this.bind_group_layouts.len(),
             });
@@ -125,18 +146,7 @@ impl ComputeBundle {
 
     /// Dispatch the compute bundle for `count` instances.
     pub fn dispatch(&self, encoder: &mut wgpu::CommandEncoder, count: u32) {
-        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some(label_for_components!(self.label, "Compute Pass").as_str()),
-            timestamp_writes: None,
-        });
-
-        pass.set_pipeline(&self.pipeline);
-
-        for (i, group) in self.bind_groups.iter().enumerate() {
-            pass.set_bind_group(i as u32, group, &[]);
-        }
-
-        pass.dispatch_workgroups(count.div_ceil(self.workgroup_size()), 1, 1);
+        self.dispatch_with_bind_groups(encoder, self.bind_groups(), count);
     }
 
     /// Create a bind group statically.
@@ -249,21 +259,10 @@ impl ComputeBundle<()> {
     pub fn dispatch<'a>(
         &self,
         encoder: &mut wgpu::CommandEncoder,
-        bind_groups: impl IntoIterator<Item = &'a wgpu::BindGroup>,
         count: u32,
+        bind_groups: impl IntoIterator<Item = &'a wgpu::BindGroup>,
     ) {
-        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some(label_for_components!(self.label, "Compute Pass").as_str()),
-            timestamp_writes: None,
-        });
-
-        pass.set_pipeline(&self.pipeline);
-
-        for (i, group) in bind_groups.into_iter().enumerate() {
-            pass.set_bind_group(i as u32, group, &[]);
-        }
-
-        pass.dispatch_workgroups(count.div_ceil(self.workgroup_size()), 1, 1);
+        self.dispatch_with_bind_groups(encoder, bind_groups, count);
     }
 }
 

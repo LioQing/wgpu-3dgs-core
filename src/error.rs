@@ -18,7 +18,7 @@ pub enum Error {
         {buffer_count} != {bind_group_layout_count}\
         "
     )]
-    BindGroupLayoutCountMismatch {
+    BufferBindGroupLayoutCountMismatch {
         buffer_count: usize,
         bind_group_layout_count: usize,
     },
