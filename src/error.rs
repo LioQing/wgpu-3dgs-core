@@ -22,12 +22,18 @@ pub enum Error {
         buffer_count: usize,
         bind_group_layout_count: usize,
     },
-    #[error("Missing bind group layout for compute bundle")]
+    #[error("missing bind group layout for compute bundle")]
     MissingBindGroupLayout,
-    #[error("Missing resolver for compute bundle")]
+    #[error("missing resolver for compute bundle")]
     MissingResolver,
-    #[error("Missing entry point for compute bundle")]
+    #[error("missing entry point for compute bundle")]
     MissingEntryPoint,
-    #[error("Missing main shader for compute bundle")]
+    #[error("missing main shader for compute bundle")]
     MissingMainShader,
+    #[error("{0}")]
+    BufferDownloadOneShotReceive(#[from] oneshot::RecvError),
+    #[error("{0}")]
+    BufferDownloadAsync(#[from] wgpu::BufferAsyncError),
+    #[error("{0}")]
+    DeviceFailedToPoll(#[from] wgpu::PollError),
 }
