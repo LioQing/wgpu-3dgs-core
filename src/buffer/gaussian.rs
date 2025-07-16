@@ -9,7 +9,7 @@ use crate::{
 };
 
 /// The Gaussians storage buffer.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct GaussiansBuffer<G: GaussianPod>(wgpu::Buffer, std::marker::PhantomData<G>);
 
 impl<G: GaussianPod> GaussiansBuffer<G> {
@@ -143,7 +143,7 @@ impl<G: GaussianPod> BufferWrapper for GaussiansBuffer<G> {
 }
 
 /// The Gaussian POD trait.
-pub trait GaussianPod: for<'a> From<&'a Gaussian> + bytemuck::NoUninit {
+pub trait GaussianPod: for<'a> From<&'a Gaussian> + Send + Sync + bytemuck::NoUninit {
     /// The SH configuration.
     type ShConfig: GaussianShConfig;
 

@@ -21,7 +21,7 @@ impl BufferWrapper for wgpu::Buffer {
 }
 
 /// A trait to enable any [`BufferWrapper`] to download the buffer data.
-pub trait DownloadableBufferWrapper: BufferWrapper + Sync + Sized {
+pub trait DownloadableBufferWrapper: BufferWrapper + Send + Sync {
     /// Download the buffer data.
     fn download(
         &self,
