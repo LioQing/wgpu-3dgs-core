@@ -424,7 +424,7 @@ impl<'a, R: wesl::Resolver> ComputeBundleBuilder<'a, R> {
         };
 
         let shader_source = wgpu::ShaderSource::Wgsl(
-            wesl::Wesl::new("placeholder") // Base will be replaced by DynEntryResolver
+            wesl::Wesl::new("placeholder")
                 .set_custom_resolver(resolver)
                 .set_options(self.compile_options)
                 .compile(main_shader)?
@@ -465,7 +465,7 @@ impl<'a, R: wesl::Resolver> ComputeBundleBuilder<'a, R> {
         };
 
         let shader_source = wgpu::ShaderSource::Wgsl(
-            wesl::Wesl::new("placeholder") // Base will be replaced by DynEntryResolver
+            wesl::Wesl::new("placeholder")
                 .set_custom_resolver(resolver)
                 .set_options(self.compile_options)
                 .compile(main_shader)?
