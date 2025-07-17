@@ -83,3 +83,5 @@ pub trait DownloadableBufferWrapper: BufferWrapper + Send + Sync {
         }
     }
 }
+
+impl<T: BufferWrapper + Send + Sync> DownloadableBufferWrapper for T {}

@@ -269,23 +269,25 @@ impl ComputeBundle<()> {
 /// A builder for [`ComputeBundle`].
 ///
 /// The shader is compiled using the WESL compiler,
-pub struct ComputeBundleBuilder<'a, R: wesl::Resolver = wesl::StandardResolver> {
+pub struct ComputeBundleBuilder<
+    'a,
+    R: wesl::Resolver = wesl::StandardResolver,
+    M: Into<wesl::ModulePath> = &'a str,
+> {
     pub label: Option<&'a str>,
-    pub headers: Vec<&'a str>,
     pub bind_group_layouts: Vec<&'a wgpu::BindGroupLayoutDescriptor<'a>>,
     pub compilation_options: wgpu::PipelineCompilationOptions<'a>,
     pub entry_point: Option<&'a str>,
-    pub main_shader: Option<&'a str>,
+    pub main_shader: Option<M>,
     pub compile_options: wesl::CompileOptions,
     pub resolver: Option<R>,
 }
 
-impl<'a, R: wesl::Resolver> ComputeBundleBuilder<'a, R> {
+impl ComputeBundleBuilder<'_> {
     /// Create a new compute bundle builder.
     pub fn new() -> Self {
         Self {
             label: None,
-            headers: Vec::new(),
             bind_group_layouts: Vec::new(),
             compilation_options: wgpu::PipelineCompilationOptions::default(),
             entry_point: None,
@@ -294,30 +296,12 @@ impl<'a, R: wesl::Resolver> ComputeBundleBuilder<'a, R> {
             resolver: None,
         }
     }
+}
 
+impl<'a, R: wesl::Resolver, M: Into<wesl::ModulePath>> ComputeBundleBuilder<'a, R, M> {
     /// Set the label of the compute bundle.
     pub fn label(mut self, label: impl Into<&'a str>) -> Self {
         self.label = Some(label.into());
-        self
-    }
-
-    /// Add a header to the main entry shader.
-    ///
-    /// These can be constants, functions, imporst, etc.
-    /// The headers are only joined with newlines,
-    /// so anything that is valid WGSL code can be used.
-    pub fn header(mut self, header: &'a str) -> Self {
-        self.headers.push(header);
-        self
-    }
-
-    /// Add the headers to the main entry shader.
-    ///
-    /// These can be constants, functions, imporst, etc.
-    /// The headers are only joined with newlines,
-    /// so anything that is valid WGSL code can be used.
-    pub fn headers(mut self, header: Vec<&'a str>) -> Self {
-        self.headers.extend(header);
         self
     }
 
@@ -376,9 +360,16 @@ impl<'a, R: wesl::Resolver> ComputeBundleBuilder<'a, R> {
     /// Set the main shader of the compute bundle.
     ///
     /// The shader is required to have an overridable variable `workgroup_size` of `u32`.
-    pub fn main_shader(mut self, main: &'a str) -> Self {
-        self.main_shader = Some(main);
-        self
+    pub fn main_shader<N: Into<wesl::ModulePath>>(self, main: N) -> ComputeBundleBuilder<'a, R, N> {
+        ComputeBundleBuilder {
+            label: self.label,
+            bind_group_layouts: self.bind_group_layouts,
+            compilation_options: self.compilation_options,
+            entry_point: self.entry_point,
+            main_shader: Some(main),
+            compile_options: self.compile_options,
+            resolver: self.resolver,
+        }
     }
 
     /// Set the compile options for the WESL compiler.
@@ -388,10 +379,9 @@ impl<'a, R: wesl::Resolver> ComputeBundleBuilder<'a, R> {
     }
 
     /// Set the WESL resolver.
-    pub fn resolver<S: wesl::Resolver>(self, resolver: S) -> ComputeBundleBuilder<'a, S> {
+    pub fn resolver<S: wesl::Resolver>(self, resolver: S) -> ComputeBundleBuilder<'a, S, M> {
         ComputeBundleBuilder {
             label: self.label,
-            headers: self.headers,
             bind_group_layouts: self.bind_group_layouts,
             compilation_options: self.compilation_options,
             entry_point: self.entry_point,
@@ -484,7 +474,7 @@ impl<'a, R: wesl::Resolver> ComputeBundleBuilder<'a, R> {
     }
 }
 
-impl<R: wesl::Resolver> Default for ComputeBundleBuilder<'_, R> {
+impl Default for ComputeBundleBuilder<'_> {
     fn default() -> Self {
         Self::new()
     }
