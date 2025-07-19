@@ -281,6 +281,7 @@ pub struct ComputeBundleBuilder<
     pub main_shader: Option<M>,
     pub compile_options: wesl::CompileOptions,
     pub resolver: Option<R>,
+    pub mangler: Box<dyn wesl::Mangler + Send + Sync + 'static>,
 }
 
 impl ComputeBundleBuilder<'_> {
@@ -294,6 +295,7 @@ impl ComputeBundleBuilder<'_> {
             main_shader: None,
             compile_options: wesl::CompileOptions::default(),
             resolver: None,
+            mangler: Box::new(wesl::NoMangler),
         }
     }
 }
@@ -369,6 +371,7 @@ impl<'a, R: wesl::Resolver, M: Into<wesl::ModulePath>> ComputeBundleBuilder<'a, 
             main_shader: Some(main),
             compile_options: self.compile_options,
             resolver: self.resolver,
+            mangler: self.mangler,
         }
     }
 
@@ -388,6 +391,24 @@ impl<'a, R: wesl::Resolver, M: Into<wesl::ModulePath>> ComputeBundleBuilder<'a, 
             main_shader: self.main_shader,
             compile_options: self.compile_options,
             resolver: Some(resolver),
+            mangler: self.mangler,
+        }
+    }
+
+    /// Set the WESL mangler.
+    pub fn mangler(
+        self,
+        mangler: impl wesl::Mangler + Send + Sync + 'static,
+    ) -> ComputeBundleBuilder<'a, R, M> {
+        ComputeBundleBuilder {
+            label: self.label,
+            bind_group_layouts: self.bind_group_layouts,
+            compilation_options: self.compilation_options,
+            entry_point: self.entry_point,
+            main_shader: self.main_shader,
+            compile_options: self.compile_options,
+            resolver: self.resolver,
+            mangler: Box::new(mangler),
         }
     }
 
@@ -413,13 +434,20 @@ impl<'a, R: wesl::Resolver, M: Into<wesl::ModulePath>> ComputeBundleBuilder<'a, 
             return Err(Error::MissingMainShader);
         };
 
+        let (syntax, sourcemap) = wesl::compile_sourcemap(
+            &main_shader.into(),
+            &resolver,
+            &self.mangler,
+            &self.compile_options,
+        );
+
         let shader_source = wgpu::ShaderSource::Wgsl(
-            wesl::Wesl::new("placeholder")
-                .set_custom_resolver(resolver)
-                .set_options(self.compile_options)
-                .compile(main_shader)?
-                .to_string()
-                .into(),
+            wesl::CompileResult {
+                syntax: syntax?,
+                sourcemap: Some(sourcemap),
+            }
+            .to_string()
+            .into(),
         );
 
         ComputeBundle::new(
@@ -454,13 +482,20 @@ impl<'a, R: wesl::Resolver, M: Into<wesl::ModulePath>> ComputeBundleBuilder<'a, 
             return Err(Error::MissingMainShader);
         };
 
+        let (syntax, sourcemap) = wesl::compile_sourcemap(
+            &main_shader.into(),
+            &resolver,
+            &self.mangler,
+            &self.compile_options,
+        );
+
         let shader_source = wgpu::ShaderSource::Wgsl(
-            wesl::Wesl::new("placeholder")
-                .set_custom_resolver(resolver)
-                .set_options(self.compile_options)
-                .compile(main_shader)?
-                .to_string()
-                .into(),
+            wesl::CompileResult {
+                syntax: syntax?,
+                sourcemap: Some(sourcemap),
+            }
+            .to_string()
+            .into(),
         );
 
         ComputeBundle::new_without_bind_groups(
