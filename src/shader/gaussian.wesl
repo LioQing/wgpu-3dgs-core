@@ -15,6 +15,10 @@ struct Gaussian {
     cov3d: array<u32, 3>,
 }
 
+fn gaussian_unpack_color(gaussian: Gaussian) -> vec4<f32> {
+    return unpack4x8unorm(gaussian.color);
+}
+
 @if(sh_single) fn gaussian_unpack_sh(gaussian: Gaussian, sh_index: u32) -> vec3<f32> {
     return vec3<f32>(
         gaussian.sh[(sh_index - 1) * 3],
