@@ -20,8 +20,8 @@ impl ModelTransformBuffer {
     }
 
     /// Update the model transformation buffer.
-    pub fn update(&self, queue: &wgpu::Queue, pos: Vec3, quat: Quat, scale: Vec3) {
-        self.update_with_pod(queue, &ModelTransformPod::new(pos, quat, scale));
+    pub fn update(&self, queue: &wgpu::Queue, pos: Vec3, rot: Quat, scale: Vec3) {
+        self.update_with_pod(queue, &ModelTransformPod::new(pos, rot, scale));
     }
 
     /// Update the model transformation buffer with [`ModelTransformPod`].
@@ -42,18 +42,18 @@ impl BufferWrapper for ModelTransformBuffer {
 pub struct ModelTransformPod {
     pub pos: Vec3,
     _padding_0: f32,
-    pub quat: Quat,
+    pub rot: Quat,
     pub scale: Vec3,
     _padding_1: f32,
 }
 
 impl ModelTransformPod {
     /// Create a new model transformation.
-    pub const fn new(pos: Vec3, quat: Quat, scale: Vec3) -> Self {
+    pub const fn new(pos: Vec3, rot: Quat, scale: Vec3) -> Self {
         Self {
             pos,
             _padding_0: 0.0,
-            quat,
+            rot,
             scale,
             _padding_1: 0.0,
         }

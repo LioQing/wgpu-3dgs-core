@@ -336,10 +336,13 @@ impl<'a, R: wesl::Resolver, M: Into<wesl::ModulePath>> ComputeBundleBuilder<'a, 
 
     /// Set the entry point of the compute shader.
     ///
-    /// This should be in the form of a function name,
-    /// where the function is suggested to be defined as follows:
+    /// This should be the function name of the entry point,
+    /// where the function along with the overridable workgroup size
+    /// is suggested to be defined as follows:
     ///
     /// ```wgsl
+    /// override workgroup_size: u32;
+    ///
     /// @compute @workgroup_size(workgroup_size, 1, 1)
     /// fn main(
     ///     @builtin(workgroup_id) wid: vec3<u32>,

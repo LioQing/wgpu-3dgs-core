@@ -2,7 +2,7 @@ import super::gaussian::Gaussian;
 
 struct ModelTransform {
     pos: vec3<f32>,
-    quat: vec4<f32>,
+    rot: vec4<f32>,
     scale: vec3<f32>,
 }
 
@@ -12,21 +12,21 @@ fn model_to_world(model_transform: ModelTransform, pos: vec3<f32>) -> vec4<f32> 
 
 fn model_transform_mat(model_transform: ModelTransform) -> mat4x4<f32> {
     let pos = model_transform.pos;
-    let quat = model_transform.quat;
+    let rot = model_transform.rot;
     let scale = model_transform.scale;
 
-    let x2 = quat.x + quat.x;
-    let y2 = quat.y + quat.y;
-    let z2 = quat.z + quat.z;
-    let xx = quat.x * x2;
-    let xy = quat.x * y2;
-    let xz = quat.x * z2;
-    let yy = quat.y * y2;
-    let yz = quat.y * z2;
-    let zz = quat.z * z2;
-    let wx = quat.w * x2;
-    let wy = quat.w * y2;
-    let wz = quat.w * z2;
+    let x2 = rot.x + rot.x;
+    let y2 = rot.y + rot.y;
+    let z2 = rot.z + rot.z;
+    let xx = rot.x * x2;
+    let xy = rot.x * y2;
+    let xz = rot.x * z2;
+    let yy = rot.y * y2;
+    let yz = rot.y * z2;
+    let zz = rot.z * z2;
+    let wx = rot.w * x2;
+    let wy = rot.w * y2;
+    let wz = rot.w * z2;
 
     let sx = scale.x;
     let sy = scale.y;
@@ -56,21 +56,21 @@ fn model_transform_mat(model_transform: ModelTransform) -> mat4x4<f32> {
 }
 
 fn model_transform_inv_sr_mat(model_transform: ModelTransform) -> mat3x3<f32> {
-    let quat = model_transform.quat;
+    let rot = model_transform.rot;
     let scale = model_transform.scale;
 
-    let x2 = quat.x + quat.x;
-    let y2 = quat.y + quat.y;
-    let z2 = quat.z + quat.z;
-    let xx = quat.x * x2;
-    let xy = quat.x * y2;
-    let xz = quat.x * z2;
-    let yy = quat.y * y2;
-    let yz = quat.y * z2;
-    let zz = quat.z * z2;
-    let wx = quat.w * x2;
-    let wy = quat.w * y2;
-    let wz = quat.w * z2;
+    let x2 = rot.x + rot.x;
+    let y2 = rot.y + rot.y;
+    let z2 = rot.z + rot.z;
+    let xx = rot.x * x2;
+    let xy = rot.x * y2;
+    let xz = rot.x * z2;
+    let yy = rot.y * y2;
+    let yz = rot.y * z2;
+    let zz = rot.z * z2;
+    let wx = rot.w * x2;
+    let wy = rot.w * y2;
+    let wz = rot.w * z2;
 
     let sx = scale.x;
     let sy = scale.y;
@@ -96,21 +96,21 @@ fn model_transform_inv_sr_mat(model_transform: ModelTransform) -> mat3x3<f32> {
 }
 
 fn model_scale_rotation_mat(model_transform: ModelTransform) -> mat3x3<f32> {
-    let quat = model_transform.quat;
+    let rot = model_transform.rot;
     let scale = model_transform.scale;
 
-    let x2 = quat.x + quat.x;
-    let y2 = quat.y + quat.y;
-    let z2 = quat.z + quat.z;
-    let xx = quat.x * x2;
-    let xy = quat.x * y2;
-    let xz = quat.x * z2;
-    let yy = quat.y * y2;
-    let yz = quat.y * z2;
-    let zz = quat.z * z2;
-    let wx = quat.w * x2;
-    let wy = quat.w * y2;
-    let wz = quat.w * z2;
+    let x2 = rot.x + rot.x;
+    let y2 = rot.y + rot.y;
+    let z2 = rot.z + rot.z;
+    let xx = rot.x * x2;
+    let xy = rot.x * y2;
+    let xz = rot.x * z2;
+    let yy = rot.y * y2;
+    let yz = rot.y * z2;
+    let zz = rot.z * z2;
+    let wx = rot.w * x2;
+    let wy = rot.w * y2;
+    let wz = rot.w * z2;
 
     let sx = scale.x;
     let sy = scale.y;
