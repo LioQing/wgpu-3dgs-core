@@ -8,6 +8,14 @@ pub use model_transform::*;
 
 use crate::Error;
 
+/// A macro to create an array of `&dyn BufferWrapper` from a list of `BufferWrapper` types.
+#[macro_export]
+macro_rules! buffer_wrapper_arr {
+    ($($buffer:expr),* $(,)?) => {
+        [$($buffer as &dyn $crate::buffer::BufferWrapper),*]
+    }
+}
+
 /// A trait to to enable any wrapper to act like a [`wgpu::Buffer`].
 pub trait BufferWrapper {
     /// Returns a reference to the buffer data.
