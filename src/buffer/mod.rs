@@ -12,7 +12,7 @@ use crate::Error;
 #[macro_export]
 macro_rules! buffer_wrapper_arr {
     ($($buffer:expr),* $(,)?) => {
-        [$($buffer as &dyn $crate::buffer::BufferWrapper),*]
+        [$($buffer as &dyn $crate::BufferWrapper),*]
     }
 }
 
