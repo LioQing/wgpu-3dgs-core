@@ -4,8 +4,8 @@ use wgpu::util::DeviceExt;
 
 use crate::{
     BufferWrapper, Gaussian, GaussianCov3dConfig, GaussianCov3dHalfConfig,
-    GaussianCov3dSingleConfig, GaussianShConfig, GaussianShHalfConfig, GaussianShNoneConfig,
-    GaussianShNorm8Config, GaussianShSingleConfig,
+    GaussianCov3dRotScaleConfig, GaussianCov3dSingleConfig, GaussianShConfig, GaussianShHalfConfig,
+    GaussianShNoneConfig, GaussianShNorm8Config, GaussianShSingleConfig,
 };
 
 /// The Gaussians storage buffer.
@@ -156,12 +156,13 @@ pub trait GaussianPod: for<'a> From<&'a Gaussian> + Send + Sync + bytemuck::NoUn
     }
 
     /// Create the features for [`Wesl`](wesl::Wesl) compilation.
-    fn features() -> [(&'static str, bool); 6] {
+    fn features() -> [(&'static str, bool); 7] {
         [
             GaussianShSingleConfig::FEATURE,
             GaussianShHalfConfig::FEATURE,
             GaussianShNorm8Config::FEATURE,
             GaussianShNoneConfig::FEATURE,
+            GaussianCov3dRotScaleConfig::FEATURE,
             GaussianCov3dSingleConfig::FEATURE,
             GaussianCov3dHalfConfig::FEATURE,
         ]
@@ -200,18 +201,10 @@ macro_rules! gaussian_pod {
             impl From<&Gaussian> for [< GaussianPodWith Sh $sh Cov3d $cov3d Configs >] {
                 fn from(gaussian: &Gaussian) -> Self {
                     // Covariance
-                    let r = Mat3::from_quat(gaussian.rotation);
-                    let s = Mat3::from_diagonal(gaussian.scale);
-                    let m = r * s;
-                    let sigma = m * m.transpose();
-                    let cov3d = [< GaussianCov3d $cov3d Config >]::from_cov3d([
-                        sigma.x_axis.x,
-                        sigma.x_axis.y,
-                        sigma.x_axis.z,
-                        sigma.y_axis.y,
-                        sigma.y_axis.z,
-                        sigma.z_axis.z,
-                    ]);
+                    let cov3d = <[< GaussianCov3d $cov3d Config >]>::from_rot_scale(
+                        gaussian.rot,
+                        gaussian.scale,
+                    );
 
                     // Color
                     let color = gaussian.color;
@@ -240,11 +233,15 @@ macro_rules! gaussian_pod {
     };
 }
 
+gaussian_pod!(sh = Single, cov3d = RotScale, padding_size = 0);
 gaussian_pod!(sh = Single, cov3d = Single, padding_size = 1);
 gaussian_pod!(sh = Single, cov3d = Half, padding_size = 0);
+gaussian_pod!(sh = Half, cov3d = RotScale, padding_size = 2);
 gaussian_pod!(sh = Half, cov3d = Single, padding_size = 3);
 gaussian_pod!(sh = Half, cov3d = Half, padding_size = 2);
+gaussian_pod!(sh = Norm8, cov3d = RotScale, padding_size = 0);
 gaussian_pod!(sh = Norm8, cov3d = Single, padding_size = 1);
 gaussian_pod!(sh = Norm8, cov3d = Half, padding_size = 0);
+gaussian_pod!(sh = None, cov3d = RotScale, padding_size = 1);
 gaussian_pod!(sh = None, cov3d = Single, padding_size = 2);
 gaussian_pod!(sh = None, cov3d = Half, padding_size = 1);
