@@ -15,7 +15,7 @@ pub struct PlyGaussianPod {
     pub sh: [f32; 3 * 15],
     pub alpha: f32,
     pub scale: [f32; 3],
-    pub rotation: [f32; 4],
+    pub rot: [f32; 4],
 }
 
 impl PlyGaussianPod {
@@ -85,10 +85,10 @@ impl PlyGaussianPod {
             "scale_0" => set_prop!("scale_0", self.scale[0]),
             "scale_1" => set_prop!("scale_1", self.scale[1]),
             "scale_2" => set_prop!("scale_2", self.scale[2]),
-            "rot_0" => set_prop!("rot_0", self.rotation[0]),
-            "rot_1" => set_prop!("rot_1", self.rotation[1]),
-            "rot_2" => set_prop!("rot_2", self.rotation[2]),
-            "rot_3" => set_prop!("rot_3", self.rotation[3]),
+            "rot_0" => set_prop!("rot_0", self.rot[0]),
+            "rot_1" => set_prop!("rot_1", self.rot[1]),
+            "rot_2" => set_prop!("rot_2", self.rot[2]),
+            "rot_3" => set_prop!("rot_3", self.rot[3]),
             _ => {
                 log::warn!("Unknown property: {name}");
             }

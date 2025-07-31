@@ -11,7 +11,7 @@ pub trait GaussianShConfig {
     /// The [`GaussianPod`](crate::GaussianPod) field type.
     type Field: bytemuck::Pod + bytemuck::Zeroable;
 
-    /// Create from [`Gaussian::sh`].
+    /// Create from [`Gaussian::sh`](crate::Gaussian::sh).
     fn from_sh(sh: &[Vec3; 15]) -> Self::Field;
 }
 
@@ -97,8 +97,21 @@ pub trait GaussianCov3dConfig {
     /// The [`GaussianPod`](crate::GaussianPod) field type.
     type Field: bytemuck::Pod + bytemuck::Zeroable;
 
-    /// Create from a single precision cov3d.
-    fn from_cov3d(cov3d: [f32; 6]) -> Self::Field;
+    /// Create from [`Gaussian::rot`](crate::Gaussian::rot) and [`Gaussian::scale`](crate::Gaussian::scale).
+    fn from_rot_scale(rot: Quat, scale: Vec3) -> Self::Field;
+}
+
+/// The unconverted rotation and scale covariance 3D configuration of Gaussian.
+pub struct GaussianCov3dRotScaleConfig;
+
+impl GaussianCov3dConfig for GaussianCov3dRotScaleConfig {
+    const FEATURE: &'static str = "cov3d_rot_scale";
+
+    type Field = [f32; 7]; // (rot: [f32; 4], scale: [f32; 3])
+
+    fn from_rot_scale(rot: Quat, scale: Vec3) -> Self::Field {
+        [rot.x, rot.y, rot.z, rot.w, scale.x, scale.y, scale.z]
+    }
 }
 
 /// The single precision covariance 3D configuration of Gaussian.
@@ -109,8 +122,20 @@ impl GaussianCov3dConfig for GaussianCov3dSingleConfig {
 
     type Field = [f32; 6];
 
-    fn from_cov3d(cov3d: [f32; 6]) -> Self::Field {
-        cov3d
+    fn from_rot_scale(rot: Quat, scale: Vec3) -> Self::Field {
+        let r = Mat3::from_quat(rot);
+        let s = Mat3::from_diagonal(scale);
+        let m = r * s;
+        let sigma = m * m.transpose();
+
+        [
+            sigma.x_axis.x,
+            sigma.x_axis.y,
+            sigma.x_axis.z,
+            sigma.y_axis.y,
+            sigma.y_axis.z,
+            sigma.z_axis.z,
+        ]
     }
 }
 
@@ -122,7 +147,7 @@ impl GaussianCov3dConfig for GaussianCov3dHalfConfig {
 
     type Field = [f16; 6];
 
-    fn from_cov3d(cov3d: [f32; 6]) -> Self::Field {
-        cov3d.map(f16::from_f32)
+    fn from_rot_scale(rot: Quat, scale: Vec3) -> Self::Field {
+        GaussianCov3dSingleConfig::from_rot_scale(rot, scale).map(f16::from_f32)
     }
 }

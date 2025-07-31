@@ -134,7 +134,7 @@ impl Gaussians {
 /// The Gaussian.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Gaussian {
-    pub rotation: Quat,
+    pub rot: Quat,
     pub pos: Vec3,
     pub color: U8Vec4,
     pub sh: [Vec3; 15],
@@ -148,13 +148,7 @@ impl Gaussian {
         let pos = Vec3::from_array(ply.pos);
 
         // Rotation
-        let rotation = Quat::from_xyzw(
-            ply.rotation[1],
-            ply.rotation[2],
-            ply.rotation[3],
-            ply.rotation[0],
-        )
-        .normalize();
+        let rot = Quat::from_xyzw(ply.rot[1], ply.rot[2], ply.rot[3], ply.rot[0]).normalize();
 
         // Scale
         let scale = Vec3::from_array(ply.scale).exp();
@@ -170,7 +164,7 @@ impl Gaussian {
         let sh = std::array::from_fn(|i| Vec3::new(ply.sh[i], ply.sh[i + 15], ply.sh[i + 30]));
 
         Self {
-            rotation,
+            rot,
             pos,
             color,
             sh,
@@ -184,12 +178,7 @@ impl Gaussian {
         let pos = self.pos.to_array();
 
         // Rotation
-        let rotation = [
-            self.rotation.w,
-            self.rotation.x,
-            self.rotation.y,
-            self.rotation.z,
-        ];
+        let rot = [self.rot.w, self.rot.x, self.rot.y, self.rot.z];
 
         // Scale
         let scale = self.scale.map(|x| x.ln()).to_array();
@@ -219,7 +208,7 @@ impl Gaussian {
             sh,
             alpha,
             scale,
-            rotation,
+            rot,
         }
     }
 }
