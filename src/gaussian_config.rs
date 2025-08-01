@@ -13,6 +13,9 @@ pub trait GaussianShConfig {
 
     /// Create from [`Gaussian::sh`](crate::Gaussian::sh).
     fn from_sh(sh: &[Vec3; 15]) -> Self::Field;
+
+    /// Convert the field to [`Gaussian::sh`](crate::Gaussian::sh).
+    fn to_sh(field: &Self::Field) -> [Vec3; 15];
 }
 
 /// The single precision SH configuration of Gaussian.
@@ -25,6 +28,10 @@ impl GaussianShConfig for GaussianShSingleConfig {
 
     fn from_sh(sh: &[Vec3; 15]) -> Self::Field {
         *sh
+    }
+
+    fn to_sh(field: &Self::Field) -> [Vec3; 15] {
+        *field
     }
 }
 
@@ -45,6 +52,21 @@ impl GaussianShConfig for GaussianShHalfConfig {
             .try_into()
             .expect("SH half")
     }
+
+    fn to_sh(field: &Self::Field) -> [Vec3; 15] {
+        field
+            .chunks_exact(3)
+            .map(|chunk| {
+                Vec3::new(
+                    f16::to_f32(chunk[0]),
+                    f16::to_f32(chunk[1]),
+                    f16::to_f32(chunk[2]),
+                )
+            })
+            .collect::<Vec<_>>()
+            .try_into()
+            .expect("SH half")
+    }
 }
 
 /// The min max 8 bit normalized SH configuration of Gaussian.
@@ -53,7 +75,7 @@ pub struct GaussianShNorm8Config;
 impl GaussianShConfig for GaussianShNorm8Config {
     const FEATURE: &'static str = "sh_norm8";
 
-    type Field = [u8; 4 + (3 * 15 + 3)]; // ([f16; 2], [U8Vec4; (3 * 15 + 3) / 4])
+    type Field = [u8; 4 + (3 * 15 + 3)]; // ([f16; 2], [U8Vec3; (3 * 15 + 3) / 4])
 
     fn from_sh(sh: &[Vec3; 15]) -> Self::Field {
         let mut sh_pod = [0; 4 + (3 * 15 + 3)];
@@ -62,21 +84,43 @@ impl GaussianShConfig for GaussianShNorm8Config {
         let (min, max) = sh.iter().fold((f32::MAX, f32::MIN), |(min, max), &x| {
             (min.min(x), max.max(x))
         });
+        let scale = max - min;
 
         sh_pod[0..2].copy_from_slice(&f16::from_f32(min).to_ne_bytes());
         sh_pod[2..4].copy_from_slice(&f16::from_f32(max).to_ne_bytes());
         sh_pod[4..].copy_from_slice(
             &sh.iter()
-                .map(|&x| ((x - min) / (max - min) * 255.0).round() as u8)
+                .map(|&x| ((x - min) / scale * 255.0).round() as u8)
                 .chain(std::iter::repeat_n(0, 3))
                 .collect::<Vec<_>>(),
         );
 
         sh_pod
     }
+
+    fn to_sh(field: &Self::Field) -> [Vec3; 15] {
+        let min = f16::to_f32(f16::from_ne_bytes([field[0], field[1]]));
+        let max = f16::to_f32(f16::from_ne_bytes([field[2], field[3]]));
+        let scale = max - min;
+
+        field[4..field.len() - 3]
+            .chunks_exact(3)
+            .map(|chunk| {
+                Vec3::new(
+                    (chunk[0] as f32 / 255.0) * scale + min,
+                    (chunk[1] as f32 / 255.0) * scale + min,
+                    (chunk[2] as f32 / 255.0) * scale + min,
+                )
+            })
+            .collect::<Vec<_>>()
+            .try_into()
+            .expect("SH norm8")
+    }
 }
 
 /// The none SH configuration of Gaussian.
+///
+/// This config cannot be converted to SH.
 pub struct GaussianShNoneConfig;
 
 impl GaussianShConfig for GaussianShNoneConfig {
@@ -85,6 +129,10 @@ impl GaussianShConfig for GaussianShNoneConfig {
     type Field = ();
 
     fn from_sh(_sh: &[Vec3; 15]) -> Self::Field {}
+
+    fn to_sh(_field: &Self::Field) -> [Vec3; 15] {
+        panic!("Cannot convert from SH None configuration")
+    }
 }
 
 /// The covariance 3D configuration of Gaussian.
@@ -99,6 +147,9 @@ pub trait GaussianCov3dConfig {
 
     /// Create from [`Gaussian::rot`](crate::Gaussian::rot) and [`Gaussian::scale`](crate::Gaussian::scale).
     fn from_rot_scale(rot: Quat, scale: Vec3) -> Self::Field;
+
+    /// Convert the field to [`Gaussian::rot`](crate::Gaussian::rot) and [`Gaussian::scale`](crate::Gaussian::scale).
+    fn to_rot_scale(field: &Self::Field) -> (Quat, Vec3);
 }
 
 /// The unconverted rotation and scale covariance 3D configuration of Gaussian.
@@ -112,9 +163,18 @@ impl GaussianCov3dConfig for GaussianCov3dRotScaleConfig {
     fn from_rot_scale(rot: Quat, scale: Vec3) -> Self::Field {
         [rot.x, rot.y, rot.z, rot.w, scale.x, scale.y, scale.z]
     }
+
+    fn to_rot_scale(field: &Self::Field) -> (Quat, Vec3) {
+        (
+            Quat::from_xyzw(field[0], field[1], field[2], field[3]),
+            Vec3::new(field[4], field[5], field[6]),
+        )
+    }
 }
 
 /// The single precision covariance 3D configuration of Gaussian.
+///
+/// This config cannot be converted to rotation and scale.
 pub struct GaussianCov3dSingleConfig;
 
 impl GaussianCov3dConfig for GaussianCov3dSingleConfig {
@@ -137,9 +197,15 @@ impl GaussianCov3dConfig for GaussianCov3dSingleConfig {
             sigma.z_axis.z,
         ]
     }
+
+    fn to_rot_scale(_field: &Self::Field) -> (Quat, Vec3) {
+        panic!("Cannot convert from Cov3d Single configuration")
+    }
 }
 
 /// The half precision covariance 3D configuration of Gaussian.
+///
+/// This config cannot be converted to rotation and scale.
 pub struct GaussianCov3dHalfConfig;
 
 impl GaussianCov3dConfig for GaussianCov3dHalfConfig {
@@ -149,5 +215,9 @@ impl GaussianCov3dConfig for GaussianCov3dHalfConfig {
 
     fn from_rot_scale(rot: Quat, scale: Vec3) -> Self::Field {
         GaussianCov3dSingleConfig::from_rot_scale(rot, scale).map(f16::from_f32)
+    }
+
+    fn to_rot_scale(_field: &Self::Field) -> (Quat, Vec3) {
+        panic!("Cannot convert from Cov3d Half configuration")
     }
 }
