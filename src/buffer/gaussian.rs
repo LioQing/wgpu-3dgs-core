@@ -3,9 +3,10 @@ use glam::*;
 use wgpu::util::DeviceExt;
 
 use crate::{
-    BufferWrapper, Gaussian, GaussianCov3dConfig, GaussianCov3dHalfConfig,
-    GaussianCov3dRotScaleConfig, GaussianCov3dSingleConfig, GaussianShConfig, GaussianShHalfConfig,
-    GaussianShNoneConfig, GaussianShNorm8Config, GaussianShSingleConfig,
+    BufferWrapper, DownloadableBufferWrapper, Gaussian, GaussianCov3dConfig,
+    GaussianCov3dHalfConfig, GaussianCov3dRotScaleConfig, GaussianCov3dSingleConfig,
+    GaussianShConfig, GaussianShHalfConfig, GaussianShNoneConfig, GaussianShNorm8Config,
+    GaussianShSingleConfig,
 };
 
 /// The Gaussians storage buffer.
@@ -25,12 +26,43 @@ impl<G: GaussianPod> GaussiansBuffer<G> {
         )
     }
 
+    /// Create a new Gaussians buffer with the specified size with [`wgpu::BufferUsages`].
+    pub fn new_with_usage(
+        device: &wgpu::Device,
+        gaussians: &[Gaussian],
+        usage: wgpu::BufferUsages,
+    ) -> Self {
+        Self::new_with_pods_and_usage(
+            device,
+            gaussians
+                .iter()
+                .map(G::from_gaussian)
+                .collect::<Vec<_>>()
+                .as_slice(),
+            usage,
+        )
+    }
+
     /// Create a new Gaussians buffer with [`GaussianPod`].
     pub fn new_with_pods(device: &wgpu::Device, gaussians: &[G]) -> Self {
+        Self::new_with_pods_and_usage(
+            device,
+            gaussians,
+            wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        )
+    }
+
+    /// Create a new Gaussians buffer with [`GaussianPod`] and the specified size with
+    /// [`wgpu::BufferUsages`].
+    pub fn new_with_pods_and_usage(
+        device: &wgpu::Device,
+        gaussians: &[G],
+        usage: wgpu::BufferUsages,
+    ) -> Self {
         let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Gaussians Buffer"),
             contents: bytemuck::cast_slice(gaussians),
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            usage,
         });
 
         Self(buffer, std::marker::PhantomData)
@@ -38,10 +70,23 @@ impl<G: GaussianPod> GaussiansBuffer<G> {
 
     /// Create a new Gaussians buffer with the specified size.
     pub fn new_empty(device: &wgpu::Device, len: usize) -> Self {
+        Self::new_empty_with_usage(
+            device,
+            len,
+            wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        )
+    }
+
+    /// Create a new Gaussians buffer with the specified size with [`wgpu::BufferUsages`].
+    pub fn new_empty_with_usage(
+        device: &wgpu::Device,
+        len: usize,
+        usage: wgpu::BufferUsages,
+    ) -> Self {
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Gaussians Buffer"),
             size: (len * std::mem::size_of::<G>()) as u64,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            usage,
             mapped_at_creation: false,
         });
 
@@ -134,6 +179,17 @@ impl<G: GaussianPod> GaussiansBuffer<G> {
             bytemuck::cast_slice(pods),
         );
     }
+
+    /// Download the buffer data into a vector of [`Gaussian`].
+    pub async fn download_gaussians(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<Vec<Gaussian>, crate::Error> {
+        self.download::<G>(device, queue)
+            .await
+            .map(|pods| pods.into_iter().map(Into::into).collect::<Vec<_>>())
+    }
 }
 
 impl<G: GaussianPod> BufferWrapper for GaussiansBuffer<G> {
@@ -143,12 +199,24 @@ impl<G: GaussianPod> BufferWrapper for GaussiansBuffer<G> {
 }
 
 /// The Gaussian POD trait.
-pub trait GaussianPod: for<'a> From<&'a Gaussian> + Send + Sync + bytemuck::NoUninit {
+pub trait GaussianPod:
+    for<'a> From<&'a Gaussian>
+    + Into<Gaussian>
+    + Send
+    + Sync
+    + bytemuck::NoUninit
+    + bytemuck::AnyBitPattern
+{
     /// The SH configuration.
     type ShConfig: GaussianShConfig;
 
     /// The covariance 3D configuration.
     type Cov3dConfig: GaussianCov3dConfig;
+
+    /// Convert from POD to Gaussian.
+    fn into_gaussian(self) -> Gaussian {
+        self.into()
+    }
 
     /// Create a new Gaussian POD from the Gaussian.
     fn from_gaussian(gaussian: &Gaussian) -> Self {
@@ -221,6 +289,30 @@ macro_rules! gaussian_pod {
                         sh,
                         cov3d,
                         _padding: [0.0; $padding],
+                    }
+                }
+            }
+
+            impl From<[< GaussianPodWith Sh $sh Cov3d $cov3d Configs >]> for Gaussian {
+                fn from(pod: [< GaussianPodWith Sh $sh Cov3d $cov3d Configs >]) -> Self {
+                    // Position
+                    let pos = pod.pos;
+
+                    // Spherical harmonics
+                    let sh = [< GaussianSh $sh Config >]::to_sh(&pod.sh);
+
+                    // Color
+                    let color = pod.color;
+
+                    // Rotation
+                    let (rot, scale) = <[< GaussianCov3d $cov3d Config >]>::to_rot_scale(&pod.cov3d);
+
+                    Self {
+                        rot,
+                        pos,
+                        color,
+                        sh,
+                        scale,
                     }
                 }
             }

@@ -31,11 +31,11 @@ impl BufferWrapper for wgpu::Buffer {
 /// A trait to enable any [`BufferWrapper`] to download the buffer data.
 pub trait DownloadableBufferWrapper: BufferWrapper + Send + Sync {
     /// Download the buffer data.
-    fn download(
+    fn download<T: bytemuck::NoUninit + bytemuck::AnyBitPattern>(
         &self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-    ) -> impl Future<Output = Result<Vec<u32>, Error>> + Send {
+    ) -> impl Future<Output = Result<Vec<T>, Error>> + Send {
         async {
             let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("Selection Download Encoder"),
@@ -69,10 +69,10 @@ pub trait DownloadableBufferWrapper: BufferWrapper + Send + Sync {
     }
 
     /// Map the download buffer to read the buffer data.
-    fn map_download(
+    fn map_download<T: bytemuck::NoUninit + bytemuck::AnyBitPattern>(
         download: &wgpu::Buffer,
         device: &wgpu::Device,
-    ) -> impl Future<Output = Result<Vec<u32>, Error>> + Send {
+    ) -> impl Future<Output = Result<Vec<T>, Error>> + Send {
         async {
             let (tx, rx) = oneshot::channel();
             let buffer_slice = download.slice(..);
