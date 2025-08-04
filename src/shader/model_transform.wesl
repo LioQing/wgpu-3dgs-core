@@ -95,7 +95,7 @@ fn model_transform_inv_sr_mat(model_transform: ModelTransform) -> mat3x3<f32> {
     );
 }
 
-fn model_scale_rotation_mat(model_transform: ModelTransform) -> mat3x3<f32> {
+fn model_scale_rot_mat(model_transform: ModelTransform) -> mat3x3<f32> {
     let rot = model_transform.rot;
     let scale = model_transform.scale;
 
