@@ -14,6 +14,11 @@ use crate::{
 pub struct GaussiansBuffer<G: GaussianPod>(wgpu::Buffer, std::marker::PhantomData<G>);
 
 impl<G: GaussianPod> GaussiansBuffer<G> {
+    /// The default [`wgpu::BufferUsages`] for the Gaussians buffer.
+    pub const DEFAULT_USAGE: wgpu::BufferUsages = wgpu::BufferUsages::from_bits_truncate(
+        wgpu::BufferUsages::STORAGE.bits() | wgpu::BufferUsages::COPY_DST.bits(),
+    );
+
     /// Create a new Gaussians buffer.
     pub fn new(device: &wgpu::Device, gaussians: &[Gaussian]) -> Self {
         Self::new_with_pods(
@@ -45,11 +50,7 @@ impl<G: GaussianPod> GaussiansBuffer<G> {
 
     /// Create a new Gaussians buffer with [`GaussianPod`].
     pub fn new_with_pods(device: &wgpu::Device, gaussians: &[G]) -> Self {
-        Self::new_with_pods_and_usage(
-            device,
-            gaussians,
-            wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-        )
+        Self::new_with_pods_and_usage(device, gaussians, Self::DEFAULT_USAGE)
     }
 
     /// Create a new Gaussians buffer with [`GaussianPod`] and the specified size with
@@ -70,11 +71,7 @@ impl<G: GaussianPod> GaussiansBuffer<G> {
 
     /// Create a new Gaussians buffer with the specified size.
     pub fn new_empty(device: &wgpu::Device, len: usize) -> Self {
-        Self::new_empty_with_usage(
-            device,
-            len,
-            wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-        )
+        Self::new_empty_with_usage(device, len, Self::DEFAULT_USAGE)
     }
 
     /// Create a new Gaussians buffer with the specified size with [`wgpu::BufferUsages`].
