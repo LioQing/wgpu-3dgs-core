@@ -28,6 +28,8 @@ pub struct ComputeBundle<B = wgpu::BindGroup> {
 
 impl<B> ComputeBundle<B> {
     /// Create the bind group.
+    ///
+    /// Returns [`None`] if the index is out of bounds.
     pub fn create_bind_group<'a>(
         &self,
         device: &wgpu::Device,
@@ -147,6 +149,36 @@ impl ComputeBundle {
     /// Dispatch the compute bundle for `count` instances.
     pub fn dispatch(&self, encoder: &mut wgpu::CommandEncoder, count: u32) {
         self.dispatch_with_bind_groups(encoder, self.bind_groups(), count);
+    }
+
+    /// Update the bind group at `index`.
+    ///
+    /// Returns [`Some`] of the previous bind group if it was updated,
+    /// or [`None`] if the index is out of bounds.
+    pub fn update_bind_group(
+        &mut self,
+        index: usize,
+        bind_group: wgpu::BindGroup,
+    ) -> Option<wgpu::BindGroup> {
+        if index >= self.bind_groups.len() {
+            return None;
+        }
+
+        Some(std::mem::replace(&mut self.bind_groups[index], bind_group))
+    }
+
+    /// Update the bind group at `index` with the provided buffers.
+    ///
+    /// Returns [`Some`] of the previous bind group if it was updated,
+    /// or [`None`] if the index is out of bounds.
+    pub fn update_bind_group_with_buffers<'a>(
+        &mut self,
+        device: &wgpu::Device,
+        index: usize,
+        buffers: impl IntoIterator<Item = &'a dyn BufferWrapper>,
+    ) -> Option<wgpu::BindGroup> {
+        let bind_group = self.create_bind_group(device, index, buffers)?;
+        self.update_bind_group(index, bind_group)
     }
 
     /// Create a bind group statically.
