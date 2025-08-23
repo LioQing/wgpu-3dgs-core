@@ -1,4 +1,4 @@
-use crate::{BufferWrapper, Error};
+use crate::Error;
 
 macro_rules! label_for_components {
     ($label:expr, $component:expr) => {
@@ -34,14 +34,14 @@ impl<B> ComputeBundle<B> {
         &self,
         device: &wgpu::Device,
         index: usize,
-        buffers: impl IntoIterator<Item = &'a dyn BufferWrapper>,
+        resources: impl IntoIterator<Item = wgpu::BindingResource<'a>>,
     ) -> Option<wgpu::BindGroup> {
         Some(ComputeBundle::create_bind_group_static(
             self.label.as_deref(),
             device,
             index,
             self.bind_group_layouts().get(index)?,
-            buffers,
+            resources,
         ))
     }
 
@@ -95,7 +95,7 @@ impl ComputeBundle {
         label: Option<&str>,
         device: &wgpu::Device,
         bind_group_layout_descriptors: impl IntoIterator<Item = &'a wgpu::BindGroupLayoutDescriptor<'a>>,
-        buffers: impl IntoIterator<Item = impl IntoIterator<Item = &'b dyn BufferWrapper>>,
+        resources: impl IntoIterator<Item = impl IntoIterator<Item = wgpu::BindingResource<'a>>>,
         compilation_options: wgpu::PipelineCompilationOptions,
         shader_source: wgpu::ShaderSource,
         entry_point: &str,
@@ -109,11 +109,11 @@ impl ComputeBundle {
             entry_point,
         )?;
 
-        let buffers = buffers.into_iter().collect::<Vec<_>>();
+        let resources = resources.into_iter().collect::<Vec<_>>();
 
-        if buffers.len() != this.bind_group_layouts.len() {
-            return Err(Error::BufferBindGroupLayoutCountMismatch {
-                buffer_count: buffers.len(),
+        if resources.len() != this.bind_group_layouts.len() {
+            return Err(Error::ResourceCountMismatch {
+                resource_count: resources.len(),
                 bind_group_layout_count: this.bind_group_layouts.len(),
             });
         }
@@ -125,10 +125,10 @@ impl ComputeBundle {
         let bind_groups = this
             .bind_group_layouts
             .iter()
-            .zip(buffers.into_iter())
+            .zip(resources.into_iter())
             .enumerate()
-            .map(|(i, (layout, buffers))| {
-                ComputeBundle::create_bind_group_static(this.label(), device, i, layout, buffers)
+            .map(|(i, (layout, resources))| {
+                ComputeBundle::create_bind_group_static(this.label(), device, i, layout, resources)
             })
             .collect::<Vec<_>>();
 
@@ -167,17 +167,17 @@ impl ComputeBundle {
         Some(std::mem::replace(&mut self.bind_groups[index], bind_group))
     }
 
-    /// Update the bind group at `index` with the provided buffers.
+    /// Update the bind group at `index` with the provided binding resources.
     ///
     /// Returns [`Some`] of the previous bind group if it was updated,
     /// or [`None`] if the index is out of bounds.
-    pub fn update_bind_group_with_buffers<'a>(
+    pub fn update_bind_group_with_binding_resources<'a>(
         &mut self,
         device: &wgpu::Device,
         index: usize,
-        buffers: impl IntoIterator<Item = &'a dyn BufferWrapper>,
+        resources: impl IntoIterator<Item = wgpu::BindingResource<'a>>,
     ) -> Option<wgpu::BindGroup> {
-        let bind_group = self.create_bind_group(device, index, buffers)?;
+        let bind_group = self.create_bind_group(device, index, resources)?;
         self.update_bind_group(index, bind_group)
     }
 
@@ -189,17 +189,17 @@ impl ComputeBundle {
         device: &wgpu::Device,
         index: usize,
         bind_group_layout: &wgpu::BindGroupLayout,
-        buffers: impl IntoIterator<Item = &'a dyn BufferWrapper>,
+        resources: impl IntoIterator<Item = wgpu::BindingResource<'a>>,
     ) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some(label_for_components!(label, format!("Bind Group {index}")).as_str()),
             layout: bind_group_layout,
-            entries: &buffers
+            entries: &resources
                 .into_iter()
                 .enumerate()
-                .map(|(i, buffer)| wgpu::BindGroupEntry {
+                .map(|(i, resource)| wgpu::BindGroupEntry {
                     binding: i as u32,
-                    resource: buffer.buffer().as_entire_binding(),
+                    resource,
                 })
                 .collect::<Vec<_>>(),
         })
@@ -447,11 +447,11 @@ impl<'a, R: wesl::Resolver, M: Into<wesl::ModulePath>> ComputeBundleBuilder<'a, 
         }
     }
 
-    /// Build the compute bundle with bind groups.
+    /// Build the compute bundle with bindings.
     pub fn build<'b>(
         self,
         device: &wgpu::Device,
-        buffers: impl IntoIterator<Item = impl IntoIterator<Item = &'b dyn BufferWrapper>>,
+        resources: impl IntoIterator<Item = impl IntoIterator<Item = wgpu::BindingResource<'a>>>,
     ) -> Result<ComputeBundle<wgpu::BindGroup>, Error> {
         if self.bind_group_layouts.is_empty() {
             return Err(Error::MissingBindGroupLayout);
@@ -489,7 +489,7 @@ impl<'a, R: wesl::Resolver, M: Into<wesl::ModulePath>> ComputeBundleBuilder<'a, 
             self.label,
             device,
             self.bind_group_layouts.into_iter().collect::<Vec<_>>(),
-            buffers,
+            resources,
             self.compilation_options,
             shader_source,
             entry_point,
