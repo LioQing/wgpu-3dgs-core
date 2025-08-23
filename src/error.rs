@@ -14,12 +14,12 @@ pub enum Error {
     Wesl(#[from] wesl::Error),
     #[error(
         "\
-        buffer count and bind group layout count mismatch: \
-        {buffer_count} != {bind_group_layout_count}\
+        resource count and bind group layout count mismatch: \
+        {resource_count} != {bind_group_layout_count}\
         "
     )]
-    BufferBindGroupLayoutCountMismatch {
-        buffer_count: usize,
+    ResourceCountMismatch {
+        resource_count: usize,
         bind_group_layout_count: usize,
     },
     #[error("missing bind group layout for compute bundle")]
