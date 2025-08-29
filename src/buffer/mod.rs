@@ -9,7 +9,12 @@ pub use model_transform::*;
 use crate::Error;
 
 /// A trait to to enable any wrapper to act like a [`wgpu::Buffer`].
-pub trait BufferWrapper {
+pub trait BufferWrapper: Into<wgpu::Buffer> {
+    /// The default usages.
+    const DEFAULT_USAGES: wgpu::BufferUsages = wgpu::BufferUsages::from_bits_retain(
+        wgpu::BufferUsages::UNIFORM.bits() | wgpu::BufferUsages::COPY_DST.bits(),
+    );
+
     /// Returns a reference to the buffer data.
     fn buffer(&self) -> &wgpu::Buffer;
 }
@@ -85,3 +90,29 @@ pub trait DownloadableBufferWrapper: BufferWrapper + Send + Sync {
 }
 
 impl<T: BufferWrapper + Send + Sync> DownloadableBufferWrapper for T {}
+
+/// A buffer wrapper with a fixed size that can be validated from a wgpu::Buffer.
+pub trait FixedSizeBufferWrapper: BufferWrapper + TryFrom<wgpu::Buffer, Error = Error> {
+    /// The POD element type that defines the layout/size.
+    type Pod;
+
+    /// Returns the size in bytes of the POD element.
+    fn pod_size() -> wgpu::BufferAddress {
+        std::mem::size_of::<Self::Pod>() as wgpu::BufferAddress
+    }
+
+    /// Check if the given buffer matches the expected size.
+    ///
+    /// This is a helper function for implementing `TryFrom<wgpu::Buffer>`.
+    fn verify_buffer_size(buffer: &wgpu::Buffer) -> Result<(), Error> {
+        let expected_size = Self::pod_size();
+        let buffer_size = buffer.size();
+        if buffer_size != expected_size {
+            return Err(Error::BufferSizeMismatched {
+                buffer_size,
+                expected_size,
+            });
+        }
+        Ok(())
+    }
+}

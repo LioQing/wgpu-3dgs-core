@@ -36,4 +36,16 @@ pub enum Error {
     BufferDownloadAsync(#[from] wgpu::BufferAsyncError),
     #[error("{0}")]
     DeviceFailedToPoll(#[from] wgpu::PollError),
+    #[error("buffer size and expected size mismatch: {buffer_size} != {expected_size}")]
+    BufferSizeMismatched {
+        buffer_size: wgpu::BufferAddress,
+        expected_size: wgpu::BufferAddress,
+    },
+    #[error(
+        "buffer size and expected multiple size mismatch: {buffer_size} % {expected_multiple_size} != 0"
+    )]
+    BufferSizeNotMultiple {
+        buffer_size: wgpu::BufferAddress,
+        expected_multiple_size: wgpu::BufferAddress,
+    },
 }

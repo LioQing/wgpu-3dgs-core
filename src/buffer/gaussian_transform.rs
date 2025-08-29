@@ -1,7 +1,7 @@
 use glam::*;
 use wgpu::util::DeviceExt;
 
-use crate::BufferWrapper;
+use crate::{BufferWrapper, Error, FixedSizeBufferWrapper};
 
 /// The Gaussian display modes.
 #[repr(u8)]
@@ -49,7 +49,7 @@ impl GaussianTransformBuffer {
         let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Gaussian transform Buffer"),
             contents: bytemuck::bytes_of(&GaussianTransformPod::default()),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            usage: Self::DEFAULT_USAGES,
         });
 
         Self(buffer)
@@ -80,6 +80,24 @@ impl BufferWrapper for GaussianTransformBuffer {
     fn buffer(&self) -> &wgpu::Buffer {
         &self.0
     }
+}
+
+impl From<GaussianTransformBuffer> for wgpu::Buffer {
+    fn from(wrapper: GaussianTransformBuffer) -> Self {
+        wrapper.0
+    }
+}
+
+impl TryFrom<wgpu::Buffer> for GaussianTransformBuffer {
+    type Error = Error;
+
+    fn try_from(buffer: wgpu::Buffer) -> Result<Self, Self::Error> {
+        Self::verify_buffer_size(&buffer).map(|()| Self(buffer))
+    }
+}
+
+impl FixedSizeBufferWrapper for GaussianTransformBuffer {
+    type Pod = GaussianTransformPod;
 }
 
 /// The POD representation of a Gaussian transformation.
