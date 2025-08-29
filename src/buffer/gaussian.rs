@@ -3,7 +3,7 @@ use glam::*;
 use wgpu::util::DeviceExt;
 
 use crate::{
-    BufferWrapper, DownloadableBufferWrapper, Gaussian, GaussianCov3dConfig,
+    BufferWrapper, DownloadableBufferWrapper, Error, Gaussian, GaussianCov3dConfig,
     GaussianCov3dHalfConfig, GaussianCov3dRotScaleConfig, GaussianCov3dSingleConfig,
     GaussianShConfig, GaussianShHalfConfig, GaussianShNoneConfig, GaussianShNorm8Config,
     GaussianShSingleConfig,
@@ -14,11 +14,6 @@ use crate::{
 pub struct GaussiansBuffer<G: GaussianPod>(wgpu::Buffer, std::marker::PhantomData<G>);
 
 impl<G: GaussianPod> GaussiansBuffer<G> {
-    /// The default [`wgpu::BufferUsages`] for the Gaussians buffer.
-    pub const DEFAULT_USAGE: wgpu::BufferUsages = wgpu::BufferUsages::from_bits_truncate(
-        wgpu::BufferUsages::STORAGE.bits() | wgpu::BufferUsages::COPY_DST.bits(),
-    );
-
     /// Create a new Gaussians buffer.
     pub fn new(device: &wgpu::Device, gaussians: &[Gaussian]) -> Self {
         Self::new_with_pods(
@@ -50,7 +45,7 @@ impl<G: GaussianPod> GaussiansBuffer<G> {
 
     /// Create a new Gaussians buffer with [`GaussianPod`].
     pub fn new_with_pods(device: &wgpu::Device, gaussians: &[G]) -> Self {
-        Self::new_with_pods_and_usage(device, gaussians, Self::DEFAULT_USAGE)
+        Self::new_with_pods_and_usage(device, gaussians, Self::DEFAULT_USAGES)
     }
 
     /// Create a new Gaussians buffer with [`GaussianPod`] and the specified size with
@@ -71,10 +66,10 @@ impl<G: GaussianPod> GaussiansBuffer<G> {
 
     /// Create a new Gaussians buffer with the specified size.
     pub fn new_empty(device: &wgpu::Device, len: usize) -> Self {
-        Self::new_empty_with_usage(device, len, Self::DEFAULT_USAGE)
+        Self::new_empty_with_usage(device, len, Self::DEFAULT_USAGES)
     }
 
-    /// Create a new Gaussians buffer with the specified size with [`wgpu::BufferUsages`].
+    /// Create a new Gaussians buffer with the specified size and [`wgpu::BufferUsages`].
     pub fn new_empty_with_usage(
         device: &wgpu::Device,
         len: usize,
@@ -82,7 +77,7 @@ impl<G: GaussianPod> GaussiansBuffer<G> {
     ) -> Self {
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Gaussians Buffer"),
-            size: (len * std::mem::size_of::<G>()) as u64,
+            size: (len * std::mem::size_of::<G>()) as wgpu::BufferAddress,
             usage,
             mapped_at_creation: false,
         });
@@ -190,8 +185,33 @@ impl<G: GaussianPod> GaussiansBuffer<G> {
 }
 
 impl<G: GaussianPod> BufferWrapper for GaussiansBuffer<G> {
+    const DEFAULT_USAGES: wgpu::BufferUsages = wgpu::BufferUsages::from_bits_retain(
+        wgpu::BufferUsages::STORAGE.bits() | wgpu::BufferUsages::COPY_DST.bits(),
+    );
+
     fn buffer(&self) -> &wgpu::Buffer {
         &self.0
+    }
+}
+
+impl<G: GaussianPod> From<GaussiansBuffer<G>> for wgpu::Buffer {
+    fn from(wrapper: GaussiansBuffer<G>) -> Self {
+        wrapper.0
+    }
+}
+
+impl<G: GaussianPod> TryFrom<wgpu::Buffer> for GaussiansBuffer<G> {
+    type Error = Error;
+
+    fn try_from(buffer: wgpu::Buffer) -> Result<Self, Self::Error> {
+        if buffer.size() % std::mem::size_of::<G>() as wgpu::BufferAddress != 0 {
+            return Err(Error::BufferSizeNotMultiple {
+                buffer_size: buffer.size(),
+                expected_multiple_size: std::mem::size_of::<G>() as wgpu::BufferAddress,
+            });
+        }
+
+        Ok(Self(buffer, std::marker::PhantomData))
     }
 }
 
