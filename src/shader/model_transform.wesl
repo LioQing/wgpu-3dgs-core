@@ -1,4 +1,4 @@
-import super::gaussian::Gaussian;
+import package::gaussian::Gaussian;
 
 struct ModelTransform {
     pos: vec3<f32>,
