@@ -301,16 +301,12 @@ impl ComputeBundle<()> {
 /// A builder for [`ComputeBundle`].
 ///
 /// The shader is compiled using the WESL compiler,
-pub struct ComputeBundleBuilder<
-    'a,
-    R: wesl::Resolver = wesl::StandardResolver,
-    M: Into<wesl::ModulePath> = &'a str,
-> {
+pub struct ComputeBundleBuilder<'a, R: wesl::Resolver = wesl::StandardResolver> {
     pub label: Option<&'a str>,
     pub bind_group_layouts: Vec<&'a wgpu::BindGroupLayoutDescriptor<'a>>,
     pub compilation_options: wgpu::PipelineCompilationOptions<'a>,
     pub entry_point: Option<&'a str>,
-    pub main_shader: Option<M>,
+    pub main_shader: Option<wesl::ModulePath>,
     pub compile_options: wesl::CompileOptions,
     pub resolver: Option<R>,
     pub mangler: Box<dyn wesl::Mangler + Send + Sync + 'static>,
@@ -332,7 +328,7 @@ impl ComputeBundleBuilder<'_> {
     }
 }
 
-impl<'a, R: wesl::Resolver, M: Into<wesl::ModulePath>> ComputeBundleBuilder<'a, R, M> {
+impl<'a, R: wesl::Resolver> ComputeBundleBuilder<'a, R> {
     /// Set the label of the compute bundle.
     pub fn label(mut self, label: impl Into<&'a str>) -> Self {
         self.label = Some(label.into());
@@ -397,7 +393,7 @@ impl<'a, R: wesl::Resolver, M: Into<wesl::ModulePath>> ComputeBundleBuilder<'a, 
     /// Set the main shader of the compute bundle.
     ///
     /// The shader is required to have an overridable variable `workgroup_size` of `u32`.
-    pub fn main_shader<N: Into<wesl::ModulePath>>(self, main: N) -> ComputeBundleBuilder<'a, R, N> {
+    pub fn main_shader(self, main: wesl::ModulePath) -> ComputeBundleBuilder<'a, R> {
         ComputeBundleBuilder {
             label: self.label,
             bind_group_layouts: self.bind_group_layouts,
@@ -417,7 +413,7 @@ impl<'a, R: wesl::Resolver, M: Into<wesl::ModulePath>> ComputeBundleBuilder<'a, 
     }
 
     /// Set the WESL resolver.
-    pub fn resolver<S: wesl::Resolver>(self, resolver: S) -> ComputeBundleBuilder<'a, S, M> {
+    pub fn resolver<S: wesl::Resolver>(self, resolver: S) -> ComputeBundleBuilder<'a, S> {
         ComputeBundleBuilder {
             label: self.label,
             bind_group_layouts: self.bind_group_layouts,
@@ -434,7 +430,7 @@ impl<'a, R: wesl::Resolver, M: Into<wesl::ModulePath>> ComputeBundleBuilder<'a, 
     pub fn mangler(
         self,
         mangler: impl wesl::Mangler + Send + Sync + 'static,
-    ) -> ComputeBundleBuilder<'a, R, M> {
+    ) -> ComputeBundleBuilder<'a, R> {
         ComputeBundleBuilder {
             label: self.label,
             bind_group_layouts: self.bind_group_layouts,
@@ -469,18 +465,13 @@ impl<'a, R: wesl::Resolver, M: Into<wesl::ModulePath>> ComputeBundleBuilder<'a, 
             return Err(Error::MissingMainShader);
         };
 
-        let (syntax, sourcemap) = wesl::compile_sourcemap(
-            &main_shader.into(),
-            &resolver,
-            &self.mangler,
-            &self.compile_options,
-        );
-
         let shader_source = wgpu::ShaderSource::Wgsl(
-            wesl::CompileResult {
-                syntax: syntax?,
-                sourcemap: Some(sourcemap),
-            }
+            wesl::compile_sourcemap(
+                &main_shader.into(),
+                &resolver,
+                &self.mangler,
+                &self.compile_options,
+            )?
             .to_string()
             .into(),
         );
@@ -517,18 +508,13 @@ impl<'a, R: wesl::Resolver, M: Into<wesl::ModulePath>> ComputeBundleBuilder<'a, 
             return Err(Error::MissingMainShader);
         };
 
-        let (syntax, sourcemap) = wesl::compile_sourcemap(
-            &main_shader.into(),
-            &resolver,
-            &self.mangler,
-            &self.compile_options,
-        );
-
         let shader_source = wgpu::ShaderSource::Wgsl(
-            wesl::CompileResult {
-                syntax: syntax?,
-                sourcemap: Some(sourcemap),
-            }
+            wesl::compile_sourcemap(
+                &main_shader.into(),
+                &resolver,
+                &self.mangler,
+                &self.compile_options,
+            )?
             .to_string()
             .into(),
         );

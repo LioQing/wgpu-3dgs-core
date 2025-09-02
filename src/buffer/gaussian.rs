@@ -259,12 +259,15 @@ pub trait GaussianPod:
         })
     }
 
-    /// Create the features for [`Wesl`](wesl::Wesl) compilation as a [`HashMap`].
-    fn features_map() -> std::collections::HashMap<String, bool> {
-        Self::features()
-            .iter()
-            .map(|(name, enabled)| (name.to_string(), *enabled))
-            .collect()
+    /// Create the features for [`Wesl`](wesl::Wesl) compilation as a [`wesl::Features`].
+    fn wesl_features() -> wesl::Features {
+        wesl::Features {
+            flags: Self::features()
+                .iter()
+                .map(|(name, enabled)| (name.to_string(), (*enabled).into()))
+                .collect(),
+            ..Default::default()
+        }
     }
 }
 

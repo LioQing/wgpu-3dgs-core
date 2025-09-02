@@ -1,66 +1,58 @@
-use wesl::PkgModule;
+use wesl::{Pkg, PkgModule};
 
-pub struct Mod;
+pub const PACKAGE: Pkg = Pkg {
+    crate_name: "wgpu-3dgs-core",
+    root: &MODULE,
+    dependencies: &[],
+};
 
-impl PkgModule for Mod {
-    fn name(&self) -> &'static str {
-        "wgpu_3dgs_core"
-    }
+pub const MODULE: PkgModule = PkgModule {
+    name: "wgpu_3dgs_core",
+    source: "",
+    submodules: &[
+        &gaussian::MODULE,
+        &gaussian_transform::MODULE,
+        &model_transform::MODULE,
+        &compute_bundle::MODULE,
+    ],
+};
 
-    fn source(&self) -> &'static str {
-        ""
-    }
+pub mod gaussian {
+    use super::PkgModule;
 
-    fn submodules(&self) -> &[&dyn PkgModule] {
-        static SUBMODULES: &[&dyn PkgModule] = &[
-            &gaussian::Mod,
-            &gaussian_transform::Mod,
-            &model_transform::Mod,
-            &compute_bundle::Mod,
-        ];
-        SUBMODULES
-    }
-
-    fn submodule(&self, name: &str) -> Option<&dyn PkgModule> {
-        match name {
-            "gaussian" => Some(&gaussian::Mod),
-            "gaussian_transform" => Some(&gaussian_transform::Mod),
-            "model_transform" => Some(&model_transform::Mod),
-            "compute_bundle" => Some(&compute_bundle::Mod),
-            _ => None,
-        }
-    }
-}
-
-macro_rules! submodule {
-    ($name:ident) => {
-        paste::paste! {
-            pub mod $name {
-                pub struct Mod;
-
-                impl wesl::PkgModule for Mod {
-                    fn name(&self) -> &'static str {
-                        stringify!($name)
-                    }
-
-                    fn source(&self) -> &'static str {
-                        include_str!(concat!("shader/", stringify!($name), ".wesl"))
-                    }
-
-                    fn submodules(&self) -> &[&dyn wesl::PkgModule] {
-                        &[]
-                    }
-
-                    fn submodule(&self, _name: &str) -> Option<&dyn wesl::PkgModule> {
-                        None
-                    }
-                }
-            }
-        }
+    pub const MODULE: PkgModule = PkgModule {
+        name: "gaussian",
+        source: include_str!("shader/gaussian.wesl"),
+        submodules: &[],
     };
 }
 
-submodule!(gaussian);
-submodule!(gaussian_transform);
-submodule!(model_transform);
-submodule!(compute_bundle);
+pub mod gaussian_transform {
+    use super::PkgModule;
+
+    pub const MODULE: PkgModule = PkgModule {
+        name: "gaussian_transform",
+        source: include_str!("shader/gaussian_transform.wesl"),
+        submodules: &[],
+    };
+}
+
+pub mod model_transform {
+    use super::PkgModule;
+
+    pub const MODULE: PkgModule = PkgModule {
+        name: "model_transform",
+        source: include_str!("shader/model_transform.wesl"),
+        submodules: &[],
+    };
+}
+
+pub mod compute_bundle {
+    use super::PkgModule;
+
+    pub const MODULE: PkgModule = PkgModule {
+        name: "compute_bundle",
+        source: include_str!("shader/compute_bundle.wesl"),
+        submodules: &[],
+    };
+}
