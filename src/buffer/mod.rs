@@ -6,7 +6,7 @@ pub use gaussian::*;
 pub use gaussian_transform::*;
 pub use model_transform::*;
 
-use crate::Error;
+use crate::{DownloadBufferError, FixedSizeBufferWrapperError};
 
 /// A trait to to enable any wrapper to act like a [`wgpu::Buffer`].
 pub trait BufferWrapper: Into<wgpu::Buffer> {
@@ -32,7 +32,7 @@ pub trait DownloadableBufferWrapper: BufferWrapper + Send + Sync {
         &self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-    ) -> impl Future<Output = Result<Vec<T>, Error>> + Send {
+    ) -> impl Future<Output = Result<Vec<T>, DownloadBufferError>> + Send {
         async {
             let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("Selection Download Encoder"),
@@ -66,10 +66,12 @@ pub trait DownloadableBufferWrapper: BufferWrapper + Send + Sync {
     }
 
     /// Map the download buffer to read the buffer data.
+    ///
+    /// `download` should be created with [`wgpu::BufferUsages::MAP_READ`].
     fn map_download<T: bytemuck::NoUninit + bytemuck::AnyBitPattern>(
         download: &wgpu::Buffer,
         device: &wgpu::Device,
-    ) -> impl Future<Output = Result<Vec<T>, Error>> + Send {
+    ) -> impl Future<Output = Result<Vec<T>, DownloadBufferError>> + Send {
         async {
             let (tx, rx) = oneshot::channel();
             let buffer_slice = download.slice(..);
@@ -91,8 +93,8 @@ pub trait DownloadableBufferWrapper: BufferWrapper + Send + Sync {
 
 impl<T: BufferWrapper + Send + Sync> DownloadableBufferWrapper for T {}
 
-/// A buffer wrapper with a fixed size that can be validated from a wgpu::Buffer.
-pub trait FixedSizeBufferWrapper: BufferWrapper + TryFrom<wgpu::Buffer, Error = Error> {
+/// A [`BufferWrapper`] with a fixed size that can be validated from a [`wgpu::Buffer`].
+pub trait FixedSizeBufferWrapper: BufferWrapper + TryFrom<wgpu::Buffer> {
     /// The POD element type that defines the layout/size.
     type Pod;
 
@@ -103,12 +105,12 @@ pub trait FixedSizeBufferWrapper: BufferWrapper + TryFrom<wgpu::Buffer, Error = 
 
     /// Check if the given buffer matches the expected size.
     ///
-    /// This is a helper function for implementing `TryFrom<wgpu::Buffer>`.
-    fn verify_buffer_size(buffer: &wgpu::Buffer) -> Result<(), Error> {
+    /// This is a helper function for implementing [`TryFrom`].
+    fn verify_buffer_size(buffer: &wgpu::Buffer) -> Result<(), FixedSizeBufferWrapperError> {
         let expected_size = Self::pod_size();
         let buffer_size = buffer.size();
         if buffer_size != expected_size {
-            return Err(Error::BufferSizeMismatched {
+            return Err(FixedSizeBufferWrapperError::BufferSizeMismatched {
                 buffer_size,
                 expected_size,
             });

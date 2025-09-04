@@ -2,10 +2,16 @@ use glam::*;
 use half::f16;
 
 /// The spherical harmonics configuration of Gaussian.
+///
+/// Currently, there are four configurations:
+/// - Single precision (15 * [`Vec3`]) [`GaussianShSingleConfig`](crate::GaussianShSingleConfig)
+/// - Half precision ((15 * 3 + 1) * [`struct@f16`]) [`GaussianShHalfConfig`](crate::GaussianShHalfConfig)
+/// - Min max 8 bit normalized ((15 * 3 + 3 + 4) * [`prim@u8`]) [`GaussianShNorm8Config`](crate::GaussianShNorm8Config)
+/// - None (no SH data) [`GaussianShNoneConfig`](crate::GaussianShNoneConfig)
 pub trait GaussianShConfig {
     /// The feature name of the configuration.
     ///
-    /// Must match the feature name in the shader.
+    /// Must match the [`wesl::Feature`] name in the shader.
     const FEATURE: &'static str;
 
     /// The [`GaussianPod`](crate::GaussianPod) field type.
@@ -120,7 +126,7 @@ impl GaussianShConfig for GaussianShNorm8Config {
 
 /// The none SH configuration of Gaussian.
 ///
-/// This config cannot be converted to SH.
+/// Calling [`GaussianShConfig::to_sh`] will panic on this config.
 pub struct GaussianShNoneConfig;
 
 impl GaussianShConfig for GaussianShNoneConfig {
@@ -136,10 +142,15 @@ impl GaussianShConfig for GaussianShNoneConfig {
 }
 
 /// The covariance 3D configuration of Gaussian.
+///
+/// Currently, there are three configurations:
+/// - Rotation and scale ([`Quat`] + [`Vec3`]) [`GaussianCov3dRotScaleConfig`](crate::GaussianCov3dRotScaleConfig)
+/// - Single precision (6 * [`prim@f32`]) [`GaussianCov3dSingleConfig`](crate::GaussianCov3dSingleConfig)
+/// - Half precision (6 * [`struct@f16`]) [`GaussianCov3dHalfConfig`](crate::GaussianCov3dHalfConfig)
 pub trait GaussianCov3dConfig {
     /// The name of the configuration.
     ///
-    /// Must match the name in the shader.
+    /// Must match the [`wesl::Feature`] name in the shader.
     const FEATURE: &'static str;
 
     /// The [`GaussianPod`](crate::GaussianPod) field type.
@@ -153,6 +164,8 @@ pub trait GaussianCov3dConfig {
 }
 
 /// The unconverted rotation and scale covariance 3D configuration of Gaussian.
+///
+/// Instead of storing the covariance matrix, this config stores the rotation and scale directly.
 pub struct GaussianCov3dRotScaleConfig;
 
 impl GaussianCov3dConfig for GaussianCov3dRotScaleConfig {
@@ -174,7 +187,7 @@ impl GaussianCov3dConfig for GaussianCov3dRotScaleConfig {
 
 /// The single precision covariance 3D configuration of Gaussian.
 ///
-/// This config cannot be converted to rotation and scale.
+/// Calling [`GaussianCov3dConfig::to_rot_scale`] will panic on this config.
 pub struct GaussianCov3dSingleConfig;
 
 impl GaussianCov3dConfig for GaussianCov3dSingleConfig {
@@ -205,7 +218,7 @@ impl GaussianCov3dConfig for GaussianCov3dSingleConfig {
 
 /// The half precision covariance 3D configuration of Gaussian.
 ///
-/// This config cannot be converted to rotation and scale.
+/// Calling [`GaussianCov3dConfig::to_rot_scale`] will panic on this config.
 pub struct GaussianCov3dHalfConfig;
 
 impl GaussianCov3dConfig for GaussianCov3dHalfConfig {

@@ -1,15 +1,20 @@
 import package::gaussian::Gaussian;
 
+// Model transform buffer structure.
+//
+// Corresponds to `ModelTransformPod`.
 struct ModelTransform {
     pos: vec3<f32>,
     rot: vec4<f32>,
     scale: vec3<f32>,
 }
 
+// Transform a position from model space to world space.
 fn model_to_world(model_transform: ModelTransform, pos: vec3<f32>) -> vec4<f32> {
     return model_transform_mat(model_transform) * vec4<f32>(pos, 1.0);
 }
 
+// Get the transformation matrix from `ModelTransform`.
 fn model_transform_mat(model_transform: ModelTransform) -> mat4x4<f32> {
     let pos = model_transform.pos;
     let rot = model_transform.rot;
@@ -55,6 +60,7 @@ fn model_transform_mat(model_transform: ModelTransform) -> mat4x4<f32> {
     );
 }
 
+// Get the inverse scale-rotation matrix from `ModelTransform`.
 fn model_transform_inv_sr_mat(model_transform: ModelTransform) -> mat3x3<f32> {
     let rot = model_transform.rot;
     let scale = model_transform.scale;
@@ -95,6 +101,7 @@ fn model_transform_inv_sr_mat(model_transform: ModelTransform) -> mat3x3<f32> {
     );
 }
 
+// Get the scale-rotation matrix from `ModelTransform`.
 fn model_scale_rot_mat(model_transform: ModelTransform) -> mat3x3<f32> {
     let rot = model_transform.rot;
     let scale = model_transform.scale;

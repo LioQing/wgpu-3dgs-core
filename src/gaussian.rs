@@ -3,9 +3,11 @@ use std::io::{BufRead, Write};
 use bytemuck::Zeroable;
 use glam::*;
 
-use crate::{Error, PlyGaussianIter, PlyGaussianPod, PlyHeader};
+use crate::{PlyGaussianIter, PlyGaussianPod, PlyHeader, ReadPlyError};
 
-/// A scene containing Gaussians.
+/// A vector of Gaussians.
+///
+/// This is a simple wrapper around a [`Vec`] of [`Gaussian`].
 #[derive(Debug, Clone)]
 pub struct Gaussians {
     /// The Gaussians.
@@ -13,11 +15,16 @@ pub struct Gaussians {
 }
 
 impl Gaussians {
-    /// Read a splat PLY file.
-    pub fn read_ply(reader: &mut impl BufRead) -> Result<Self, Error> {
+    /// Read a PLY file.
+    ///
+    /// The PLY file is expected to be the same format as the one used in the original Inria
+    /// implementation, or a custom PLY file with the same properties.
+    ///
+    /// See [`PLY_PROPERTIES`] for a list of expected properties.
+    pub fn read_ply(reader: &mut impl BufRead) -> Result<Self, ReadPlyError> {
         let ply_header = Self::read_ply_header(reader)?;
 
-        let count = ply_header.count()?;
+        let count = ply_header.count().ok_or(ReadPlyError::VertexNotFound)?;
         let mut gaussians = Vec::with_capacity(count);
 
         for gaussian in Self::read_ply_gaussians(reader, ply_header)? {
@@ -27,14 +34,16 @@ impl Gaussians {
         Ok(Self { gaussians })
     }
 
-    /// Read a splat PLY header.
-    pub fn read_ply_header(reader: &mut impl BufRead) -> Result<PlyHeader, Error> {
+    /// Read a PLY header.
+    ///
+    /// See [`PLY_PROPERTIES`] for a list of expected properties.
+    pub fn read_ply_header(reader: &mut impl BufRead) -> Result<PlyHeader, ReadPlyError> {
         let parser = ply_rs::parser::Parser::<ply_rs::ply::DefaultElement>::new();
         let header = parser.read_header(reader)?;
         let vertex = header
             .elements
             .get("vertex")
-            .ok_or(Error::PlyVertexNotFound)?;
+            .ok_or(ReadPlyError::VertexNotFound)?;
 
         const SYSTEM_ENDIANNESS: ply_rs::ply::Encoding = match cfg!(target_endian = "little") {
             true => ply_rs::ply::Encoding::BinaryLittleEndian,
@@ -60,60 +69,73 @@ impl Gaussians {
         Ok(ply_header)
     }
 
-    /// Read the splat PLY Gaussians into [`PlyGaussianPod`].
+    /// Read the PLY Gaussians into [`PlyGaussianPod`].
+    ///
+    /// `ply_header` may be parsed by calling [`Gaussians::read_ply_header`].
     pub fn read_ply_gaussians(
         reader: &mut impl BufRead,
         ply_header: PlyHeader,
-    ) -> Result<impl Iterator<Item = Result<PlyGaussianPod, Error>>, Error> {
-        let count = ply_header.count()?;
+    ) -> Result<impl Iterator<Item = Result<PlyGaussianPod, ReadPlyError>>, ReadPlyError> {
+        let count = ply_header.count().ok_or(ReadPlyError::VertexNotFound)?;
         log::info!("Reading PLY format with {count} Gaussians");
 
         Ok(match ply_header {
-            PlyHeader::Inria(..) => PlyGaussianIter::Inria((0..count).map(|_| {
-                let mut gaussian = PlyGaussianPod::zeroed();
-                reader.read_exact(bytemuck::bytes_of_mut(&mut gaussian))?;
-                Ok(gaussian)
-            })),
+            PlyHeader::Inria(..) => PlyGaussianIter::Inria((0..count).map(
+                |_| -> Result<PlyGaussianPod, ReadPlyError> {
+                    let mut gaussian = PlyGaussianPod::zeroed();
+                    reader.read_exact(bytemuck::bytes_of_mut(&mut gaussian))?;
+                    Ok(gaussian)
+                },
+            )),
             PlyHeader::Custom(header) => {
                 let parser = ply_rs::parser::Parser::<PlyGaussianPod>::new();
 
-                PlyGaussianIter::Custom((0..count).map(move |_| {
-                    let Some(vertex) = header.elements.get("vertex") else {
-                        return Err(Error::PlyVertexNotFound);
-                    };
-                    Ok(match header.encoding {
-                        ply_rs::ply::Encoding::Ascii => {
-                            let mut line = String::new();
-                            reader.read_line(&mut line)?;
+                PlyGaussianIter::Custom((0..count).map(
+                    move |_| -> Result<PlyGaussianPod, ReadPlyError> {
+                        let Some(vertex) = header.elements.get("vertex") else {
+                            return Err(ReadPlyError::VertexNotFound);
+                        };
+                        Ok(match header.encoding {
+                            ply_rs::ply::Encoding::Ascii => {
+                                let mut line = String::new();
+                                reader.read_line(&mut line)?;
 
-                            let mut gaussian = PlyGaussianPod::zeroed();
-                            line.split(' ')
-                                .map(|s| s.parse::<f32>())
-                                .zip(vertex.properties.keys())
-                                .try_for_each(|(value, name)| match value {
-                                    Ok(value) => {
-                                        gaussian.set_value(name, value);
-                                        Ok(())
-                                    }
-                                    Err(_) => Err(Error::PlyVertexPropertyNotFound(name.clone())),
-                                })?;
+                                let mut gaussian = PlyGaussianPod::zeroed();
+                                line.split(' ')
+                                    .map(|s| s.parse::<f32>())
+                                    .zip(vertex.properties.keys())
+                                    .try_for_each(|(value, name)| match value {
+                                        Ok(value) => {
+                                            gaussian.set_value(name, value);
+                                            Ok(())
+                                        }
+                                        Err(_) => {
+                                            Err(ReadPlyError::VertexPropertyNotFound(name.clone()))
+                                        }
+                                    })?;
 
-                            gaussian
-                        }
-                        ply_rs::ply::Encoding::BinaryLittleEndian => {
-                            parser.read_little_endian_element(reader, vertex)?
-                        }
-                        ply_rs::ply::Encoding::BinaryBigEndian => {
-                            parser.read_big_endian_element(reader, vertex)?
-                        }
-                    })
-                }))
+                                gaussian
+                            }
+                            ply_rs::ply::Encoding::BinaryLittleEndian => {
+                                parser.read_little_endian_element(reader, vertex)?
+                            }
+                            ply_rs::ply::Encoding::BinaryBigEndian => {
+                                parser.read_big_endian_element(reader, vertex)?
+                            }
+                        })
+                    },
+                ))
             }
         })
     }
 
     /// Write the Gaussians to a PLY file.
-    pub fn write_ply(&self, writer: &mut impl Write) -> Result<(), Error> {
+    ///
+    /// The output PLY file will be in binary little endian format with the same properties as the
+    /// original Inria implementation.
+    ///
+    /// See [`PLY_PROPERTIES`] for a list of the properties.
+    pub fn write_ply(&self, writer: &mut impl Write) -> Result<(), std::io::Error> {
         writeln!(writer, "ply")?;
         writeln!(writer, "format binary_little_endian 1.0")?;
         writeln!(writer, "element vertex {}", self.gaussians.len())?;
@@ -132,6 +154,8 @@ impl Gaussians {
 }
 
 /// The Gaussian.
+///
+/// This is the representation used by the CPU.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Gaussian {
     pub rot: Quat,
@@ -142,7 +166,7 @@ pub struct Gaussian {
 }
 
 impl Gaussian {
-    /// Convert from PLY Gaussian to Gaussian.
+    /// Convert from [`PlyGaussianPod`].
     pub fn from_ply(ply: &PlyGaussianPod) -> Self {
         // Position
         let pos = Vec3::from_array(ply.pos);
@@ -172,7 +196,7 @@ impl Gaussian {
         }
     }
 
-    /// Convert to PLY Gaussian.
+    /// Convert to [`PlyGaussianPod`].
     pub fn to_ply(&self) -> PlyGaussianPod {
         // Position
         let pos = self.pos.to_array();
@@ -225,7 +249,8 @@ impl From<&PlyGaussianPod> for Gaussian {
     }
 }
 
-const PLY_PROPERTIES: &[&str] = &[
+/// The list of properties in the PLY file.
+pub const PLY_PROPERTIES: &[&str] = &[
     "x",
     "y",
     "z",

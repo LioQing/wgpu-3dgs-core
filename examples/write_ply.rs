@@ -4,6 +4,10 @@ use glam::*;
 use wgpu_3dgs_core as gs;
 
 fn main() {
+    let model_path = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "target/out.ply".to_string());
+
     let gaussians = gs::Gaussians {
         gaussians: vec![
             gs::Gaussian {
@@ -30,6 +34,12 @@ fn main() {
         ],
     };
 
-    let mut file = std::fs::File::create("target/out.ply").expect("created file");
+    println!(
+        "Writing {} gaussians to {}",
+        gaussians.gaussians.len(),
+        model_path,
+    );
+
+    let mut file = std::fs::File::create(model_path).expect("created file");
     gaussians.write_ply(&mut file).expect("write PLY file");
 }

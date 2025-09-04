@@ -1,6 +1,6 @@
 use bytemuck::Zeroable;
 
-use crate::Error;
+use crate::ReadPlyError;
 
 /// The POD representation of Gaussian in PLY format.
 ///
@@ -19,6 +19,7 @@ pub struct PlyGaussianPod {
 }
 
 impl PlyGaussianPod {
+    /// Set the value of a property by name.
     pub fn set_value(&mut self, name: &str, value: f32) {
         macro_rules! set_prop {
             ($name:expr, $field:expr) => {
@@ -111,11 +112,15 @@ impl ply_rs::ply::PropertyAccess for PlyGaussianPod {
 }
 
 /// Header of PLY file.
+///
+/// This represents the header parsed by [`Gaussians::read_ply_header`](crate::Gaussians::read_ply_header).
 #[derive(Debug, Clone)]
 pub enum PlyHeader {
     /// The Inria PLY format.
     ///
-    /// This can be directly loaded into [`PlyGaussianPod`].
+    /// The number represents the number of Gaussians.
+    ///
+    /// This can be directly loaded into [`PlyGaussianPod`] by [`BufReader::read_exact`](std::io::Read::read_exact).
     Inria(usize),
 
     /// Custom PLY format.
@@ -124,22 +129,20 @@ pub enum PlyHeader {
 
 impl PlyHeader {
     /// Get the number of Gaussians.
-    pub fn count(&self) -> Result<usize, Error> {
+    ///
+    /// Returns [`None`] if the vertex element is not found in [`PlyHeader::Custom`].
+    pub fn count(&self) -> Option<usize> {
         match self {
-            Self::Inria(count) => Ok(*count),
-            Self::Custom(header) => header
-                .elements
-                .get("vertex")
-                .map(|vertex| vertex.count)
-                .ok_or(Error::PlyVertexNotFound),
+            Self::Inria(count) => Some(*count),
+            Self::Custom(header) => header.elements.get("vertex").map(|vertex| vertex.count),
         }
     }
 }
 
-/// PLY Gaussian iterator.
+/// PLY Gaussian [`Result`] iterator.
 pub enum PlyGaussianIter<
-    I: Iterator<Item = Result<PlyGaussianPod, Error>>,
-    C: Iterator<Item = Result<PlyGaussianPod, Error>>,
+    I: Iterator<Item = Result<PlyGaussianPod, ReadPlyError>>,
+    C: Iterator<Item = Result<PlyGaussianPod, ReadPlyError>>,
 > {
     /// The Inria PLY format.
     Inria(I),
@@ -149,11 +152,11 @@ pub enum PlyGaussianIter<
 }
 
 impl<
-    I: Iterator<Item = Result<PlyGaussianPod, Error>>,
-    C: Iterator<Item = Result<PlyGaussianPod, Error>>,
+    I: Iterator<Item = Result<PlyGaussianPod, ReadPlyError>>,
+    C: Iterator<Item = Result<PlyGaussianPod, ReadPlyError>>,
 > Iterator for PlyGaussianIter<I, C>
 {
-    type Item = Result<PlyGaussianPod, Error>;
+    type Item = Result<PlyGaussianPod, ReadPlyError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self {
