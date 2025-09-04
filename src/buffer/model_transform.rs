@@ -1,9 +1,12 @@
 use glam::*;
 use wgpu::util::DeviceExt;
 
-use crate::{BufferWrapper, Error, FixedSizeBufferWrapper};
+use crate::{BufferWrapper, FixedSizeBufferWrapper, FixedSizeBufferWrapperError};
 
 /// The model transformation buffer.
+///
+/// This buffer holds the model transformation data, including position, rotation, and scale.
+/// It is used to transform the model from model space to world space.
 #[derive(Debug, Clone)]
 pub struct ModelTransformBuffer(wgpu::Buffer);
 
@@ -43,7 +46,7 @@ impl From<ModelTransformBuffer> for wgpu::Buffer {
 }
 
 impl TryFrom<wgpu::Buffer> for ModelTransformBuffer {
-    type Error = Error;
+    type Error = FixedSizeBufferWrapperError;
 
     fn try_from(buffer: wgpu::Buffer) -> Result<Self, Self::Error> {
         Self::verify_buffer_size(&buffer).map(|()| Self(buffer))
@@ -59,10 +62,10 @@ impl FixedSizeBufferWrapper for ModelTransformBuffer {
 #[derive(Debug, Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct ModelTransformPod {
     pub pos: Vec3,
-    _padding_0: f32,
+    pub padding_0: f32,
     pub rot: Quat,
     pub scale: Vec3,
-    _padding_1: f32,
+    pub padding_1: f32,
 }
 
 impl ModelTransformPod {
@@ -70,10 +73,10 @@ impl ModelTransformPod {
     pub const fn new(pos: Vec3, rot: Quat, scale: Vec3) -> Self {
         Self {
             pos,
-            _padding_0: 0.0,
+            padding_0: 0.0,
             rot,
             scale,
-            _padding_1: 0.0,
+            padding_1: 0.0,
         }
     }
 }

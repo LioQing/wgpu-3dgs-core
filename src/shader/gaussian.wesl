@@ -1,3 +1,6 @@
+// Gaussian buffer structure.
+//
+// Corresponds to `GaussianPod`.
 struct Gaussian {
     pos: vec3<f32>,
     color: u32,
@@ -17,10 +20,12 @@ struct Gaussian {
         cov3d: array<u32, 3>,
 }
 
+// Unpack the color from `Gaussian.color`.
 fn gaussian_unpack_color(gaussian: Gaussian) -> vec4<f32> {
     return unpack4x8unorm(gaussian.color);
 }
 
+// Unpack the SH coefficients from `Gaussian.sh`.
 @if(sh_single) fn gaussian_unpack_sh(gaussian: Gaussian, sh_index: u32) -> vec3<f32> {
     return vec3<f32>(
         gaussian.sh[(sh_index - 1) * 3],
@@ -29,6 +34,7 @@ fn gaussian_unpack_color(gaussian: Gaussian) -> vec4<f32> {
     );
 }
 
+// Unpack the SH coefficients from `Gaussian.sh`.
 @if(sh_half) fn gaussian_unpack_sh(gaussian: Gaussian, sh_index: u32) -> vec3<f32> {
     let i = (sh_index - 1) * 3;
     let xi = i / 2;
@@ -48,6 +54,7 @@ fn gaussian_unpack_color(gaussian: Gaussian) -> vec4<f32> {
     }
 }
 
+// Unpack the SH coefficients from `Gaussian.sh`.
 @if(sh_norm8) fn gaussian_unpack_sh(gaussian: Gaussian, sh_index: u32) -> vec3<f32> {
     let minmax = unpack2x16float(gaussian.sh[0]);
 
@@ -68,10 +75,12 @@ fn gaussian_unpack_color(gaussian: Gaussian) -> vec4<f32> {
     return minmax.x + norm * (minmax.y - minmax.x);
 }
 
+// Unpack the SH coefficients from `Gaussian.sh`.
 @if(sh_none) fn gaussian_unpack_sh(gaussian: Gaussian, sh_index: u32) -> vec3<f32> {
     return vec3<f32>(0.0);
 }
 
+// Unpack the 3D covariance matrix from `Gaussian.cov3d`.
 @if(cov3d_rot_scale) fn gaussian_unpack_cov3d(gaussian: Gaussian) -> array<f32, 6> {
     let rot = vec4<f32>(gaussian.cov3d[0], gaussian.cov3d[1], gaussian.cov3d[2], gaussian.cov3d[3]);
     let scale = vec3<f32>(gaussian.cov3d[4], gaussian.cov3d[5], gaussian.cov3d[6]);
@@ -123,10 +132,12 @@ fn gaussian_unpack_color(gaussian: Gaussian) -> vec4<f32> {
     );
 }
 
+// Unpack the 3D covariance matrix from `Gaussian.cov3d`.
 @if(cov3d_single) fn gaussian_unpack_cov3d(gaussian: Gaussian) -> array<f32, 6> {
     return gaussian.cov3d;
 }
 
+// Unpack the 3D covariance matrix from `Gaussian.cov3d`.
 @if(cov3d_half) fn gaussian_unpack_cov3d(gaussian: Gaussian) -> array<f32, 6> {
     let x = unpack2x16float(gaussian.cov3d[0]);
     let y = unpack2x16float(gaussian.cov3d[1]);

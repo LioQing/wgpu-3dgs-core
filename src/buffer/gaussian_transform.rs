@@ -1,7 +1,7 @@
 use glam::*;
 use wgpu::util::DeviceExt;
 
-use crate::{BufferWrapper, Error, FixedSizeBufferWrapper};
+use crate::{BufferWrapper, FixedSizeBufferWrapper, FixedSizeBufferWrapperError};
 
 /// The Gaussian display modes.
 #[repr(u8)]
@@ -40,6 +40,9 @@ impl GaussianShDegree {
 }
 
 /// The Gaussian transform buffer.
+///
+/// This buffer holds the Gaussian transformation data, including size, display mode, SH degree,
+/// and whether to show SH0.
 #[derive(Debug, Clone)]
 pub struct GaussianTransformBuffer(wgpu::Buffer);
 
@@ -89,7 +92,7 @@ impl From<GaussianTransformBuffer> for wgpu::Buffer {
 }
 
 impl TryFrom<wgpu::Buffer> for GaussianTransformBuffer {
-    type Error = Error;
+    type Error = FixedSizeBufferWrapperError;
 
     fn try_from(buffer: wgpu::Buffer) -> Result<Self, Self::Error> {
         Self::verify_buffer_size(&buffer).map(|()| Self(buffer))

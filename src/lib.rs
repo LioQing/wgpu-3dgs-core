@@ -7,7 +7,6 @@ mod gaussian;
 mod gaussian_config;
 mod ply;
 pub mod shader;
-pub mod wesl;
 
 pub use buffer::*;
 pub use compute_bundle::*;
@@ -15,3 +14,6 @@ pub use error::*;
 pub use gaussian::*;
 pub use gaussian_config::*;
 pub use ply::*;
+
+pub use glam;
+pub use wgpu;

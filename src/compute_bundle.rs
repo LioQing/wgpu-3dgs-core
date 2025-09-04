@@ -1,4 +1,4 @@
-use crate::Error;
+use crate::{ComputeBundleBuildError, ComputeBundleCreateError};
 
 macro_rules! label_for_components {
     ($label:expr, $component:expr) => {
@@ -12,6 +12,37 @@ macro_rules! label_for_components {
 
 /// A bundle of [`wgpu::ComputePipeline`], its [`wgpu::BindGroupLayout`]
 /// and optionally [`wgpu::BindGroup`].
+///
+/// This is an abstraction of a compute pipeline with its associated resources, so that any
+/// compute operations can be easily setup and dispatched.
+///
+/// It is recommended to use [`ComputeBundleBuilder`] to create a compute bundle.
+///
+/// # Shader Format
+///
+/// The compute shader is suggested to be in the following form:
+///
+/// ```wgsl
+/// override workgroup_size: u32;
+///
+/// @compute @workgroup_size(workgroup_size)
+/// fn main(@builtin(global_invocation_id) id: vec3<u32>) {
+///     let index = id;
+///
+///     if index >= arrayLength(&data) {
+///         return;
+///     }
+///
+///     // Do something with `data[index]`
+/// }
+/// ```
+///
+/// - `workgroup_size` is an overridable variable of type `u32`.
+/// - The entry point function (here `main`) must have the `@compute` attribute and a
+///   `@workgroup_size(workgroup_size)` attribute.
+/// - The entry point function is suggested to have a parameter with
+///   [`@builtin(global_invocation_id)`](https://www.w3.org/TR/WGSL/#global-invocation-id-builtin-value)
+///   attribute to get the global invocation ID for indexing into the data.
 #[derive(Debug)]
 pub struct ComputeBundle<B = wgpu::BindGroup> {
     /// The label of the compute bundle.
@@ -27,9 +58,11 @@ pub struct ComputeBundle<B = wgpu::BindGroup> {
 }
 
 impl<B> ComputeBundle<B> {
-    /// Create the bind group.
+    /// Create the bind group at the given index.
     ///
-    /// Returns [`None`] if the index is out of bounds.
+    /// `index` refers to the index in [`ComputeBundle::bind_group_layouts`].
+    ///
+    /// Returns [`None`] if the `index` is out of bounds.
     pub fn create_bind_group<'a>(
         &self,
         device: &wgpu::Device,
@@ -56,6 +89,9 @@ impl<B> ComputeBundle<B> {
     }
 
     /// Get the bind group layouts.
+    ///
+    /// This corresponds to the `bind_group_layout_descriptors` provided
+    /// when creating the compute bundle.
     pub fn bind_group_layouts(&self) -> &[wgpu::BindGroupLayout] {
         &self.bind_group_layouts
     }
@@ -66,6 +102,9 @@ impl<B> ComputeBundle<B> {
     }
 
     /// Dispatch the compute bundle for `count` instances with provided bind group.
+    ///
+    /// Each bind group in `bind_groups` corresponds to the bind group layout
+    /// at the same index in [`ComputeBundle::bind_group_layouts`].
     pub fn dispatch_with_bind_groups<'a>(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -90,7 +129,8 @@ impl<B> ComputeBundle<B> {
 impl ComputeBundle {
     /// Create a new compute bundle.
     ///
-    /// `shader_source` requires an overridable variable `workgroup_size` of `u32`.
+    /// `shader_source` requires an overridable variable `workgroup_size` of `u32`, see docs of
+    /// [`ComputeBundle`].
     pub fn new<'a, 'b>(
         label: Option<&str>,
         device: &wgpu::Device,
@@ -99,7 +139,7 @@ impl ComputeBundle {
         compilation_options: wgpu::PipelineCompilationOptions,
         shader_source: wgpu::ShaderSource,
         entry_point: &str,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, ComputeBundleCreateError> {
         let this = ComputeBundle::new_without_bind_groups(
             label,
             device,
@@ -107,12 +147,12 @@ impl ComputeBundle {
             compilation_options,
             shader_source,
             entry_point,
-        )?;
+        );
 
         let resources = resources.into_iter().collect::<Vec<_>>();
 
         if resources.len() != this.bind_group_layouts.len() {
-            return Err(Error::ResourceCountMismatch {
+            return Err(ComputeBundleCreateError::ResourceCountMismatch {
                 resource_count: resources.len(),
                 bind_group_layout_count: this.bind_group_layouts.len(),
             });
@@ -218,7 +258,7 @@ impl ComputeBundle<()> {
         compilation_options: wgpu::PipelineCompilationOptions,
         shader_source: wgpu::ShaderSource,
         entry_point: &str,
-    ) -> Result<Self, Error> {
+    ) -> Self {
         let workgroup_size = device
             .limits()
             .max_compute_workgroup_size_x
@@ -278,13 +318,13 @@ impl ComputeBundle<()> {
 
         log::info!("{} created", label.as_deref().unwrap_or("Compute Bundle"));
 
-        Ok(Self {
+        Self {
             label: label.map(String::from),
             workgroup_size,
             bind_group_layouts,
             bind_groups: Vec::new(),
             pipeline,
-        })
+        }
     }
 
     /// Dispatch the compute bundle for `count` instances.
@@ -301,13 +341,20 @@ impl ComputeBundle<()> {
 /// A builder for [`ComputeBundle`].
 ///
 /// The shader is compiled using the WESL compiler,
+///
+/// The following fields should be set before calling [`ComputeBundleBuilder::build`] or
+/// [`ComputeBundleBuilder::build_without_bind_groups`]:
+/// - [`ComputeBundleBuilder::bind_group_layouts`]
+/// - [`ComputeBundleBuilder::resolver`]
+/// - [`ComputeBundleBuilder::entry_point`]
+/// - [`ComputeBundleBuilder::main_shader`]
 pub struct ComputeBundleBuilder<'a, R: wesl::Resolver = wesl::StandardResolver> {
     pub label: Option<&'a str>,
     pub bind_group_layouts: Vec<&'a wgpu::BindGroupLayoutDescriptor<'a>>,
-    pub compilation_options: wgpu::PipelineCompilationOptions<'a>,
+    pub pipeline_compile_options: wgpu::PipelineCompilationOptions<'a>,
     pub entry_point: Option<&'a str>,
     pub main_shader: Option<wesl::ModulePath>,
-    pub compile_options: wesl::CompileOptions,
+    pub wesl_compile_options: wesl::CompileOptions,
     pub resolver: Option<R>,
     pub mangler: Box<dyn wesl::Mangler + Send + Sync + 'static>,
 }
@@ -318,10 +365,10 @@ impl ComputeBundleBuilder<'_> {
         Self {
             label: None,
             bind_group_layouts: Vec::new(),
-            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            pipeline_compile_options: wgpu::PipelineCompilationOptions::default(),
             entry_point: None,
             main_shader: None,
-            compile_options: wesl::CompileOptions::default(),
+            wesl_compile_options: wesl::CompileOptions::default(),
             resolver: None,
             mangler: Box::new(wesl::NoMangler),
         }
@@ -335,8 +382,8 @@ impl<'a, R: wesl::Resolver> ComputeBundleBuilder<'a, R> {
         self
     }
 
-    /// Add a bind group descriptor.
-    pub fn bind_group(
+    /// Add a [`wgpu::BindGroupLayoutDescriptor`].
+    pub fn bind_group_layout(
         mut self,
         bind_group_layout: &'a wgpu::BindGroupLayoutDescriptor<'a>,
     ) -> Self {
@@ -344,8 +391,8 @@ impl<'a, R: wesl::Resolver> ComputeBundleBuilder<'a, R> {
         self
     }
 
-    /// Add the bind group descriptors.
-    pub fn bind_groups(
+    /// Add [`wgpu::BindGroupLayoutDescriptor`]s.
+    pub fn bind_group_layouts(
         mut self,
         bind_group_layouts: impl IntoIterator<Item = &'a wgpu::BindGroupLayoutDescriptor<'a>>,
     ) -> Self {
@@ -354,37 +401,18 @@ impl<'a, R: wesl::Resolver> ComputeBundleBuilder<'a, R> {
     }
 
     /// Set the [`wgpu::PipelineCompilationOptions`].
-    pub fn compilation_options(
+    pub fn pipeline_compile_options(
         mut self,
         compilation_options: wgpu::PipelineCompilationOptions<'a>,
     ) -> Self {
-        self.compilation_options = compilation_options;
+        self.pipeline_compile_options = compilation_options;
         self
     }
 
     /// Set the entry point of the compute shader.
     ///
-    /// This should be the function name of the entry point,
-    /// where the function along with the overridable workgroup size
-    /// is suggested to be defined as follows:
-    ///
-    /// ```wgsl
-    /// override workgroup_size: u32;
-    ///
-    /// @compute @workgroup_size(workgroup_size, 1, 1)
-    /// fn main(
-    ///     @builtin(workgroup_id) wid: vec3<u32>,
-    ///     @builtin(local_invocation_id) lid: vec3<u32>,
-    /// ) {
-    ///     let index = wgpu_3dgs_core::compute_bundle::index(wid, workgroup_size, lid);
-    ///
-    ///     if index >= arrayLength(&data) {
-    ///         return;
-    ///     }
-    ///
-    ///     // Do something with `data[index]`
-    /// }
-    /// ```
+    /// This should be the function name of the entry point in the compute shader, which is
+    /// passed into [`wgpu::ComputePipelineDescriptor::entry_point`].
     pub fn entry_point(mut self, main: &'a str) -> Self {
         self.entry_point = Some(main);
         self
@@ -392,41 +420,42 @@ impl<'a, R: wesl::Resolver> ComputeBundleBuilder<'a, R> {
 
     /// Set the main shader of the compute bundle.
     ///
-    /// The shader is required to have an overridable variable `workgroup_size` of `u32`.
+    /// The shader is required to have an overridable variable `workgroup_size` of `u32`, which is
+    /// set to the workgroup size of at the entry point of the compute pipeline.
     pub fn main_shader(self, main: wesl::ModulePath) -> ComputeBundleBuilder<'a, R> {
         ComputeBundleBuilder {
             label: self.label,
             bind_group_layouts: self.bind_group_layouts,
-            compilation_options: self.compilation_options,
+            pipeline_compile_options: self.pipeline_compile_options,
             entry_point: self.entry_point,
             main_shader: Some(main),
-            compile_options: self.compile_options,
+            wesl_compile_options: self.wesl_compile_options,
             resolver: self.resolver,
             mangler: self.mangler,
         }
     }
 
-    /// Set the compile options for the WESL compiler.
-    pub fn compile_options(mut self, options: wesl::CompileOptions) -> Self {
-        self.compile_options = options;
+    /// Set the [`wesl::CompileOptions`].
+    pub fn wesl_compile_options(mut self, options: wesl::CompileOptions) -> Self {
+        self.wesl_compile_options = options;
         self
     }
 
-    /// Set the WESL resolver.
+    /// Set the [`wesl::Resolver`].
     pub fn resolver<S: wesl::Resolver>(self, resolver: S) -> ComputeBundleBuilder<'a, S> {
         ComputeBundleBuilder {
             label: self.label,
             bind_group_layouts: self.bind_group_layouts,
-            compilation_options: self.compilation_options,
+            pipeline_compile_options: self.pipeline_compile_options,
             entry_point: self.entry_point,
             main_shader: self.main_shader,
-            compile_options: self.compile_options,
+            wesl_compile_options: self.wesl_compile_options,
             resolver: Some(resolver),
             mangler: self.mangler,
         }
     }
 
-    /// Set the WESL mangler.
+    /// Set the [`wesl::Mangler`].
     pub fn mangler(
         self,
         mangler: impl wesl::Mangler + Send + Sync + 'static,
@@ -434,10 +463,10 @@ impl<'a, R: wesl::Resolver> ComputeBundleBuilder<'a, R> {
         ComputeBundleBuilder {
             label: self.label,
             bind_group_layouts: self.bind_group_layouts,
-            compilation_options: self.compilation_options,
+            pipeline_compile_options: self.pipeline_compile_options,
             entry_point: self.entry_point,
             main_shader: self.main_shader,
-            compile_options: self.compile_options,
+            wesl_compile_options: self.wesl_compile_options,
             resolver: self.resolver,
             mangler: Box::new(mangler),
         }
@@ -448,21 +477,21 @@ impl<'a, R: wesl::Resolver> ComputeBundleBuilder<'a, R> {
         self,
         device: &wgpu::Device,
         resources: impl IntoIterator<Item = impl IntoIterator<Item = wgpu::BindingResource<'a>>>,
-    ) -> Result<ComputeBundle<wgpu::BindGroup>, Error> {
+    ) -> Result<ComputeBundle<wgpu::BindGroup>, ComputeBundleBuildError> {
         if self.bind_group_layouts.is_empty() {
-            return Err(Error::MissingBindGroupLayout);
+            return Err(ComputeBundleBuildError::MissingBindGroupLayout);
         }
 
         let Some(resolver) = self.resolver else {
-            return Err(Error::MissingResolver);
+            return Err(ComputeBundleBuildError::MissingResolver);
         };
 
         let Some(entry_point) = self.entry_point else {
-            return Err(Error::MissingEntryPoint);
+            return Err(ComputeBundleBuildError::MissingEntryPoint);
         };
 
         let Some(main_shader) = self.main_shader else {
-            return Err(Error::MissingMainShader);
+            return Err(ComputeBundleBuildError::MissingMainShader);
         };
 
         let shader_source = wgpu::ShaderSource::Wgsl(
@@ -470,7 +499,7 @@ impl<'a, R: wesl::Resolver> ComputeBundleBuilder<'a, R> {
                 &main_shader.into(),
                 &resolver,
                 &self.mangler,
-                &self.compile_options,
+                &self.wesl_compile_options,
             )?
             .to_string()
             .into(),
@@ -481,31 +510,32 @@ impl<'a, R: wesl::Resolver> ComputeBundleBuilder<'a, R> {
             device,
             self.bind_group_layouts.into_iter().collect::<Vec<_>>(),
             resources,
-            self.compilation_options,
+            self.pipeline_compile_options,
             shader_source,
             entry_point,
         )
+        .map_err(Into::into)
     }
 
     /// Build the compute bundle without bind groups.
     pub fn build_without_bind_groups(
         self,
         device: &wgpu::Device,
-    ) -> Result<ComputeBundle<()>, Error> {
+    ) -> Result<ComputeBundle<()>, ComputeBundleBuildError> {
         if self.bind_group_layouts.is_empty() {
-            return Err(Error::MissingBindGroupLayout);
+            return Err(ComputeBundleBuildError::MissingBindGroupLayout);
         }
 
         let Some(resolver) = self.resolver else {
-            return Err(Error::MissingResolver);
+            return Err(ComputeBundleBuildError::MissingResolver);
         };
 
         let Some(entry_point) = self.entry_point else {
-            return Err(Error::MissingEntryPoint);
+            return Err(ComputeBundleBuildError::MissingEntryPoint);
         };
 
         let Some(main_shader) = self.main_shader else {
-            return Err(Error::MissingMainShader);
+            return Err(ComputeBundleBuildError::MissingMainShader);
         };
 
         let shader_source = wgpu::ShaderSource::Wgsl(
@@ -513,20 +543,20 @@ impl<'a, R: wesl::Resolver> ComputeBundleBuilder<'a, R> {
                 &main_shader.into(),
                 &resolver,
                 &self.mangler,
-                &self.compile_options,
+                &self.wesl_compile_options,
             )?
             .to_string()
             .into(),
         );
 
-        ComputeBundle::new_without_bind_groups(
+        Ok(ComputeBundle::new_without_bind_groups(
             self.label,
             device,
             self.bind_group_layouts.into_iter().collect::<Vec<_>>(),
-            self.compilation_options,
+            self.pipeline_compile_options,
             shader_source,
             entry_point,
-        )
+        ))
     }
 }
 

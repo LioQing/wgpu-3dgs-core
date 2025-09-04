@@ -3,13 +3,16 @@ use glam::*;
 use wgpu::util::DeviceExt;
 
 use crate::{
-    BufferWrapper, DownloadableBufferWrapper, Error, Gaussian, GaussianCov3dConfig,
+    BufferWrapper, DownloadBufferError, DownloadableBufferWrapper, Gaussian, GaussianCov3dConfig,
     GaussianCov3dHalfConfig, GaussianCov3dRotScaleConfig, GaussianCov3dSingleConfig,
     GaussianShConfig, GaussianShHalfConfig, GaussianShNoneConfig, GaussianShNorm8Config,
-    GaussianShSingleConfig,
+    GaussianShSingleConfig, GaussiansBufferTryFromBufferError, GaussiansBufferUpdateError,
+    GaussiansBufferUpdateRangeError,
 };
 
 /// The Gaussians storage buffer.
+///
+/// This buffer holds an array of Gaussians represented by the specified [`GaussianPod`].
 #[derive(Debug, Clone)]
 pub struct GaussiansBuffer<G: GaussianPod>(wgpu::Buffer, std::marker::PhantomData<G>);
 
@@ -48,7 +51,7 @@ impl<G: GaussianPod> GaussiansBuffer<G> {
         Self::new_with_pods_and_usage(device, gaussians, Self::DEFAULT_USAGES)
     }
 
-    /// Create a new Gaussians buffer with [`GaussianPod`] and the specified size with
+    /// Create a new Gaussians buffer with [`GaussianPod`] and the specified size and
     /// [`wgpu::BufferUsages`].
     pub fn new_with_pods_and_usage(
         device: &wgpu::Device,
@@ -96,14 +99,18 @@ impl<G: GaussianPod> GaussiansBuffer<G> {
     }
 
     /// Update the buffer.
-    pub fn update(&self, queue: &wgpu::Queue, gaussians: &[Gaussian]) {
+    ///
+    /// `gaussians` should have the same number of Gaussians as the buffer.
+    pub fn update(
+        &self,
+        queue: &wgpu::Queue,
+        gaussians: &[Gaussian],
+    ) -> Result<(), GaussiansBufferUpdateError> {
         if gaussians.len() != self.len() {
-            log::error!(
-                "Gaussians count mismatch, buffer has {}, but {} were provided",
-                self.len(),
-                gaussians.len()
-            );
-            return;
+            return Err(GaussiansBufferUpdateError::CountMismatch {
+                count: gaussians.len(),
+                expected_count: self.len(),
+            });
         }
 
         self.update_with_pod(
@@ -113,33 +120,44 @@ impl<G: GaussianPod> GaussiansBuffer<G> {
                 .map(G::from_gaussian)
                 .collect::<Vec<_>>()
                 .as_slice(),
-        );
+        )
     }
 
     /// Update the buffer with [`GaussianPod`].
-    pub fn update_with_pod(&self, queue: &wgpu::Queue, pods: &[G]) {
+    ///
+    /// `pods` should have the same number of Gaussians as the buffer.
+    pub fn update_with_pod(
+        &self,
+        queue: &wgpu::Queue,
+        pods: &[G],
+    ) -> Result<(), GaussiansBufferUpdateError> {
         if pods.len() != self.len() {
-            log::error!(
-                "Gaussians count mismatch, buffer has {}, but {} were provided",
-                self.len(),
-                pods.len()
-            );
-            return;
+            return Err(GaussiansBufferUpdateError::CountMismatch {
+                count: pods.len(),
+                expected_count: self.len(),
+            });
         }
 
         queue.write_buffer(&self.0, 0, bytemuck::cast_slice(pods));
+
+        Ok(())
     }
 
     /// Update a range of the buffer.
-    pub fn update_range(&self, queue: &wgpu::Queue, start: usize, gaussians: &[Gaussian]) {
+    ///
+    /// `gaussians` should fit in the buffer starting from `start`.
+    pub fn update_range(
+        &self,
+        queue: &wgpu::Queue,
+        start: usize,
+        gaussians: &[Gaussian],
+    ) -> Result<(), GaussiansBufferUpdateRangeError> {
         if start + gaussians.len() > self.len() {
-            log::error!(
-                "Gaussians count mismatch, buffer has {}, but {} were provided starting at {}",
-                self.len(),
-                gaussians.len(),
-                start
-            );
-            return;
+            return Err(GaussiansBufferUpdateRangeError::CountMismatch {
+                count: gaussians.len(),
+                start,
+                expected_count: self.len(),
+            });
         }
 
         self.update_range_with_pod(
@@ -150,19 +168,24 @@ impl<G: GaussianPod> GaussiansBuffer<G> {
                 .map(G::from_gaussian)
                 .collect::<Vec<_>>()
                 .as_slice(),
-        );
+        )
     }
 
     /// Update a range of the buffer with [`GaussianPod`].
-    pub fn update_range_with_pod(&self, queue: &wgpu::Queue, start: usize, pods: &[G]) {
+    ///
+    /// `pods` should fit in the buffer starting from `start`.
+    pub fn update_range_with_pod(
+        &self,
+        queue: &wgpu::Queue,
+        start: usize,
+        pods: &[G],
+    ) -> Result<(), GaussiansBufferUpdateRangeError> {
         if start + pods.len() > self.len() {
-            log::error!(
-                "Gaussians count mismatch, buffer has {}, but {} were provided starting at {}",
-                self.len(),
-                pods.len(),
-                start
-            );
-            return;
+            return Err(GaussiansBufferUpdateRangeError::CountMismatch {
+                count: pods.len(),
+                start,
+                expected_count: self.len(),
+            });
         }
 
         queue.write_buffer(
@@ -170,14 +193,16 @@ impl<G: GaussianPod> GaussiansBuffer<G> {
             (start * std::mem::size_of::<G>()) as wgpu::BufferAddress,
             bytemuck::cast_slice(pods),
         );
+
+        Ok(())
     }
 
-    /// Download the buffer data into a vector of [`Gaussian`].
+    /// Download the buffer data into a [`Vec`] of [`Gaussian`].
     pub async fn download_gaussians(
         &self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-    ) -> Result<Vec<Gaussian>, crate::Error> {
+    ) -> Result<Vec<Gaussian>, DownloadBufferError> {
         self.download::<G>(device, queue)
             .await
             .map(|pods| pods.into_iter().map(Into::into).collect::<Vec<_>>())
@@ -201,11 +226,11 @@ impl<G: GaussianPod> From<GaussiansBuffer<G>> for wgpu::Buffer {
 }
 
 impl<G: GaussianPod> TryFrom<wgpu::Buffer> for GaussiansBuffer<G> {
-    type Error = Error;
+    type Error = GaussiansBufferTryFromBufferError;
 
     fn try_from(buffer: wgpu::Buffer) -> Result<Self, Self::Error> {
         if buffer.size() % std::mem::size_of::<G>() as wgpu::BufferAddress != 0 {
-            return Err(Error::BufferSizeNotMultiple {
+            return Err(GaussiansBufferTryFromBufferError::BufferSizeNotMultiple {
                 buffer_size: buffer.size(),
                 expected_multiple_size: std::mem::size_of::<G>() as wgpu::BufferAddress,
             });
@@ -216,6 +241,13 @@ impl<G: GaussianPod> TryFrom<wgpu::Buffer> for GaussiansBuffer<G> {
 }
 
 /// The Gaussian POD trait.
+///
+/// The number of configurations for this is the combination of all the [`GaussianShConfig`]
+/// and [`GaussianCov3dConfig`].
+///
+/// You can use the corresponding config by using the name in the following format:
+/// `GaussianPodWithSh{ShConfig}Cov3d{Cov3dConfig}Configs`, e.g.
+/// [`GaussianPodWithShSingleCov3dRotScaleConfigs`].
 pub trait GaussianPod:
     for<'a> From<&'a Gaussian>
     + Into<Gaussian>
@@ -241,6 +273,8 @@ pub trait GaussianPod:
     }
 
     /// Create the features for [`Wesl`](wesl::Wesl) compilation.
+    ///
+    /// You may want to use [`GaussianPod::wesl_features`] most of the time instead.
     fn features() -> [(&'static str, bool); 7] {
         [
             GaussianShSingleConfig::FEATURE,
@@ -275,7 +309,6 @@ pub trait GaussianPod:
 macro_rules! gaussian_pod {
     (sh = $sh:ident, cov3d = $cov3d:ident, padding_size = $padding:expr) => {
         paste::paste! {
-            /// The POD representation of Gaussian.
             #[repr(C)]
             #[derive(Debug, Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
             pub struct [< GaussianPodWith Sh $sh Cov3d $cov3d Configs >] {
@@ -283,7 +316,7 @@ macro_rules! gaussian_pod {
                 pub color: U8Vec4,
                 pub sh: <[< GaussianSh $sh Config >] as GaussianShConfig>::Field,
                 pub cov3d: <[< GaussianCov3d $cov3d Config >] as GaussianCov3dConfig>::Field,
-                _padding: [f32; $padding],
+                pub padding: [f32; $padding],
             }
 
             impl From<&Gaussian> for [< GaussianPodWith Sh $sh Cov3d $cov3d Configs >] {
@@ -308,7 +341,7 @@ macro_rules! gaussian_pod {
                         color,
                         sh,
                         cov3d,
-                        _padding: [0.0; $padding],
+                        padding: [0.0; $padding],
                     }
                 }
             }
