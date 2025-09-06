@@ -4,10 +4,14 @@ use half::f16;
 /// The spherical harmonics configuration of Gaussian.
 ///
 /// Currently, there are four configurations:
-/// - Single precision (15 * [`Vec3`]) [`GaussianShSingleConfig`](crate::GaussianShSingleConfig)
-/// - Half precision ((15 * 3 + 1) * [`struct@f16`]) [`GaussianShHalfConfig`](crate::GaussianShHalfConfig)
-/// - Min max 8 bit normalized ((15 * 3 + 3 + 4) * [`prim@u8`]) [`GaussianShNorm8Config`](crate::GaussianShNorm8Config)
-/// - None (no SH data) [`GaussianShNoneConfig`](crate::GaussianShNoneConfig)
+/// - Single precision [`GaussianShSingleConfig`](crate::GaussianShSingleConfig)
+///     - Format: 15 * [`Vec3`]
+/// - Half precision [`GaussianShHalfConfig`](crate::GaussianShHalfConfig)
+///     - Format: (15 * 3 + 1) * [`struct@f16`]
+/// - Min max 8 bit normalized [`GaussianShNorm8Config`](crate::GaussianShNorm8Config)
+///     - Format: (15 * 3 + 3 + 4) * [`prim@u8`]
+/// - None [`GaussianShNoneConfig`](crate::GaussianShNoneConfig)
+///    - Cannot be converted back to SH
 pub trait GaussianShConfig {
     /// The feature name of the configuration.
     ///
@@ -144,9 +148,14 @@ impl GaussianShConfig for GaussianShNoneConfig {
 /// The covariance 3D configuration of Gaussian.
 ///
 /// Currently, there are three configurations:
-/// - Rotation and scale ([`Quat`] + [`Vec3`]) [`GaussianCov3dRotScaleConfig`](crate::GaussianCov3dRotScaleConfig)
-/// - Single precision (6 * [`prim@f32`]) [`GaussianCov3dSingleConfig`](crate::GaussianCov3dSingleConfig)
-/// - Half precision (6 * [`struct@f16`]) [`GaussianCov3dHalfConfig`](crate::GaussianCov3dHalfConfig)
+/// - Rotation and scale [`GaussianCov3dRotScaleConfig`](crate::GaussianCov3dRotScaleConfig)
+///     - Format: [`Quat`] + [`Vec3`]
+/// - Single precision [`GaussianCov3dSingleConfig`](crate::GaussianCov3dSingleConfig)
+///     - Format: 6 * [`prim@f32`]
+///     - Cannot be converted back to rotation and scale
+/// - Half precision [`GaussianCov3dHalfConfig`](crate::GaussianCov3dHalfConfig)
+///     - Format: 6 * [`struct@f16`]
+///     - Cannot be converted back to rotation and scale
 pub trait GaussianCov3dConfig {
     /// The name of the configuration.
     ///
