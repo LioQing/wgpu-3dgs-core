@@ -13,3 +13,7 @@ This library provides helper functions and abstractions for working with 3D Gaus
 - Configuring Gaussian structures for loading into GPU buffers.
 - Utilities for creating and managing GPU resources related to 3D Gaussian Splatting.
 - Compute pipeline abstractions for processing 3D Gaussian data on the GPU.
+
+## Examples
+
+See the [examples](./examples) directory for usage examples.

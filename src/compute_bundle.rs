@@ -13,12 +13,14 @@ macro_rules! label_for_components {
 /// A bundle of [`wgpu::ComputePipeline`], its [`wgpu::BindGroupLayout`]
 /// and optionally [`wgpu::BindGroup`].
 ///
+/// ## Overview
+///
 /// This is an abstraction of a compute pipeline with its associated resources, so that any
 /// compute operations can be easily setup and dispatched.
 ///
-/// It is recommended to use [`ComputeBundleBuilder`] to create a compute bundle.
+/// It is recommended to use [`ComputeBundleBuilder`] to create a compute bundle
 ///
-/// # Shader Format
+/// ## Shader Format
 ///
 /// The compute shader is suggested to be in the following form:
 ///
@@ -27,7 +29,7 @@ macro_rules! label_for_components {
 ///
 /// @compute @workgroup_size(workgroup_size)
 /// fn main(@builtin(global_invocation_id) id: vec3<u32>) {
-///     let index = id;
+///     let index = id.x;
 ///
 ///     if index >= arrayLength(&data) {
 ///         return;
