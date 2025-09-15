@@ -35,6 +35,7 @@ path = "examples/read_ply.rs"
 doc-scrape-examples = true
 
 [package.metadata.docs.rs]
+all-features = true
 cargo-args = ["-Zunstable-options", "-Zrustdoc-scrape-examples"]
 
 [dependencies]
