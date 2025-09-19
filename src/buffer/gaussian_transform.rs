@@ -66,10 +66,11 @@ impl GaussianTransformBuffer {
         display_mode: GaussianDisplayMode,
         sh_deg: GaussianShDegree,
         no_sh0: bool,
+        std_dev: f32,
     ) {
         self.update_with_pod(
             queue,
-            &GaussianTransformPod::new(size, display_mode, sh_deg, no_sh0),
+            &GaussianTransformPod::new(size, display_mode, sh_deg, no_sh0, std_dev),
         );
     }
 
@@ -109,7 +110,7 @@ impl FixedSizeBufferWrapper for GaussianTransformBuffer {
 pub struct GaussianTransformPod {
     pub size: f32,
 
-    /// \[display_mode, sh_deg, no_sh0, padding\]
+    /// \[display_mode, sh_deg, no_sh0, std_dev\]
     pub flags: U8Vec4,
 }
 
@@ -120,14 +121,16 @@ impl GaussianTransformPod {
         display_mode: GaussianDisplayMode,
         sh_deg: GaussianShDegree,
         no_sh0: bool,
+        std_dev: f32,
     ) -> Self {
         let display_mode = display_mode as u8;
         let sh_deg = sh_deg.0;
         let no_sh0 = no_sh0 as u8;
+        let std_dev = (std_dev / 3.0 * 255.0) as u8;
 
         Self {
             size,
-            flags: u8vec4(display_mode, sh_deg, no_sh0, 0),
+            flags: u8vec4(display_mode, sh_deg, no_sh0, std_dev),
         }
     }
 }
@@ -139,6 +142,7 @@ impl Default for GaussianTransformPod {
             GaussianDisplayMode::Splat,
             GaussianShDegree::new_unchecked(3),
             false,
+            3.0,
         )
     }
 }
