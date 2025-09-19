@@ -45,7 +45,7 @@ macro_rules! label_for_components {
 /// - The entry point function is suggested to have a parameter with
 ///   [`@builtin(global_invocation_id)`](https://www.w3.org/TR/WGSL/#global-invocation-id-builtin-value)
 ///   attribute to get the global invocation ID for indexing into the data.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ComputeBundle<B = wgpu::BindGroup> {
     /// The label of the compute bundle.
     label: Option<String>,
@@ -65,6 +65,10 @@ impl<B> ComputeBundle<B> {
     /// `index` refers to the index in [`ComputeBundle::bind_group_layouts`].
     ///
     /// Returns [`None`] if the `index` is out of bounds.
+    ///
+    /// As a good practice, if you are designing API for others to use, do not let the user
+    /// create bind groups manually as they will have to make sure the binding resources match
+    /// the layout.
     pub fn create_bind_group<'a>(
         &self,
         device: &wgpu::Device,
