@@ -16,4 +16,4 @@ This library provides helper functions and abstractions for working with 3D Gaus
 
 ## Examples
 
-See the [examples](./examples) directory for usage examples.
+See the [examples](https://github.com/LioQing/wgpu-3dgs-core/tree/master/examples) directory for usage examples.
