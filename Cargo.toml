@@ -12,7 +12,6 @@ include = [
     "LICENSE-APACHE",
     "CHANGELOG.md",
     "Cargo.toml",
-    "Cargo.lock",
     "src/**/*",
 ]
 repository = "https://github.com/LioQing/wgpu-3dgs-core"
