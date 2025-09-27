@@ -1,4 +1,10 @@
 //! This example reads a PLY file containing Gaussians and uploads them to a GPU buffer.
+//!
+//! Run with:
+//!
+//! ```sh
+//! cargo run --example write_ply -- "path/to/input.ply"
+//! ```
 
 use glam::*;
 use wgpu_3dgs_core::{self as gs, BufferWrapper};

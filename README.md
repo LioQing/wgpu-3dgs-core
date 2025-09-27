@@ -2,7 +2,11 @@
 
 ...written in Rust using [wgpu](https://wgpu.rs/).
 
-[![Crates.io](https://img.shields.io/crates/v/wgpu-3dgs-core)](https://crates.io/crates/wgpu-3dgs-core) [![Docs.rs](https://img.shields.io/docsrs/wgpu-3dgs-core)](https://docs.rs/wgpu-3dgs-core/latest/wgpu_3dgs_core) [![License](https://img.shields.io/crates/l/wgpu-3dgs-core)](https://crates.io/crates/wgpu-3dgs-core)
+[![Crates.io](https://img.shields.io/crates/v/wgpu-3dgs-core)](https://crates.io/crates/wgpu-3dgs-core)
+[![Docs.rs](https://img.shields.io/docsrs/wgpu-3dgs-core)](https://docs.rs/wgpu-3dgs-core/latest/wgpu_3dgs_core)
+[![Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fgithub.com%2FLioQing%2Fwgpu-3dgs-core%2Ftree%2Fmaster%2Fcoverage%2Fbadge.json
+)](https://github.com/LioQing/wgpu-3dgs-core/tree/master/coverage)
+[![License](https://img.shields.io/crates/l/wgpu-3dgs-core)](https://crates.io/crates/wgpu-3dgs-core)
 
 ## Overview
 
