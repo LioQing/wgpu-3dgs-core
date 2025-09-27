@@ -1,4 +1,10 @@
 //! This example generates a PLY file containing 3 hardcoded Gaussians.
+//!
+//! Run with:
+//!
+//! ```sh
+//! cargo run --example write_ply -- "path/to/output.ply"
+//! ```
 
 use glam::*;
 use wgpu_3dgs_core as gs;
@@ -6,7 +12,7 @@ use wgpu_3dgs_core as gs;
 fn main() {
     let model_path = std::env::args()
         .nth(1)
-        .unwrap_or_else(|| "target/out.ply".to_string());
+        .unwrap_or_else(|| "target/output.ply".to_string());
 
     let gaussians = gs::Gaussians {
         gaussians: vec![
