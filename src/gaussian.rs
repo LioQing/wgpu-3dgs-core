@@ -101,15 +101,20 @@ impl Gaussians {
                                 reader.read_line(&mut line)?;
 
                                 let mut gaussian = PlyGaussianPod::zeroed();
-                                line.split(' ')
-                                    .map(|s| s.parse::<f32>())
-                                    .zip(vertex.properties.keys())
-                                    .try_for_each(|(value, name)| match value {
-                                        Ok(value) => {
+                                vertex
+                                    .properties
+                                    .keys()
+                                    .zip(
+                                        line.split(' ')
+                                            .map(|s| Some(s.trim().parse::<f32>()))
+                                            .chain(std::iter::repeat(None)),
+                                    )
+                                    .try_for_each(|(name, value)| match value {
+                                        Some(Ok(value)) => {
                                             gaussian.set_value(name, value);
                                             Ok(())
                                         }
-                                        Err(_) => {
+                                        Some(Err(_)) | None => {
                                             Err(ReadPlyError::VertexPropertyNotFound(name.clone()))
                                         }
                                     })?;
@@ -136,8 +141,13 @@ impl Gaussians {
     ///
     /// See [`PLY_PROPERTIES`] for a list of the properties.
     pub fn write_ply(&self, writer: &mut impl Write) -> Result<(), std::io::Error> {
+        const SYSTEM_ENDIANNESS: ply_rs::ply::Encoding = match cfg!(target_endian = "little") {
+            true => ply_rs::ply::Encoding::BinaryLittleEndian,
+            false => ply_rs::ply::Encoding::BinaryBigEndian,
+        };
+
         writeln!(writer, "ply")?;
-        writeln!(writer, "format binary_little_endian 1.0")?;
+        writeln!(writer, "format {SYSTEM_ENDIANNESS} 1.0")?;
         writeln!(writer, "element vertex {}", self.gaussians.len())?;
         for property in PLY_PROPERTIES {
             writeln!(writer, "property float {property}")?;

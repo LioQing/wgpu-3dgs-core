@@ -7,6 +7,10 @@
 - 📑 Add example modules documentations.
 - 🧪 Add coverage script and reports.
 
+### Changed
+
+- 🐛 Fix `Gaussians::read_ply_gaussians` in specific scenario failed to read custom format.
+
 ## [0.4.0](https://crates.io/crates/wgpu-3dgs-core/0.4.0) - 2025-09-20
 
 ### Added

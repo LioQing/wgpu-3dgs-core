@@ -26,6 +26,8 @@ impl BufferWrapper for wgpu::Buffer {
 }
 
 /// A trait to enable any [`BufferWrapper`] to download the buffer data.
+///
+/// The buffer should be created with [`wgpu::BufferUsages::COPY_SRC`] usage.
 pub trait DownloadableBufferWrapper: BufferWrapper + Send + Sync {
     /// Download the buffer data.
     fn download<T: bytemuck::NoUninit + bytemuck::AnyBitPattern>(
@@ -77,7 +79,7 @@ pub trait DownloadableBufferWrapper: BufferWrapper + Send + Sync {
             let buffer_slice = download.slice(..);
             buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
                 if let Err(e) = tx.send(result) {
-                    log::error!("Error occurred while sending Gaussian selection: {e:?}");
+                    log::error!("Error occurred while sending buffer download data: {e:?}");
                 }
             });
             device.poll(wgpu::PollType::Wait)?;

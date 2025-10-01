@@ -253,6 +253,10 @@ pub trait GaussianPod:
     + Into<Gaussian>
     + Send
     + Sync
+    + std::fmt::Debug
+    + Clone
+    + Copy
+    + PartialEq
     + bytemuck::NoUninit
     + bytemuck::AnyBitPattern
 {
@@ -390,3 +394,146 @@ gaussian_pod!(sh = Norm8, cov3d = Half, padding_size = 0);
 gaussian_pod!(sh = None, cov3d = RotScale, padding_size = 1);
 gaussian_pod!(sh = None, cov3d = Single, padding_size = 2);
 gaussian_pod!(sh = None, cov3d = Half, padding_size = 1);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    macro_rules! test_pod_from_gaussian {
+        ($name:ident, $pod_type:ty, true) => {
+            paste::paste! {
+                #[test]
+                #[should_panic]
+                fn [<test_ $name _into_gaussian_should_panic>]() {
+                    let pod = $pod_type::from_gaussian(&Gaussian {
+                        rot: Quat::from_xyzw(0.0, 0.0, 0.0, 1.0),
+                        pos: Vec3::new(1.0, 2.0, 3.0),
+                        color: U8Vec4::new(255, 128, 64, 32),
+                        sh: [Vec3::new(0.1, 0.2, 0.3); 15],
+                        scale: Vec3::new(1.0, 2.0, 3.0),
+                    });
+
+                    pod.into_gaussian();
+                }
+            }
+        };
+        ($name:ident, $pod_type:ty, false) => {
+            paste::paste! {
+                #[test]
+                fn [<test_ $name _into_gaussian_should_equal_original_pod>]() {
+                    let pod = $pod_type::from_gaussian(&Gaussian {
+                        rot: Quat::from_xyzw(0.0, 0.0, 0.0, 1.0),
+                        pos: Vec3::new(1.0, 2.0, 3.0),
+                        color: U8Vec4::new(255, 128, 64, 32),
+                        sh: [Vec3::new(0.1, 0.2, 0.3); 15],
+                        scale: Vec3::new(1.0, 2.0, 3.0),
+                    });
+
+                    let gaussian = pod.into_gaussian();
+
+                    assert_eq!(pod.pos, gaussian.pos);
+                    assert_eq!(pod.color, gaussian.color);
+                    assert_eq!(
+                        pod.sh,
+                        <$pod_type as GaussianPod>::ShConfig::from_sh(&gaussian.sh),
+                    );
+                    assert_eq!(
+                        pod.cov3d,
+                        <$pod_type as GaussianPod>::Cov3dConfig::from_rot_scale(
+                            gaussian.rot,
+                            gaussian.scale
+                        ),
+                    );
+                }
+            }
+        };
+    }
+
+    macro_rules! test_pod {
+        ($name:ident, $pod_type:ty, $when_into_gaussian_should_panic:expr) => {
+            paste::paste! {
+                #[test]
+                fn [<test_ $name _from_gaussian_should_equal_original_gaussian>]() {
+                    let gaussian = Gaussian {
+                        rot: Quat::from_xyzw(0.0, 0.0, 0.0, 1.0),
+                        pos: Vec3::new(1.0, 2.0, 3.0),
+                        color: U8Vec4::new(255, 128, 64, 32),
+                        sh: [Vec3::new(0.1, 0.2, 0.3); 15],
+                        scale: Vec3::new(1.0, 2.0, 3.0),
+                    };
+
+                    let pod = $pod_type::from_gaussian(&gaussian);
+
+                    assert_eq!(gaussian.pos, pod.pos);
+                    assert_eq!(gaussian.color, pod.color);
+                    assert_eq!(
+                        <$pod_type as GaussianPod>::ShConfig::from_sh(&gaussian.sh),
+                        pod.sh,
+                    );
+                    assert_eq!(
+                        <$pod_type as GaussianPod>::Cov3dConfig::from_rot_scale(
+                            gaussian.rot,
+                            gaussian.scale
+                        ),
+                        pod.cov3d,
+                    );
+                }
+
+                test_pod_from_gaussian!($name, $pod_type, $when_into_gaussian_should_panic);
+
+                #[test]
+                fn [<test_ $name _features_should_be_correct>]() {
+                    let features = <$pod_type as GaussianPod>::features();
+
+                    for (name, enabled) in features {
+                        if name == <$pod_type as GaussianPod>::ShConfig::FEATURE
+                            || name == <$pod_type as GaussianPod>::Cov3dConfig::FEATURE
+                        {
+                            assert!(enabled, "Feature {name} should be enabled");
+                        } else {
+                            assert!(!enabled, "Feature {name} should be disabled");
+                        }
+                    }
+                }
+
+                #[test]
+                fn [<test_ $name _wesl_features_should_be_correct>]() {
+                    let wesl_features = <$pod_type as GaussianPod>::wesl_features();
+                    let features = <$pod_type as GaussianPod>::features();
+
+                    for (name, enabled) in features {
+                        let wesl_enabled = wesl_features
+                            .flags
+                            .get(name)
+                            .map(|v| *v == wesl::Feature::Enable)
+                            .unwrap_or(false);
+
+                        assert_eq!(
+                            enabled, wesl_enabled,
+                            "Feature {name} should be {}",
+                            if enabled { "enabled" } else { "disabled" }
+                        );
+                    }
+                }
+            }
+        };
+    }
+
+    #[rustfmt::skip]
+    mod pod {
+        use super::*;
+
+        test_pod!(single_rotscale, GaussianPodWithShSingleCov3dRotScaleConfigs, false);
+        test_pod!(single_single, GaussianPodWithShSingleCov3dSingleConfigs, true);
+        test_pod!(single_half, GaussianPodWithShSingleCov3dHalfConfigs, true);
+        test_pod!(half_rotscale, GaussianPodWithShHalfCov3dRotScaleConfigs, false);
+        test_pod!(test_half_single, GaussianPodWithShHalfCov3dSingleConfigs, true);
+        test_pod!(test_half_half, GaussianPodWithShHalfCov3dHalfConfigs, true);
+        test_pod!(norm8_rotscale, GaussianPodWithShNorm8Cov3dRotScaleConfigs, false);
+        test_pod!(norm8_single, GaussianPodWithShNorm8Cov3dSingleConfigs, true);
+        test_pod!(norm8_half, GaussianPodWithShNorm8Cov3dHalfConfigs, true);
+        test_pod!(none_rotscale, GaussianPodWithShNoneCov3dRotScaleConfigs, true);
+        test_pod!(none_single, GaussianPodWithShNoneCov3dSingleConfigs, true);
+        test_pod!(none_half, GaussianPodWithShNoneCov3dHalfConfigs, true);
+    }
+}
