@@ -47,7 +47,7 @@ const TEST_PACKAGE: wesl::Pkg = inline_wesl_pkg!(
     }
 );
 
-const TEST_PKG_BIND_GROUP_LAYOUTS: wgpu::BindGroupLayoutDescriptor<'static> =
+const TEST_PACKAGE_BIND_GROUP_LAYOUTS: wgpu::BindGroupLayoutDescriptor<'static> =
     wgpu::BindGroupLayoutDescriptor {
         label: Some("Test Package Bind Group Layout"),
         entries: &[
@@ -104,7 +104,7 @@ fn test_gaussian_transform_wesl_functions_should_return_correct_values() {
     });
 
     let bundle = ComputeBundleBuilder::new()
-        .bind_group_layout(&TEST_PKG_BIND_GROUP_LAYOUTS)
+        .bind_group_layout(&TEST_PACKAGE_BIND_GROUP_LAYOUTS)
         .resolver({
             let mut resolver = wesl::PkgResolver::new();
             resolver.add_package(&TEST_PACKAGE);

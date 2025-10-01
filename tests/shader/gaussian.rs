@@ -59,7 +59,7 @@ const TEST_PACKAGE: wesl::Pkg = inline_wesl_pkg!(
     }
 );
 
-const TEST_PKG_BIND_GROUP_LAYOUTS: wgpu::BindGroupLayoutDescriptor<'static> =
+const TEST_PACKAGE_BIND_GROUP_LAYOUTS: wgpu::BindGroupLayoutDescriptor<'static> =
     wgpu::BindGroupLayoutDescriptor {
         label: Some("Test Package Bind Group Layout"),
         entries: &[
@@ -118,7 +118,7 @@ fn dispatch_test<G: GaussianPod>(ctx: &TestContext, buffer: &GaussiansBuffer<G>)
     });
 
     let bundle = ComputeBundleBuilder::new()
-        .bind_group_layout(&TEST_PKG_BIND_GROUP_LAYOUTS)
+        .bind_group_layout(&TEST_PACKAGE_BIND_GROUP_LAYOUTS)
         .resolver({
             let mut resolver = wesl::PkgResolver::new();
             resolver.add_package(&TEST_PACKAGE);

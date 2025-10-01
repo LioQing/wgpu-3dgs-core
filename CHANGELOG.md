@@ -5,7 +5,8 @@
 ### Added
 
 - 📑 Add example modules documentations.
-- 🧪 Add coverage script and reports.
+- ✅ Add coverage script and reports.
+- 🧪 Add tests.
 
 ### Changed
 
