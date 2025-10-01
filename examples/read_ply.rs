@@ -11,41 +11,43 @@ use wgpu_3dgs_core::{self as gs, BufferWrapper};
 
 type GaussianPod = gs::GaussianPodWithShHalfCov3dHalfConfigs;
 
-#[tokio::main]
-async fn main() {
-    let model_path = std::env::args()
-        .nth(1)
-        .unwrap_or_else(|| "in.ply".to_string());
+fn main() {
+    pollster::block_on(async {
+        let model_path = std::env::args()
+            .nth(1)
+            .unwrap_or_else(|| "in.ply".to_string());
 
-    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
 
-    let adapter = instance
-        .request_adapter(&wgpu::RequestAdapterOptions::default())
-        .await
-        .expect("adapter");
+        let adapter = instance
+            .request_adapter(&wgpu::RequestAdapterOptions::default())
+            .await
+            .expect("adapter");
 
-    let (device, _) = adapter
-        .request_device(&wgpu::DeviceDescriptor {
-            label: Some("Device"),
-            required_features: wgpu::Features::empty(),
-            required_limits: adapter.limits(),
-            memory_hints: wgpu::MemoryHints::default(),
-            trace: wgpu::Trace::Off,
-        })
-        .await
-        .expect("device");
+        let (device, _) = adapter
+            .request_device(&wgpu::DeviceDescriptor {
+                label: Some("Device"),
+                required_features: wgpu::Features::empty(),
+                required_limits: adapter.limits(),
+                memory_hints: wgpu::MemoryHints::default(),
+                trace: wgpu::Trace::Off,
+            })
+            .await
+            .expect("device");
 
-    println!("Reading gaussians from {}", model_path);
+        println!("Reading gaussians from {}", model_path);
 
-    let f = std::fs::File::open(model_path).expect("ply file");
-    let mut reader = std::io::BufReader::new(f);
-    let gaussians = gs::Gaussians::read_ply(&mut reader).expect("gaussians");
+        let f = std::fs::File::open(model_path).expect("ply file");
+        let mut reader = std::io::BufReader::new(f);
+        let gaussians = gs::Gaussians::read_ply(&mut reader).expect("gaussians");
 
-    let gaussians_buffer = gs::GaussiansBuffer::<GaussianPod>::new(&device, &gaussians.gaussians);
+        let gaussians_buffer =
+            gs::GaussiansBuffer::<GaussianPod>::new(&device, &gaussians.gaussians);
 
-    println!(
-        "Loaded {} gaussians ({:.3} KB) into GPU buffer.",
-        gaussians_buffer.len(),
-        gaussians_buffer.buffer().size() as f32 / 1024.0,
-    );
+        println!(
+            "Loaded {} gaussians ({:.3} KB) into GPU buffer.",
+            gaussians_buffer.len(),
+            gaussians_buffer.buffer().size() as f32 / 1024.0,
+        );
+    });
 }

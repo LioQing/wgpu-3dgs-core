@@ -104,7 +104,8 @@ impl ply_rs::ply::PropertyAccess for PlyGaussianPod {
 
     fn set_property(&mut self, property_name: String, property: ply_rs::ply::Property) {
         let ply_rs::ply::Property::Float(value) = property else {
-            panic!("Expected float property");
+            log::error!("Property {property_name} is not a float");
+            return;
         };
 
         self.set_value(&property_name, value);
@@ -148,6 +149,8 @@ pub enum PlyGaussianIter<
     Inria(I),
 
     /// Custom PLY format.
+    ///
+    /// This still is the same properties as Inria format, but may have different order.
     Custom(C),
 }
 

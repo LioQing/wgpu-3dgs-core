@@ -15,9 +15,8 @@ cargo llvm-cov run --example read-ply -- "$BASE_DIR/model.ply"
 # echo "Running doctests"
 # cargo llvm-cov --no-report --doctests
 
-# No tests for now
-# echo "Running tests"
-# cargo llvm-cov --no-report nextest
+echo "Running tests"
+cargo llvm-cov --no-report nextest
 
 echo "Generating coverage report"
 cargo llvm-cov report --lcov --output-path "$LCOV_PATH"
@@ -35,7 +34,13 @@ Select-String -Path "$LCOV_PATH" -Pattern "DA:" | ForEach-Object {
 }
 
 $badge_percentage = if ($total -eq 0) { 100 } else { [math]::Round(($covered / $total) * 100) }
-$badge_color = if ($percentage -ge 80) { "brightgreen" } elseif ($percentage -ge 50) { "yellow" } else { "red" }
+$badge_color = if ($badge_percentage -ge 80) {
+    "brightgreen"
+} elseif ($badge_percentage -ge 50) {
+    "yellow"
+} else {
+    "red"
+}
 
 "{
     `"schemaVersion`": 1,
