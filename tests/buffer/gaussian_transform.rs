@@ -1,4 +1,5 @@
 use assert_matches::assert_matches;
+use wgpu::util::DeviceExt;
 use wgpu_3dgs_core::{
     BufferWrapper, DownloadableBufferWrapper, GaussianDisplayMode, GaussianShDegree,
     GaussianTransformBuffer, GaussianTransformPod,
@@ -80,15 +81,23 @@ fn test_gaussian_transform_buffer_update_should_update_buffer_correctly() {
 #[test]
 fn test_gaussian_transform_buffer_try_from_and_into_wgpu_buffer_should_be_equal() {
     let ctx = TestContext::new();
-    let buffer = ctx.device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("Test Gaussian Transform Buffer"),
-        size: std::mem::size_of::<GaussianTransformPod>() as wgpu::BufferAddress,
-        usage: GaussianTransformBuffer::DEFAULT_USAGES | wgpu::BufferUsages::COPY_SRC,
-        mapped_at_creation: false,
-    });
-    let wgpu_buffer = buffer.buffer().clone();
+    let pod = GaussianTransformPod::new(
+        1.0,
+        GaussianDisplayMode::Ellipse,
+        GaussianShDegree::new(2).unwrap(),
+        true,
+        2.0,
+    );
+    let wgpu_buffer = ctx
+        .device
+        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Test Gaussian Transform Buffer"),
+            contents: bytemuck::bytes_of(&pod),
+            usage: GaussianTransformBuffer::DEFAULT_USAGES | wgpu::BufferUsages::COPY_SRC,
+        });
 
-    let converted_buffer = GaussianTransformBuffer::try_from(buffer).expect("try_from");
+    let converted_buffer =
+        GaussianTransformBuffer::try_from(wgpu_buffer.clone()).expect("try_from");
     let wgpu_converted_buffer = wgpu::Buffer::from(converted_buffer.clone());
 
     let wgpu_downloaded = pollster::block_on(

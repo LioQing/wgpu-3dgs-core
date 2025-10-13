@@ -51,7 +51,7 @@ const TEST_PACKAGE: wesl::Pkg = inline_wesl_pkg!(
     }
 );
 
-const TEST_PACKAGE_BIND_GROUP_LAYOUTS: wgpu::BindGroupLayoutDescriptor<'static> =
+const TEST_PACKAGE_BIND_GROUP_LAYOUT: wgpu::BindGroupLayoutDescriptor<'static> =
     wgpu::BindGroupLayoutDescriptor {
         label: Some("Test Package Bind Group Layout"),
         entries: &[
@@ -127,7 +127,7 @@ fn test_model_transform_wesl_functions_should_return_correct_values() {
     });
 
     let bundle = ComputeBundleBuilder::new()
-        .bind_group_layout(&TEST_PACKAGE_BIND_GROUP_LAYOUTS)
+        .bind_group_layout(&TEST_PACKAGE_BIND_GROUP_LAYOUT)
         .resolver({
             let mut resolver = wesl::PkgResolver::new();
             resolver.add_package(&TEST_PACKAGE);
@@ -144,7 +144,7 @@ fn test_model_transform_wesl_functions_should_return_correct_values() {
                 output_buffer.as_entire_binding(),
             ]],
         )
-        .expect("build_without_bind_groups");
+        .expect("build");
 
     let mut encoder = ctx
         .device
