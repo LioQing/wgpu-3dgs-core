@@ -1,4 +1,5 @@
 use glam::*;
+use wgpu::util::DeviceExt;
 use wgpu_3dgs_core::{
     BufferWrapper, DownloadableBufferWrapper, ModelTransformBuffer, ModelTransformPod,
 };
@@ -45,15 +46,20 @@ fn test_model_transform_buffer_update_should_update_buffer_correctly() {
 #[test]
 fn test_model_transform_buffer_try_from_and_into_wgpu_buffer_should_be_equal() {
     let ctx = TestContext::new();
-    let buffer = ctx.device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("Test Model Transform Buffer"),
-        size: std::mem::size_of::<ModelTransformPod>() as wgpu::BufferAddress,
-        usage: ModelTransformBuffer::DEFAULT_USAGES | wgpu::BufferUsages::COPY_SRC,
-        mapped_at_creation: false,
-    });
-    let wgpu_buffer = buffer.buffer().clone();
+    let pod = ModelTransformPod::new(
+        Vec3::new(1.0, 2.0, 3.0),
+        Quat::from_rotation_y(std::f32::consts::PI / 4.0),
+        Vec3::new(2.0, 3.0, 4.0),
+    );
+    let wgpu_buffer = ctx
+        .device
+        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Test Model Transform Buffer"),
+            contents: bytemuck::bytes_of(&pod),
+            usage: ModelTransformBuffer::DEFAULT_USAGES | wgpu::BufferUsages::COPY_SRC,
+        });
 
-    let converted_buffer = ModelTransformBuffer::try_from(buffer).expect("try_from");
+    let converted_buffer = ModelTransformBuffer::try_from(wgpu_buffer.clone()).expect("try_from");
     let wgpu_converted_buffer = wgpu::Buffer::from(converted_buffer.clone());
 
     let wgpu_downloaded = pollster::block_on(
