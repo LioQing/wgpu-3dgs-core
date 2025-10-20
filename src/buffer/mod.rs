@@ -56,7 +56,7 @@ pub trait DownloadableBufferWrapper: BufferWrapper + Send + Sync {
         encoder: &mut wgpu::CommandEncoder,
     ) -> wgpu::Buffer {
         let download = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some(format!("Selection Download Buffer").as_str()),
+            label: Some("Selection Download Buffer"),
             size: self.buffer().size(),
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
             mapped_at_creation: false,
