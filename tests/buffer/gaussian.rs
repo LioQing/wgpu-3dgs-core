@@ -12,9 +12,7 @@ use crate::{
 fn test_gaussians_buffer_new_should_return_correct_buffer() {
     fn body<G: GaussianPod>() {
         let ctx = TestContext::new();
-        let gaussians = (0..3)
-            .map(|i| given::gaussian_with_seed(i))
-            .collect::<Vec<_>>();
+        let gaussians = (0..3).map(given::gaussian_with_seed).collect::<Vec<_>>();
         let size = (std::mem::size_of::<G>() * gaussians.len()) as u64;
         let gaussians_buffer = GaussiansBuffer::<G>::new(&ctx.device, &gaussians);
 
@@ -28,9 +26,7 @@ fn test_gaussians_buffer_new_should_return_correct_buffer() {
 fn test_gaussians_buffer_new_with_usage_should_return_correct_buffer() {
     fn body<G: GaussianPod>() {
         let ctx = TestContext::new();
-        let gaussians = (0..3)
-            .map(|i| given::gaussian_with_seed(i))
-            .collect::<Vec<_>>();
+        let gaussians = (0..3).map(given::gaussian_with_seed).collect::<Vec<_>>();
         let gaussian_pods = gaussians.iter().map(|g| G::from(g)).collect::<Vec<_>>();
         let usage = wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST;
         let gaussians_buffer = GaussiansBuffer::<G>::new_with_usage(&ctx.device, &gaussians, usage);
@@ -49,9 +45,7 @@ fn test_gaussians_buffer_new_with_usage_should_return_correct_buffer() {
 fn test_gaussians_buffer_new_with_pods_should_return_correct_buffer() {
     fn body<G: GaussianPod>() {
         let ctx = TestContext::new();
-        let gaussians = (0..3)
-            .map(|i| given::gaussian_with_seed(i))
-            .collect::<Vec<_>>();
+        let gaussians = (0..3).map(given::gaussian_with_seed).collect::<Vec<_>>();
         let gaussian_pods = gaussians.iter().map(|g| G::from(g)).collect::<Vec<_>>();
         let size = (std::mem::size_of::<G>() * gaussian_pods.len()) as u64;
         let gaussians_buffer = GaussiansBuffer::<G>::new_with_pods(&ctx.device, &gaussian_pods);
@@ -66,9 +60,7 @@ fn test_gaussians_buffer_new_with_pods_should_return_correct_buffer() {
 fn test_gaussians_buffer_new_with_pods_and_usage_should_return_correct_buffer() {
     fn body<G: GaussianPod>() {
         let ctx = TestContext::new();
-        let gaussians = (0..3)
-            .map(|i| given::gaussian_with_seed(i))
-            .collect::<Vec<_>>();
+        let gaussians = (0..3).map(given::gaussian_with_seed).collect::<Vec<_>>();
         let gaussian_pods = gaussians.iter().map(|g| G::from(g)).collect::<Vec<_>>();
         let usage = wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST;
         let gaussians_buffer =
@@ -119,9 +111,7 @@ fn test_gaussians_buffer_new_empty_with_usage_should_return_correct_buffer() {
 fn test_gaussians_buffer_len_should_return_correct_length() {
     fn body<G: GaussianPod>() {
         let ctx = TestContext::new();
-        let gaussians = (0..3)
-            .map(|i| given::gaussian_with_seed(i))
-            .collect::<Vec<_>>();
+        let gaussians = (0..3).map(given::gaussian_with_seed).collect::<Vec<_>>();
         let gaussians_buffer = GaussiansBuffer::<G>::new(&ctx.device, &gaussians);
 
         assert_eq!(gaussians_buffer.len(), gaussians.len());
@@ -134,9 +124,7 @@ fn test_gaussians_buffer_len_should_return_correct_length() {
 fn test_gaussians_buffer_is_empty_should_return_correct_value() {
     fn body<G: GaussianPod>() {
         let ctx = TestContext::new();
-        let gaussians = (0..3)
-            .map(|i| given::gaussian_with_seed(i))
-            .collect::<Vec<_>>();
+        let gaussians = (0..3).map(given::gaussian_with_seed).collect::<Vec<_>>();
         let gaussians_buffer = GaussiansBuffer::<G>::new(&ctx.device, &gaussians);
         let empty_gaussians_buffer = GaussiansBuffer::<G>::new_empty(&ctx.device, 0);
 
@@ -151,12 +139,8 @@ fn test_gaussians_buffer_is_empty_should_return_correct_value() {
 fn test_gaussians_buffer_update_should_update_buffer_correctly() {
     fn body<G: GaussianPod>() {
         let ctx = TestContext::new();
-        let gaussians = (0..3)
-            .map(|i| given::gaussian_with_seed(i))
-            .collect::<Vec<_>>();
-        let new_gaussians = (3..6)
-            .map(|i| given::gaussian_with_seed(i))
-            .collect::<Vec<_>>();
+        let gaussians = (0..3).map(given::gaussian_with_seed).collect::<Vec<_>>();
+        let new_gaussians = (3..6).map(given::gaussian_with_seed).collect::<Vec<_>>();
         let gaussian_pods = new_gaussians.iter().map(|g| G::from(g)).collect::<Vec<_>>();
         let gaussians_buffer = GaussiansBuffer::<G>::new_with_usage(
             &ctx.device,
@@ -181,12 +165,8 @@ fn test_gaussians_buffer_update_should_update_buffer_correctly() {
 fn test_gaussians_buffer_update_when_new_data_length_is_different_should_return_error() {
     fn body<G: GaussianPod>() {
         let ctx = TestContext::new();
-        let gaussians = (0..3)
-            .map(|i| given::gaussian_with_seed(i))
-            .collect::<Vec<_>>();
-        let new_gaussians = (3..5)
-            .map(|i| given::gaussian_with_seed(i))
-            .collect::<Vec<_>>();
+        let gaussians = (0..3).map(given::gaussian_with_seed).collect::<Vec<_>>();
+        let new_gaussians = (3..5).map(given::gaussian_with_seed).collect::<Vec<_>>();
         let gaussians_buffer = GaussiansBuffer::<G>::new_with_usage(
             &ctx.device,
             &gaussians,
@@ -213,12 +193,8 @@ fn test_gaussians_buffer_update_range_should_update_buffer_correctly() {
         const START_INDEX: usize = 2;
 
         let ctx = TestContext::new();
-        let gaussians = (0..10)
-            .map(|i| given::gaussian_with_seed(i))
-            .collect::<Vec<_>>();
-        let new_partial_gaussians = (10..15)
-            .map(|i| given::gaussian_with_seed(i))
-            .collect::<Vec<_>>();
+        let gaussians = (0..10).map(given::gaussian_with_seed).collect::<Vec<_>>();
+        let new_partial_gaussians = (10..15).map(given::gaussian_with_seed).collect::<Vec<_>>();
         let gaussian_pods = gaussians
             .iter()
             .take(START_INDEX)
@@ -253,9 +229,7 @@ fn test_gaussians_buffer_update_range_should_update_buffer_correctly() {
 fn test_gaussians_buffer_download_gaussians_should_download_buffer_successfully() {
     fn body<G: GaussianPod>() {
         let ctx = TestContext::new();
-        let gaussians = (0..3)
-            .map(|i| given::gaussian_with_seed(i))
-            .collect::<Vec<_>>();
+        let gaussians = (0..3).map(given::gaussian_with_seed).collect::<Vec<_>>();
         let gaussians_buffer = GaussiansBuffer::<G>::new_with_usage(
             &ctx.device,
             &gaussians,
@@ -286,9 +260,7 @@ mod test_gaussians_buffer_download_gaussians_when_configs_unsupported_should_pan
 
     pub(crate) fn body<G: GaussianPod>() {
         let ctx = TestContext::new();
-        let gaussians = (0..3)
-            .map(|i| given::gaussian_with_seed(i))
-            .collect::<Vec<_>>();
+        let gaussians = (0..3).map(given::gaussian_with_seed).collect::<Vec<_>>();
         let gaussians_buffer = GaussiansBuffer::<G>::new_with_usage(
             &ctx.device,
             &gaussians,
@@ -375,9 +347,7 @@ fn test_gaussians_buffer_download_gaussians_when_sh_none_cov3d_half_should_panic
 fn test_gaussians_buffer_try_from_and_into_wgpu_buffer_should_be_equal() {
     fn body<G: GaussianPod>() {
         let ctx = TestContext::new();
-        let gaussians = (0..3)
-            .map(|i| given::gaussian_with_seed(i))
-            .collect::<Vec<_>>();
+        let gaussians = (0..3).map(given::gaussian_with_seed).collect::<Vec<_>>();
         let gaussians_buffer = GaussiansBuffer::<G>::new_with_usage(
             &ctx.device,
             &gaussians,

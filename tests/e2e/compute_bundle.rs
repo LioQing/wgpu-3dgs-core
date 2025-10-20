@@ -157,7 +157,7 @@ fn test_compute_bundle_when_all_options_and_without_bind_group_should_run_correc
             ..Default::default()
         });
 
-        pass.set_pipeline(&bundle.pipeline());
+        pass.set_pipeline(bundle.pipeline());
 
         for (i, group) in bind_groups.iter().enumerate() {
             pass.set_bind_group(i as u32, group, &[]);

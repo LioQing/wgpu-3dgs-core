@@ -229,7 +229,10 @@ impl<G: GaussianPod> TryFrom<wgpu::Buffer> for GaussiansBuffer<G> {
     type Error = GaussiansBufferTryFromBufferError;
 
     fn try_from(buffer: wgpu::Buffer) -> Result<Self, Self::Error> {
-        if buffer.size() % std::mem::size_of::<G>() as wgpu::BufferAddress != 0 {
+        if !buffer
+            .size()
+            .is_multiple_of(std::mem::size_of::<G>() as wgpu::BufferAddress)
+        {
             return Err(GaussiansBufferTryFromBufferError::BufferSizeNotMultiple {
                 buffer_size: buffer.size(),
                 expected_multiple_size: std::mem::size_of::<G>() as wgpu::BufferAddress,

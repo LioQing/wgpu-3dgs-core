@@ -164,14 +164,11 @@ impl ComputeBundle {
             });
         }
 
-        log::debug!(
-            "Creating {} bind groups",
-            label.as_deref().unwrap_or("compute bundle")
-        );
+        log::debug!("Creating {} bind groups", label.unwrap_or("compute bundle"));
         let bind_groups = this
             .bind_group_layouts
             .iter()
-            .zip(resources.into_iter())
+            .zip(resources)
             .enumerate()
             .map(|(i, (layout, resources))| {
                 ComputeBundle::create_bind_group_static(this.label(), device, i, layout, resources)
@@ -272,7 +269,7 @@ impl ComputeBundle<()> {
 
         log::debug!(
             "Creating {} bind group layouts",
-            label.as_deref().unwrap_or("compute bundle")
+            label.unwrap_or("compute bundle")
         );
         let bind_group_layouts = bind_group_layout_descriptors
             .into_iter()
@@ -281,7 +278,7 @@ impl ComputeBundle<()> {
 
         log::debug!(
             "Creating {} pipeline layout",
-            label.as_deref().unwrap_or("compute bundle"),
+            label.unwrap_or("compute bundle"),
         );
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some(label_for_components!(label, "Pipeline Layout").as_str()),
@@ -291,7 +288,7 @@ impl ComputeBundle<()> {
 
         log::debug!(
             "Creating {} shader module",
-            label.as_deref().unwrap_or("compute bundle"),
+            label.unwrap_or("compute bundle"),
         );
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some(label_for_components!(label, "Shader").as_str()),
@@ -309,10 +306,7 @@ impl ComputeBundle<()> {
             zero_initialize_workgroup_memory: compilation_options.zero_initialize_workgroup_memory,
         };
 
-        log::debug!(
-            "Creating {} pipeline",
-            label.as_deref().unwrap_or("compute bundle"),
-        );
+        log::debug!("Creating {} pipeline", label.unwrap_or("compute bundle"),);
         let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some(label_for_components!(label, "Pipeline").as_str()),
             layout: Some(&pipeline_layout),
@@ -322,7 +316,7 @@ impl ComputeBundle<()> {
             cache: None,
         });
 
-        log::info!("{} created", label.as_deref().unwrap_or("Compute Bundle"));
+        log::info!("{} created", label.unwrap_or("Compute Bundle"));
 
         Self {
             label: label.map(String::from),
@@ -502,7 +496,7 @@ impl<'a, R: wesl::Resolver> ComputeBundleBuilder<'a, R> {
 
         let shader_source = wgpu::ShaderSource::Wgsl(
             wesl::compile_sourcemap(
-                &main_shader.into(),
+                &main_shader,
                 &resolver,
                 &self.mangler,
                 &self.wesl_compile_options,
@@ -546,7 +540,7 @@ impl<'a, R: wesl::Resolver> ComputeBundleBuilder<'a, R> {
 
         let shader_source = wgpu::ShaderSource::Wgsl(
             wesl::compile_sourcemap(
-                &main_shader.into(),
+                &main_shader,
                 &resolver,
                 &self.mangler,
                 &self.wesl_compile_options,
