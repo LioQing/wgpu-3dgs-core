@@ -47,5 +47,8 @@ fn main() {
     );
 
     let mut file = std::fs::File::create(model_path).expect("created file");
-    gaussians.write_ply(&mut file).expect("write PLY file");
+    gaussians
+        .convert::<gs::PlyGaussianPod>()
+        .write_ply(&mut file)
+        .expect("write PLY file");
 }
