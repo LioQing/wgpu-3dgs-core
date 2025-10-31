@@ -1,6 +1,6 @@
 use bytemuck::Zeroable;
 
-use crate::ReadPlyError;
+use crate::{Gaussian, ReadPlyError};
 
 /// The POD representation of Gaussian in PLY format.
 ///
@@ -109,6 +109,18 @@ impl ply_rs::ply::PropertyAccess for PlyGaussianPod {
         };
 
         self.set_value(&property_name, value);
+    }
+}
+
+impl From<Gaussian> for PlyGaussianPod {
+    fn from(gaussian: Gaussian) -> Self {
+        gaussian.to_ply()
+    }
+}
+
+impl From<&Gaussian> for PlyGaussianPod {
+    fn from(gaussian: &Gaussian) -> Self {
+        gaussian.to_ply()
     }
 }
 

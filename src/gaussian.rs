@@ -9,12 +9,66 @@ use crate::{PlyGaussianIter, PlyGaussianPod, PlyHeader, ReadPlyError};
 ///
 /// This is a simple wrapper around a [`Vec`] of [`Gaussian`].
 #[derive(Debug, Clone)]
-pub struct Gaussians {
+pub struct Gaussians<Source>
+where
+    for<'a> &'a Source: Into<Gaussian>,
+{
     /// The Gaussians.
-    pub gaussians: Vec<Gaussian>,
+    pub gaussians: Vec<Source>,
 }
 
-impl Gaussians {
+impl<Source> Gaussians<Source>
+where
+    for<'a> &'a Source: Into<Gaussian>,
+{
+    /// Create a new Gaussians.
+    pub fn new(gaussians: Vec<Source>) -> Self {
+        Self { gaussians }
+    }
+
+    /// Iterate over [`Gaussian`].
+    pub fn iter(&self) -> impl Iterator<Item = Gaussian> + '_ {
+        self.gaussians.iter().map(Into::into)
+    }
+
+    /// Get the number of Gaussians.
+    pub fn len(&self) -> usize {
+        self.gaussians.len()
+    }
+
+    /// Check if there are no Gaussians.
+    pub fn is_empty(&self) -> bool {
+        self.gaussians.is_empty()
+    }
+
+    /// Convert to Gaussians of another source type.
+    pub fn convert<Dest>(&self) -> Gaussians<Dest>
+    where
+        for<'a> &'a Source: Into<Dest>,
+        for<'a> &'a Dest: Into<Gaussian>,
+    {
+        Gaussians {
+            gaussians: self
+                .gaussians
+                .iter()
+                .map(|g| Into::<Dest>::into(g))
+                .collect::<Vec<_>>(),
+        }
+    }
+}
+
+impl<Source> FromIterator<Source> for Gaussians<Source>
+where
+    for<'a> &'a Source: Into<Gaussian>,
+{
+    fn from_iter<T: IntoIterator<Item = Source>>(iter: T) -> Self {
+        Gaussians {
+            gaussians: iter.into_iter().collect(),
+        }
+    }
+}
+
+impl Gaussians<PlyGaussianPod> {
     /// Read a PLY file.
     ///
     /// The PLY file is expected to be the same format as the one used in the original Inria
@@ -28,7 +82,7 @@ impl Gaussians {
         let mut gaussians = Vec::with_capacity(count);
 
         for gaussian in Self::read_ply_gaussians(reader, ply_header)? {
-            gaussians.push(gaussian?.into());
+            gaussians.push(gaussian?);
         }
 
         Ok(Self { gaussians })
@@ -156,8 +210,7 @@ impl Gaussians {
 
         self.gaussians
             .iter()
-            .map(|gaussian| gaussian.to_ply())
-            .try_for_each(|gaussian| writer.write_all(bytemuck::bytes_of(&gaussian)))?;
+            .try_for_each(|gaussian| writer.write_all(bytemuck::bytes_of(gaussian)))?;
 
         Ok(())
     }
@@ -165,7 +218,8 @@ impl Gaussians {
 
 /// The Gaussian.
 ///
-/// This is the representation used by the CPU.
+/// This is an intermediate representation used by the CPU to convert to
+/// [`GaussianPod`](crate::GaussianPod).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Gaussian {
     pub rot: Quat,
@@ -244,6 +298,12 @@ impl Gaussian {
             scale,
             rot,
         }
+    }
+}
+
+impl From<&Gaussian> for Gaussian {
+    fn from(gaussian: &Gaussian) -> Self {
+        *gaussian
     }
 }
 

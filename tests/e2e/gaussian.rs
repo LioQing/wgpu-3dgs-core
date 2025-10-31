@@ -3,17 +3,17 @@ use std::io::Write;
 use assert_matches::assert_matches;
 use wgpu_3dgs_core::{Gaussian, Gaussians, PLY_PROPERTIES, PlyGaussianPod, ReadPlyError, glam::*};
 
-use crate::common::given;
+use crate::common::{assert, given};
 
 fn given_custom_gaussians_ply_buffer(
-    gaussians: &[Gaussian],
+    plys: &[PlyGaussianPod],
     endianness: ply_rs::ply::Encoding,
 ) -> Vec<u8> {
     let mut buffer = Vec::new();
 
     writeln!(buffer, "ply").unwrap();
     writeln!(buffer, "format {} 1.0", endianness).unwrap();
-    writeln!(buffer, "element vertex {}", gaussians.len()).unwrap();
+    writeln!(buffer, "element vertex {}", plys.len()).unwrap();
 
     let mut properties = PLY_PROPERTIES.to_vec();
     properties.swap(1, 2); // Swap y and z to be different from Inria format.
@@ -23,9 +23,7 @@ fn given_custom_gaussians_ply_buffer(
     }
     writeln!(buffer, "end_header").unwrap();
 
-    for gaussian in gaussians.iter() {
-        let mut ply = gaussian.to_ply();
-
+    for mut ply in plys.iter().copied() {
         ply.pos.swap(1, 2); // Swap y and z to be different from Inria format.
 
         match endianness {
@@ -73,6 +71,7 @@ fn assert_gaussian(a: &Gaussian, b: &Gaussian) {
         a.rot,
         b.rot
     );
+
     assert!(
         a.pos.abs_diff_eq(b.pos, EPSILON),
         " left: {:?}\nright: {:?}",
@@ -80,8 +79,7 @@ fn assert_gaussian(a: &Gaussian, b: &Gaussian) {
         b.pos
     );
 
-    // TODO(#2): Lost of precision is caused by conversion from file format to memory format.
-    // assert_eq!(a.color, b.color);
+    assert_eq!(a.color, b.color);
 
     for i in 0..15 {
         assert!(
@@ -102,7 +100,7 @@ fn assert_gaussian(a: &Gaussian, b: &Gaussian) {
 
 #[test]
 fn test_gaussians_write_ply_and_read_ply_should_be_equal() {
-    let gaussians = given::gaussians();
+    let gaussians = given::gaussians().convert::<PlyGaussianPod>();
 
     let mut buffer = Vec::new();
     gaussians.write_ply(&mut buffer).unwrap();
@@ -115,25 +113,25 @@ fn test_gaussians_write_ply_and_read_ply_should_be_equal() {
         .iter()
         .zip(gaussians_read.gaussians.iter())
     {
-        assert_gaussian(a, b);
+        assert::ply_gaussian_pod(a, b);
     }
 }
 
 #[test]
 fn test_gaussians_read_ply_when_format_is_custom_and_ascii_should_match_original_gaussian() {
-    let gaussians = given::gaussians();
+    let gaussians = given::gaussians().convert::<PlyGaussianPod>();
     let buffer =
         given_custom_gaussians_ply_buffer(&gaussians.gaussians, ply_rs::ply::Encoding::Ascii);
 
     let gaussians_read = Gaussians::read_ply(&mut buffer.as_slice()).unwrap();
     assert_eq!(gaussians_read.gaussians.len(), 2);
-    assert_gaussian(&gaussians.gaussians[0], &gaussians_read.gaussians[0]);
-    assert_gaussian(&gaussians.gaussians[1], &gaussians_read.gaussians[1]);
+    assert::ply_gaussian_pod(&gaussians.gaussians[0], &gaussians_read.gaussians[0]);
+    assert::ply_gaussian_pod(&gaussians.gaussians[1], &gaussians_read.gaussians[1]);
 }
 
 #[test]
 fn test_gaussians_read_ply_when_format_is_custom_and_be_should_match_original_gaussian() {
-    let gaussians = given::gaussians();
+    let gaussians = given::gaussians().convert::<PlyGaussianPod>();
     let buffer = given_custom_gaussians_ply_buffer(
         &gaussians.gaussians,
         ply_rs::ply::Encoding::BinaryBigEndian,
@@ -141,13 +139,13 @@ fn test_gaussians_read_ply_when_format_is_custom_and_be_should_match_original_ga
 
     let gaussians_read = Gaussians::read_ply(&mut buffer.as_slice()).unwrap();
     assert_eq!(gaussians_read.gaussians.len(), 2);
-    assert_gaussian(&gaussians.gaussians[0], &gaussians_read.gaussians[0]);
-    assert_gaussian(&gaussians.gaussians[1], &gaussians_read.gaussians[1]);
+    assert::ply_gaussian_pod(&gaussians.gaussians[0], &gaussians_read.gaussians[0]);
+    assert::ply_gaussian_pod(&gaussians.gaussians[1], &gaussians_read.gaussians[1]);
 }
 
 #[test]
 fn test_gaussians_read_ply_when_format_is_custom_and_le_should_match_original_gaussian() {
-    let gaussians = given::gaussians();
+    let gaussians = given::gaussians().convert::<PlyGaussianPod>();
     let buffer = given_custom_gaussians_ply_buffer(
         &gaussians.gaussians,
         ply_rs::ply::Encoding::BinaryLittleEndian,
@@ -155,8 +153,8 @@ fn test_gaussians_read_ply_when_format_is_custom_and_le_should_match_original_ga
 
     let gaussians_read = Gaussians::read_ply(&mut buffer.as_slice()).unwrap();
     assert_eq!(gaussians_read.gaussians.len(), 2);
-    assert_gaussian(&gaussians.gaussians[0], &gaussians_read.gaussians[0]);
-    assert_gaussian(&gaussians.gaussians[1], &gaussians_read.gaussians[1]);
+    assert::ply_gaussian_pod(&gaussians.gaussians[0], &gaussians_read.gaussians[0]);
+    assert::ply_gaussian_pod(&gaussians.gaussians[1], &gaussians_read.gaussians[1]);
 }
 
 #[test]
@@ -234,13 +232,56 @@ fn test_gaussians_read_ply_when_missing_value_should_return_error() {
 }
 
 #[test]
-fn test_gaussian_to_ply_and_from_ply_should_be_equal() {
+fn test_gaussian_to_ply_and_from_ply_should_be_approximately_equal() {
     let gaussian = given::gaussian();
 
     let ply = gaussian.to_ply();
     let gaussian_from_ply = Gaussian::from_ply(&ply);
 
-    assert_gaussian(&gaussian, &gaussian_from_ply);
+    const EPSILON: f32 = 1e-4;
+
+    // Color are stored as exponential in PLY but linear in Gaussian
+    // so there is expected lost of precision.
+    const COLOR_EPSILON: u8 = 1;
+
+    assert!(
+        gaussian.rot.abs_diff_eq(gaussian_from_ply.rot, EPSILON),
+        " left: {:?}\nright: {:?}",
+        gaussian.rot,
+        gaussian_from_ply.rot
+    );
+
+    assert!(
+        gaussian.pos.abs_diff_eq(gaussian_from_ply.pos, EPSILON),
+        " left: {:?}\nright: {:?}",
+        gaussian.pos,
+        gaussian_from_ply.pos
+    );
+
+    assert!(
+        (gaussian.color - gaussian_from_ply.color)
+            .cmple(U8Vec4::splat(COLOR_EPSILON))
+            .all(),
+        " left: {:?}\nright: {:?}",
+        gaussian.color,
+        gaussian_from_ply.color
+    );
+
+    for i in 0..15 {
+        assert!(
+            gaussian.sh[i].abs_diff_eq(gaussian_from_ply.sh[i], EPSILON),
+            " left: {:?}\nright: {:?}",
+            gaussian.sh[i],
+            gaussian_from_ply.sh[i]
+        );
+    }
+
+    assert!(
+        gaussian.scale.abs_diff_eq(gaussian_from_ply.scale, EPSILON),
+        " left: {:?}\nright: {:?}",
+        gaussian.scale,
+        gaussian_from_ply.scale
+    );
 }
 
 #[test]

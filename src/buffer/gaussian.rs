@@ -6,8 +6,8 @@ use crate::{
     BufferWrapper, DownloadBufferError, DownloadableBufferWrapper, Gaussian, GaussianCov3dConfig,
     GaussianCov3dHalfConfig, GaussianCov3dRotScaleConfig, GaussianCov3dSingleConfig,
     GaussianShConfig, GaussianShHalfConfig, GaussianShNoneConfig, GaussianShNorm8Config,
-    GaussianShSingleConfig, GaussiansBufferTryFromBufferError, GaussiansBufferUpdateError,
-    GaussiansBufferUpdateRangeError,
+    GaussianShSingleConfig, Gaussians, GaussiansBufferTryFromBufferError,
+    GaussiansBufferUpdateError, GaussiansBufferUpdateRangeError,
 };
 
 /// The Gaussians storage buffer.
@@ -18,28 +18,34 @@ pub struct GaussiansBuffer<G: GaussianPod>(wgpu::Buffer, std::marker::PhantomDat
 
 impl<G: GaussianPod> GaussiansBuffer<G> {
     /// Create a new Gaussians buffer.
-    pub fn new(device: &wgpu::Device, gaussians: &[Gaussian]) -> Self {
+    pub fn new<'a, Source>(device: &wgpu::Device, gaussians: &'a Gaussians<Source>) -> Self
+    where
+        for<'b> &'b Source: Into<Gaussian>,
+    {
         Self::new_with_pods(
             device,
             gaussians
                 .iter()
-                .map(G::from_gaussian)
+                .map(|g| G::from_gaussian(&g))
                 .collect::<Vec<_>>()
                 .as_slice(),
         )
     }
 
     /// Create a new Gaussians buffer with the specified size with [`wgpu::BufferUsages`].
-    pub fn new_with_usage(
+    pub fn new_with_usage<'a, Source>(
         device: &wgpu::Device,
-        gaussians: &[Gaussian],
+        gaussians: &'a Gaussians<Source>,
         usage: wgpu::BufferUsages,
-    ) -> Self {
+    ) -> Self
+    where
+        for<'b> &'b Source: Into<Gaussian>,
+    {
         Self::new_with_pods_and_usage(
             device,
             gaussians
                 .iter()
-                .map(G::from_gaussian)
+                .map(|g| G::from_gaussian(&g))
                 .collect::<Vec<_>>()
                 .as_slice(),
             usage,
@@ -101,11 +107,14 @@ impl<G: GaussianPod> GaussiansBuffer<G> {
     /// Update the buffer.
     ///
     /// `gaussians` should have the same number of Gaussians as the buffer.
-    pub fn update(
+    pub fn update<Source>(
         &self,
         queue: &wgpu::Queue,
-        gaussians: &[Gaussian],
-    ) -> Result<(), GaussiansBufferUpdateError> {
+        gaussians: &Gaussians<Source>,
+    ) -> Result<(), GaussiansBufferUpdateError>
+    where
+        for<'a> &'a Source: Into<Gaussian>,
+    {
         if gaussians.len() != self.len() {
             return Err(GaussiansBufferUpdateError::CountMismatch {
                 count: gaussians.len(),
@@ -117,7 +126,7 @@ impl<G: GaussianPod> GaussiansBuffer<G> {
             queue,
             gaussians
                 .iter()
-                .map(G::from_gaussian)
+                .map(|g| G::from_gaussian(&g))
                 .collect::<Vec<_>>()
                 .as_slice(),
         )
