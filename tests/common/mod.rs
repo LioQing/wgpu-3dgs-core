@@ -1,3 +1,4 @@
+pub mod assert;
 mod for_each_gaussian_pod;
 pub mod given;
 mod inline_wesl_pkg;
