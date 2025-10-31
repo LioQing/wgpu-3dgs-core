@@ -35,10 +35,8 @@ pub fn gaussian_with_seed(seed: u32) -> Gaussian {
     }
 }
 
-pub fn gaussians() -> Gaussians {
-    Gaussians {
-        gaussians: vec![gaussian_with_seed(42), gaussian_with_seed(123)],
-    }
+pub fn gaussians() -> Gaussians<Gaussian> {
+    Gaussians::new(vec![gaussian_with_seed(42), gaussian_with_seed(123)])
 }
 
 pub fn gaussian() -> Gaussian {

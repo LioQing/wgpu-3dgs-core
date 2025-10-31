@@ -2,7 +2,7 @@ use wgpu_3dgs_core::{
     BufferWrapper, ComputeBundleBuilder, DownloadableBufferWrapper, GaussianCov3dConfig,
     GaussianPod, GaussianPodWithShHalfCov3dSingleConfigs, GaussianPodWithShNorm8Cov3dSingleConfigs,
     GaussianPodWithShSingleCov3dHalfConfigs, GaussianPodWithShSingleCov3dRotScaleConfigs,
-    GaussianPodWithShSingleCov3dSingleConfigs, GaussiansBuffer, glam::*,
+    GaussianPodWithShSingleCov3dSingleConfigs, Gaussians, GaussiansBuffer, glam::*,
 };
 
 use crate::{
@@ -162,9 +162,10 @@ fn test_gaussian_unpack_color_should_return_correct_value() {
     type G = GaussianPodWithShSingleCov3dSingleConfigs;
 
     let gaussian = given::gaussian();
+    let gaussians = Gaussians::new(vec![gaussian]);
     let buffer = GaussiansBuffer::<G>::new_with_usage(
         &ctx.device,
-        &[gaussian],
+        &gaussians,
         GaussiansBuffer::<G>::DEFAULT_USAGES | wgpu::BufferUsages::COPY_SRC,
     );
 
@@ -187,9 +188,10 @@ fn test_gaussian_unpack_sh_when_config_is_single_should_return_correct_value() {
     type G = GaussianPodWithShSingleCov3dSingleConfigs;
 
     let gaussian = given::gaussian();
+    let gaussians = Gaussians::new(vec![gaussian]);
     let buffer = GaussiansBuffer::<G>::new_with_usage(
         &ctx.device,
-        &[gaussian],
+        &gaussians,
         GaussiansBuffer::<G>::DEFAULT_USAGES | wgpu::BufferUsages::COPY_SRC,
     );
 
@@ -215,9 +217,10 @@ fn test_gaussian_unpack_sh_when_config_is_half_should_return_correct_value() {
     type G = GaussianPodWithShHalfCov3dSingleConfigs;
 
     let gaussian = given::gaussian();
+    let gaussians = Gaussians::new(vec![gaussian]);
     let buffer = GaussiansBuffer::<G>::new_with_usage(
         &ctx.device,
-        &[gaussian],
+        &gaussians,
         GaussiansBuffer::<G>::DEFAULT_USAGES | wgpu::BufferUsages::COPY_SRC,
     );
 
@@ -243,9 +246,10 @@ fn test_gaussian_unpack_sh_when_config_is_norm_8_should_return_correct_value() {
     type G = GaussianPodWithShNorm8Cov3dSingleConfigs;
 
     let gaussian = given::gaussian();
+    let gaussians = Gaussians::new(vec![gaussian]);
     let buffer = GaussiansBuffer::<G>::new_with_usage(
         &ctx.device,
-        &[gaussian],
+        &gaussians,
         GaussiansBuffer::<G>::DEFAULT_USAGES | wgpu::BufferUsages::COPY_SRC,
     );
 
@@ -271,9 +275,10 @@ fn test_gaussian_unpack_cov3d_when_config_is_rot_scale_should_return_correct_val
     type G = GaussianPodWithShSingleCov3dRotScaleConfigs;
 
     let gaussian = given::gaussian();
+    let gaussians = Gaussians::new(vec![gaussian]);
     let buffer = GaussiansBuffer::<G>::new_with_usage(
         &ctx.device,
-        &[gaussian],
+        &gaussians,
         GaussiansBuffer::<G>::DEFAULT_USAGES | wgpu::BufferUsages::COPY_SRC,
     );
 
@@ -302,9 +307,10 @@ fn test_gaussian_unpack_cov3d_when_config_is_single_should_return_correct_value(
     type G = GaussianPodWithShSingleCov3dSingleConfigs;
 
     let gaussian = given::gaussian();
+    let gaussians = Gaussians::new(vec![gaussian]);
     let buffer = GaussiansBuffer::<G>::new_with_usage(
         &ctx.device,
-        &[gaussian],
+        &gaussians,
         GaussiansBuffer::<G>::DEFAULT_USAGES | wgpu::BufferUsages::COPY_SRC,
     );
 
@@ -333,9 +339,10 @@ fn test_gaussian_unpack_cov3d_when_config_is_half_should_return_correct_value() 
     type G = GaussianPodWithShSingleCov3dHalfConfigs;
 
     let gaussian = given::gaussian();
+    let gaussians = Gaussians::new(vec![gaussian]);
     let buffer = GaussiansBuffer::<G>::new_with_usage(
         &ctx.device,
-        &[gaussian],
+        &gaussians,
         GaussiansBuffer::<G>::DEFAULT_USAGES | wgpu::BufferUsages::COPY_SRC,
     );
 

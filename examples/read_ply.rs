@@ -41,8 +41,7 @@ fn main() {
         let mut reader = std::io::BufReader::new(f);
         let gaussians = gs::Gaussians::read_ply(&mut reader).expect("gaussians");
 
-        let gaussians_buffer =
-            gs::GaussiansBuffer::<GaussianPod>::new(&device, &gaussians.gaussians);
+        let gaussians_buffer = gs::GaussiansBuffer::<GaussianPod>::new(&device, &gaussians);
 
         println!(
             "Loaded {} gaussians ({:.3} KB) into GPU buffer.",
