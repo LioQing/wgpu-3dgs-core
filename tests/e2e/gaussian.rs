@@ -3,7 +3,7 @@ use std::io::Write;
 use assert_matches::assert_matches;
 use wgpu_3dgs_core::{Gaussian, Gaussians, PLY_PROPERTIES, PlyGaussianPod, ReadPlyError, glam::*};
 
-use crate::common::given;
+use crate::common::{assert, given};
 
 fn given_custom_gaussians_ply_buffer(
     plys: &[PlyGaussianPod],
@@ -62,50 +62,6 @@ fn given_custom_gaussians_ply_buffer(
     buffer
 }
 
-fn assert_ply_gaussian_pod(a: &PlyGaussianPod, b: &PlyGaussianPod) {
-    const EPSILON: f32 = 1e-4;
-
-    assert!(
-        a.rot
-            .into_iter()
-            .zip(b.rot.into_iter())
-            .all(|(x, y)| (x - y).abs() < EPSILON),
-        " left: {:?}\nright: {:?}",
-        a.rot,
-        b.rot
-    );
-    assert!(
-        a.pos
-            .into_iter()
-            .zip(b.pos.into_iter())
-            .all(|(x, y)| (x - y).abs() < EPSILON),
-        " left: {:?}\nright: {:?}",
-        a.pos,
-        b.pos
-    );
-
-    assert_eq!(a.color, b.color);
-
-    assert!(
-        a.sh.into_iter()
-            .zip(b.sh.into_iter())
-            .all(|(x, y)| (x - y).abs() < EPSILON),
-        " left: {:?}\nright: {:?}",
-        a.sh,
-        b.sh
-    );
-
-    assert!(
-        a.scale
-            .into_iter()
-            .zip(b.scale.into_iter())
-            .all(|(x, y)| (x - y).abs() < EPSILON),
-        " left: {:?}\nright: {:?}",
-        a.scale,
-        b.scale
-    );
-}
-
 fn assert_gaussian(a: &Gaussian, b: &Gaussian) {
     const EPSILON: f32 = 1e-4;
 
@@ -157,7 +113,7 @@ fn test_gaussians_write_ply_and_read_ply_should_be_equal() {
         .iter()
         .zip(gaussians_read.gaussians.iter())
     {
-        assert_ply_gaussian_pod(a, b);
+        assert::ply_gaussian_pod(a, b);
     }
 }
 
@@ -169,8 +125,8 @@ fn test_gaussians_read_ply_when_format_is_custom_and_ascii_should_match_original
 
     let gaussians_read = Gaussians::read_ply(&mut buffer.as_slice()).unwrap();
     assert_eq!(gaussians_read.gaussians.len(), 2);
-    assert_ply_gaussian_pod(&gaussians.gaussians[0], &gaussians_read.gaussians[0]);
-    assert_ply_gaussian_pod(&gaussians.gaussians[1], &gaussians_read.gaussians[1]);
+    assert::ply_gaussian_pod(&gaussians.gaussians[0], &gaussians_read.gaussians[0]);
+    assert::ply_gaussian_pod(&gaussians.gaussians[1], &gaussians_read.gaussians[1]);
 }
 
 #[test]
@@ -183,8 +139,8 @@ fn test_gaussians_read_ply_when_format_is_custom_and_be_should_match_original_ga
 
     let gaussians_read = Gaussians::read_ply(&mut buffer.as_slice()).unwrap();
     assert_eq!(gaussians_read.gaussians.len(), 2);
-    assert_ply_gaussian_pod(&gaussians.gaussians[0], &gaussians_read.gaussians[0]);
-    assert_ply_gaussian_pod(&gaussians.gaussians[1], &gaussians_read.gaussians[1]);
+    assert::ply_gaussian_pod(&gaussians.gaussians[0], &gaussians_read.gaussians[0]);
+    assert::ply_gaussian_pod(&gaussians.gaussians[1], &gaussians_read.gaussians[1]);
 }
 
 #[test]
@@ -197,8 +153,8 @@ fn test_gaussians_read_ply_when_format_is_custom_and_le_should_match_original_ga
 
     let gaussians_read = Gaussians::read_ply(&mut buffer.as_slice()).unwrap();
     assert_eq!(gaussians_read.gaussians.len(), 2);
-    assert_ply_gaussian_pod(&gaussians.gaussians[0], &gaussians_read.gaussians[0]);
-    assert_ply_gaussian_pod(&gaussians.gaussians[1], &gaussians_read.gaussians[1]);
+    assert::ply_gaussian_pod(&gaussians.gaussians[0], &gaussians_read.gaussians[0]);
+    assert::ply_gaussian_pod(&gaussians.gaussians[1], &gaussians_read.gaussians[1]);
 }
 
 #[test]
