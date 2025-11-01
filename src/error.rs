@@ -1,16 +1,5 @@
 use thiserror::Error;
 
-/// The error type for reading PLY.
-#[derive(Debug, Error)]
-pub enum ReadPlyError {
-    #[error("{0}")]
-    Io(#[from] std::io::Error),
-    #[error("vertex not found in PLY")]
-    VertexNotFound,
-    #[error("vertex property {0} not found in PLY")]
-    VertexPropertyNotFound(String),
-}
-
 /// The error type for downloading buffer.
 #[derive(Debug, Error)]
 pub enum DownloadBufferError {

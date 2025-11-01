@@ -3,7 +3,7 @@ use std::io::{BufRead, Write};
 use bytemuck::Zeroable;
 use glam::*;
 
-use crate::{PlyGaussianIter, PlyGaussianPod, PlyHeader, ReadPlyError};
+use crate::{PlyGaussianIter, PlyGaussianPod, PlyHeader};
 
 /// A vector of Gaussians.
 ///
@@ -68,6 +68,13 @@ where
     }
 }
 
+fn vertex_element_not_found_error() -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::InvalidData,
+        "Gaussian vertex element not found in PLY header",
+    )
+}
+
 impl Gaussians<PlyGaussianPod> {
     /// Read a PLY file.
     ///
@@ -75,10 +82,12 @@ impl Gaussians<PlyGaussianPod> {
     /// implementation, or a custom PLY file with the same properties.
     ///
     /// See [`PLY_PROPERTIES`] for a list of expected properties.
-    pub fn read_ply(reader: &mut impl BufRead) -> Result<Self, ReadPlyError> {
+    pub fn read_ply(reader: &mut impl BufRead) -> Result<Self, std::io::Error> {
         let ply_header = Self::read_ply_header(reader)?;
 
-        let count = ply_header.count().ok_or(ReadPlyError::VertexNotFound)?;
+        let count = ply_header
+            .count()
+            .ok_or_else(vertex_element_not_found_error)?;
         let mut gaussians = Vec::with_capacity(count);
 
         for gaussian in Self::read_ply_gaussians(reader, ply_header)? {
@@ -91,13 +100,13 @@ impl Gaussians<PlyGaussianPod> {
     /// Read a PLY header.
     ///
     /// See [`PLY_PROPERTIES`] for a list of expected properties.
-    pub fn read_ply_header(reader: &mut impl BufRead) -> Result<PlyHeader, ReadPlyError> {
+    pub fn read_ply_header(reader: &mut impl BufRead) -> Result<PlyHeader, std::io::Error> {
         let parser = ply_rs::parser::Parser::<ply_rs::ply::DefaultElement>::new();
         let header = parser.read_header(reader)?;
         let vertex = header
             .elements
             .get("vertex")
-            .ok_or(ReadPlyError::VertexNotFound)?;
+            .ok_or_else(vertex_element_not_found_error)?;
 
         const SYSTEM_ENDIANNESS: ply_rs::ply::Encoding = match cfg!(target_endian = "little") {
             true => ply_rs::ply::Encoding::BinaryLittleEndian,
@@ -129,61 +138,61 @@ impl Gaussians<PlyGaussianPod> {
     pub fn read_ply_gaussians(
         reader: &mut impl BufRead,
         ply_header: PlyHeader,
-    ) -> Result<impl Iterator<Item = Result<PlyGaussianPod, ReadPlyError>>, ReadPlyError> {
-        let count = ply_header.count().ok_or(ReadPlyError::VertexNotFound)?;
+    ) -> Result<impl Iterator<Item = Result<PlyGaussianPod, std::io::Error>>, std::io::Error> {
+        let count = ply_header
+            .count()
+            .ok_or_else(vertex_element_not_found_error)?;
         log::info!("Reading PLY format with {count} Gaussians");
 
         Ok(match ply_header {
-            PlyHeader::Inria(..) => PlyGaussianIter::Inria((0..count).map(
-                |_| -> Result<PlyGaussianPod, ReadPlyError> {
-                    let mut gaussian = PlyGaussianPod::zeroed();
-                    reader.read_exact(bytemuck::bytes_of_mut(&mut gaussian))?;
-                    Ok(gaussian)
-                },
-            )),
+            PlyHeader::Inria(..) => PlyGaussianIter::Inria((0..count).map(|_| {
+                let mut gaussian = PlyGaussianPod::zeroed();
+                reader.read_exact(bytemuck::bytes_of_mut(&mut gaussian))?;
+                Ok(gaussian)
+            })),
             PlyHeader::Custom(header) => {
                 let parser = ply_rs::parser::Parser::<PlyGaussianPod>::new();
 
-                PlyGaussianIter::Custom((0..count).map(
-                    move |_| -> Result<PlyGaussianPod, ReadPlyError> {
-                        let Some(vertex) = header.elements.get("vertex") else {
-                            return Err(ReadPlyError::VertexNotFound);
-                        };
-                        Ok(match header.encoding {
-                            ply_rs::ply::Encoding::Ascii => {
-                                let mut line = String::new();
-                                reader.read_line(&mut line)?;
+                PlyGaussianIter::Custom((0..count).map(move |_| {
+                    let vertex = header.elements.get("vertex").ok_or(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "Gaussian vertex element not found in PLY",
+                    ))?;
+                    Ok(match header.encoding {
+                        ply_rs::ply::Encoding::Ascii => {
+                            let mut line = String::new();
+                            reader.read_line(&mut line)?;
 
-                                let mut gaussian = PlyGaussianPod::zeroed();
-                                vertex
-                                    .properties
-                                    .keys()
-                                    .zip(
-                                        line.split(' ')
-                                            .map(|s| Some(s.trim().parse::<f32>()))
-                                            .chain(std::iter::repeat(None)),
-                                    )
-                                    .try_for_each(|(name, value)| match value {
-                                        Some(Ok(value)) => {
-                                            gaussian.set_value(name, value);
-                                            Ok(())
-                                        }
-                                        Some(Err(_)) | None => {
-                                            Err(ReadPlyError::VertexPropertyNotFound(name.clone()))
-                                        }
-                                    })?;
+                            let mut gaussian = PlyGaussianPod::zeroed();
+                            vertex
+                                .properties
+                                .keys()
+                                .zip(
+                                    line.split(' ')
+                                        .map(|s| Some(s.trim().parse::<f32>()))
+                                        .chain(std::iter::repeat(None)),
+                                )
+                                .try_for_each(|(name, value)| match value {
+                                    Some(Ok(value)) => {
+                                        gaussian.set_value(name, value);
+                                        Ok(())
+                                    }
+                                    Some(Err(_)) | None => Err(std::io::Error::new(
+                                        std::io::ErrorKind::InvalidData,
+                                        "Gaussian element property not invalid or missing in PLY",
+                                    )),
+                                })?;
 
-                                gaussian
-                            }
-                            ply_rs::ply::Encoding::BinaryLittleEndian => {
-                                parser.read_little_endian_element(reader, vertex)?
-                            }
-                            ply_rs::ply::Encoding::BinaryBigEndian => {
-                                parser.read_big_endian_element(reader, vertex)?
-                            }
-                        })
-                    },
-                ))
+                            gaussian
+                        }
+                        ply_rs::ply::Encoding::BinaryLittleEndian => {
+                            parser.read_little_endian_element(reader, vertex)?
+                        }
+                        ply_rs::ply::Encoding::BinaryBigEndian => {
+                            parser.read_big_endian_element(reader, vertex)?
+                        }
+                    })
+                }))
             }
         })
     }
