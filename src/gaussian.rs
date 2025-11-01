@@ -179,7 +179,7 @@ impl Gaussians<PlyGaussianPod> {
                                     }
                                     Some(Err(_)) | None => Err(std::io::Error::new(
                                         std::io::ErrorKind::InvalidData,
-                                        "Gaussian element property not invalid or missing in PLY",
+                                        "Gaussian element property invalid or missing in PLY",
                                     )),
                                 })?;
 

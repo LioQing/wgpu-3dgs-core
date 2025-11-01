@@ -234,7 +234,7 @@ fn test_gaussians_read_ply_when_missing_value_should_return_error() {
     assert_matches!(
         result,
         Err(e) if e.kind() == std::io::ErrorKind::InvalidData &&
-            e.to_string() == "Gaussian element property not invalid or missing in PLY"
+            e.to_string() == "Gaussian element property invalid or missing in PLY"
     );
 }
 
