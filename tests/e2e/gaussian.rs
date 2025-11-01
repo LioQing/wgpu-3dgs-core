@@ -1,7 +1,7 @@
 use std::io::Write;
 
 use assert_matches::assert_matches;
-use wgpu_3dgs_core::{Gaussian, Gaussians, PLY_PROPERTIES, PlyGaussianPod, ReadPlyError, glam::*};
+use wgpu_3dgs_core::{Gaussian, Gaussians, PLY_PROPERTIES, PlyGaussianPod, glam::*};
 
 use crate::common::{assert, given};
 
@@ -190,7 +190,11 @@ fn test_gaussians_read_ply_when_missing_vertex_should_return_error() {
     .unwrap();
 
     let result = Gaussians::read_ply(&mut buffer.as_slice());
-    assert_matches!(result, Err(ReadPlyError::VertexNotFound));
+    assert_matches!(
+        result,
+        Err(e) if e.kind() == std::io::ErrorKind::InvalidData &&
+            e.to_string() == "Gaussian vertex element not found in PLY header"
+    );
 }
 
 #[test]
@@ -227,8 +231,11 @@ fn test_gaussians_read_ply_when_missing_value_should_return_error() {
 
     let result = Gaussians::read_ply(&mut buffer.as_slice());
 
-    // TODO(#3): Improve error message to just say missing value instead of guessing property name.
-    assert_matches!(result, Err(ReadPlyError::VertexPropertyNotFound(property)) if property == "rot_3");
+    assert_matches!(
+        result,
+        Err(e) if e.kind() == std::io::ErrorKind::InvalidData &&
+            e.to_string() == "Gaussian element property invalid or missing in PLY"
+    );
 }
 
 #[test]

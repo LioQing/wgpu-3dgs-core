@@ -1,6 +1,6 @@
 use bytemuck::Zeroable;
 
-use crate::{Gaussian, ReadPlyError};
+use crate::Gaussian;
 
 /// The POD representation of Gaussian in PLY format.
 ///
@@ -154,8 +154,8 @@ impl PlyHeader {
 
 /// PLY Gaussian [`Result`] iterator.
 pub enum PlyGaussianIter<
-    I: Iterator<Item = Result<PlyGaussianPod, ReadPlyError>>,
-    C: Iterator<Item = Result<PlyGaussianPod, ReadPlyError>>,
+    I: Iterator<Item = Result<PlyGaussianPod, std::io::Error>>,
+    C: Iterator<Item = Result<PlyGaussianPod, std::io::Error>>,
 > {
     /// The Inria PLY format.
     Inria(I),
@@ -167,11 +167,11 @@ pub enum PlyGaussianIter<
 }
 
 impl<
-    I: Iterator<Item = Result<PlyGaussianPod, ReadPlyError>>,
-    C: Iterator<Item = Result<PlyGaussianPod, ReadPlyError>>,
+    I: Iterator<Item = Result<PlyGaussianPod, std::io::Error>>,
+    C: Iterator<Item = Result<PlyGaussianPod, std::io::Error>>,
 > Iterator for PlyGaussianIter<I, C>
 {
-    type Item = Result<PlyGaussianPod, ReadPlyError>;
+    type Item = Result<PlyGaussianPod, std::io::Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self {
