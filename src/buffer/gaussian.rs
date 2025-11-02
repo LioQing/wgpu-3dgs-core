@@ -3,11 +3,10 @@ use glam::*;
 use wgpu::util::DeviceExt;
 
 use crate::{
-    BufferWrapper, DownloadBufferError, DownloadableBufferWrapper, Gaussian, GaussianCov3dConfig,
-    GaussianCov3dHalfConfig, GaussianCov3dRotScaleConfig, GaussianCov3dSingleConfig,
-    GaussianShConfig, GaussianShHalfConfig, GaussianShNoneConfig, GaussianShNorm8Config,
-    GaussianShSingleConfig, Gaussians, GaussiansBufferTryFromBufferError,
-    GaussiansBufferUpdateError, GaussiansBufferUpdateRangeError,
+    BufferWrapper, DownloadBufferError, Gaussian, GaussianCov3dConfig, GaussianCov3dHalfConfig,
+    GaussianCov3dRotScaleConfig, GaussianCov3dSingleConfig, GaussianShConfig, GaussianShHalfConfig,
+    GaussianShNoneConfig, GaussianShNorm8Config, GaussianShSingleConfig, Gaussians,
+    GaussiansBufferTryFromBufferError, GaussiansBufferUpdateError, GaussiansBufferUpdateRangeError,
 };
 
 /// The Gaussians storage buffer.

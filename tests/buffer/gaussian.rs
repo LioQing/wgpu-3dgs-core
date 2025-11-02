@@ -1,7 +1,5 @@
 use assert_matches::assert_matches;
-use wgpu_3dgs_core::{
-    BufferWrapper, DownloadableBufferWrapper, Gaussian, GaussianPod, Gaussians, GaussiansBuffer,
-};
+use wgpu_3dgs_core::{BufferWrapper, Gaussian, GaussianPod, Gaussians, GaussiansBuffer};
 
 use crate::{
     common::{TestContext, given},

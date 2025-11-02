@@ -1,6 +1,6 @@
 use wgpu_3dgs_core::{
-    BufferWrapper, ComputeBundleBuilder, DownloadableBufferWrapper, GaussianCov3dConfig,
-    GaussianPod, GaussianPodWithShHalfCov3dSingleConfigs, GaussianPodWithShNorm8Cov3dSingleConfigs,
+    BufferWrapper, ComputeBundleBuilder, GaussianCov3dConfig, GaussianPod,
+    GaussianPodWithShHalfCov3dSingleConfigs, GaussianPodWithShNorm8Cov3dSingleConfigs,
     GaussianPodWithShSingleCov3dHalfConfigs, GaussianPodWithShSingleCov3dRotScaleConfigs,
     GaussianPodWithShSingleCov3dSingleConfigs, Gaussians, GaussiansBuffer, glam::*,
 };
