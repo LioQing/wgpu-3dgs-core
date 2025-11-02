@@ -1,7 +1,6 @@
 use wgpu::util::DeviceExt;
 use wgpu_3dgs_core::{
-    BufferWrapper, ComputeBundleBuilder, DownloadableBufferWrapper, ModelTransformBuffer,
-    ModelTransformPod, glam::*,
+    BufferWrapper, ComputeBundleBuilder, ModelTransformBuffer, ModelTransformPod, glam::*,
 };
 
 use crate::{common::TestContext, inline_wesl_pkg};

@@ -1,6 +1,6 @@
 use wgpu_3dgs_core::{
-    BufferWrapper, ComputeBundleBuilder, DownloadableBufferWrapper, GaussianDisplayMode,
-    GaussianShDegree, GaussianTransformBuffer, GaussianTransformPod,
+    BufferWrapper, ComputeBundleBuilder, GaussianDisplayMode, GaussianShDegree,
+    GaussianTransformBuffer, GaussianTransformPod,
 };
 
 use crate::{common::TestContext, inline_wesl_pkg};

@@ -1,8 +1,7 @@
 use assert_matches::assert_matches;
 use wgpu::util::DeviceExt;
 use wgpu_3dgs_core::{
-    ComputeBundleBuildError, ComputeBundleBuilder, ComputeBundleCreateError,
-    DownloadableBufferWrapper,
+    BufferWrapper, ComputeBundleBuildError, ComputeBundleBuilder, ComputeBundleCreateError,
 };
 
 use crate::common::{TestContext, shader};
