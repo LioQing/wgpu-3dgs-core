@@ -1,8 +1,6 @@
 use glam::*;
 use wgpu::util::DeviceExt;
-use wgpu_3dgs_core::{
-    BufferWrapper, DownloadableBufferWrapper, ModelTransformBuffer, ModelTransformPod,
-};
+use wgpu_3dgs_core::{BufferWrapper, ModelTransformBuffer, ModelTransformPod};
 
 use crate::common::TestContext;
 

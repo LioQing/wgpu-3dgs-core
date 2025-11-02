@@ -1,8 +1,8 @@
 use assert_matches::assert_matches;
 use wgpu::util::DeviceExt;
 use wgpu_3dgs_core::{
-    BufferWrapper, DownloadableBufferWrapper, GaussianDisplayMode, GaussianShDegree,
-    GaussianTransformBuffer, GaussianTransformPod,
+    BufferWrapper, GaussianDisplayMode, GaussianShDegree, GaussianTransformBuffer,
+    GaussianTransformPod,
 };
 
 use crate::common::TestContext;

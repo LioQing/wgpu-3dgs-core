@@ -34,12 +34,9 @@ fn test_downloadable_buffer_wrapper_download_should_download_buffer_data() {
                 | wgpu::BufferUsages::COPY_SRC,
         });
 
-    {
-        use wgpu_3dgs_core::DownloadableBufferWrapper;
-        let downloaded = pollster::block_on(buffer.download::<u32>(&ctx.device, &ctx.queue));
+    let downloaded = pollster::block_on(buffer.download::<u32>(&ctx.device, &ctx.queue));
 
-        assert_matches!(downloaded, Ok(data) if data == vec![1u32, 2, 3, 4]);
-    }
+    assert_matches!(downloaded, Ok(data) if data == vec![1u32, 2, 3, 4]);
 }
 
 #[derive(Debug)]
@@ -113,4 +110,24 @@ fn test_fixed_size_buffer_wrapper_verify_buffer_size_when_size_mismatched_should
             expected_size: 4
         })
     );
+}
+
+#[test]
+fn test_fixed_size_buffer_download_single_should_download_single_pod() {
+    let ctx = common::TestContext::new();
+    let buffer = ctx
+        .device
+        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Test Buffer"),
+            contents: bytemuck::bytes_of(&42u32),
+            usage: wgpu::BufferUsages::UNIFORM
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+        });
+
+    let wrapper = TestBufferWrapper::try_from(buffer).expect("try_from");
+
+    let downloaded = pollster::block_on(wrapper.download_single(&ctx.device, &ctx.queue));
+
+    assert_matches!(downloaded, Ok(42u32));
 }
