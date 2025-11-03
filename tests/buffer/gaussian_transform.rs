@@ -1,8 +1,9 @@
 use assert_matches::assert_matches;
+use pollster::FutureExt;
 use wgpu::util::DeviceExt;
 use wgpu_3dgs_core::{
-    BufferWrapper, GaussianDisplayMode, GaussianMaxStdDev, GaussianShDegree,
-    GaussianTransformBuffer, GaussianTransformPod,
+    BufferWrapper, FixedSizeBufferWrapper, GaussianDisplayMode, GaussianMaxStdDev,
+    GaussianShDegree, GaussianTransformBuffer, GaussianTransformPod,
 };
 
 use crate::common::TestContext;
@@ -123,9 +124,10 @@ fn test_gaussian_transform_buffer_update_should_update_buffer_correctly() {
 
     buffer.update(&ctx.queue, size, display_mode, sh_deg, no_sh0, max_std_dev);
 
-    let downloaded =
-        pollster::block_on(buffer.download::<GaussianTransformPod>(&ctx.device, &ctx.queue))
-            .expect("download")[0];
+    let downloaded = buffer
+        .download_single(&ctx.device, &ctx.queue)
+        .block_on()
+        .expect("download single");
 
     assert_eq!(downloaded, pod);
 }
@@ -152,17 +154,18 @@ fn test_gaussian_transform_buffer_try_from_and_into_wgpu_buffer_should_be_equal(
         GaussianTransformBuffer::try_from(wgpu_buffer.clone()).expect("try_from");
     let wgpu_converted_buffer = wgpu::Buffer::from(converted_buffer.clone());
 
-    let wgpu_downloaded = pollster::block_on(
-        wgpu_converted_buffer.download::<GaussianTransformPod>(&ctx.device, &ctx.queue),
-    )
-    .expect("download");
-    let converted_downloaded = pollster::block_on(
-        converted_buffer.download::<GaussianTransformPod>(&ctx.device, &ctx.queue),
-    )
-    .expect("download");
-    let wgpu_converted_downloaded =
-        pollster::block_on(wgpu_buffer.download::<GaussianTransformPod>(&ctx.device, &ctx.queue))
-            .expect("download");
+    let wgpu_downloaded = wgpu_converted_buffer
+        .download::<GaussianTransformPod>(&ctx.device, &ctx.queue)
+        .block_on()
+        .expect("download");
+    let converted_downloaded = converted_buffer
+        .download::<GaussianTransformPod>(&ctx.device, &ctx.queue)
+        .block_on()
+        .expect("download");
+    let wgpu_converted_downloaded = wgpu_buffer
+        .download::<GaussianTransformPod>(&ctx.device, &ctx.queue)
+        .block_on()
+        .expect("download");
 
     assert_eq!(wgpu_downloaded, converted_downloaded);
     assert_eq!(wgpu_downloaded, wgpu_converted_downloaded);
@@ -182,5 +185,5 @@ fn test_gaussian_transform_pod_new_should_return_correct_pod() {
     assert_eq!(pod.flags.x, display_mode as u8);
     assert_eq!(pod.flags.y, sh_deg.get());
     assert_eq!(pod.flags.z, no_sh0 as u8);
-    assert_eq!(pod.flags.w, (max_std_dev.get() / 3.0 * 255.0) as u8);
+    assert_eq!(pod.flags.w, max_std_dev.as_u8());
 }

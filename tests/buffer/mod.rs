@@ -1,4 +1,5 @@
 use assert_matches::assert_matches;
+use pollster::FutureExt;
 use wgpu::util::DeviceExt;
 use wgpu_3dgs_core::{BufferWrapper, FixedSizeBufferWrapper, FixedSizeBufferWrapperError};
 
@@ -34,7 +35,7 @@ fn test_downloadable_buffer_wrapper_download_should_download_buffer_data() {
                 | wgpu::BufferUsages::COPY_SRC,
         });
 
-    let downloaded = pollster::block_on(buffer.download::<u32>(&ctx.device, &ctx.queue));
+    let downloaded = buffer.download::<u32>(&ctx.device, &ctx.queue).block_on();
 
     assert_matches!(downloaded, Ok(data) if data == vec![1u32, 2, 3, 4]);
 }
@@ -127,7 +128,7 @@ fn test_fixed_size_buffer_download_single_should_download_single_pod() {
 
     let wrapper = TestBufferWrapper::try_from(buffer).expect("try_from");
 
-    let downloaded = pollster::block_on(wrapper.download_single(&ctx.device, &ctx.queue));
+    let downloaded = wrapper.download_single(&ctx.device, &ctx.queue).block_on();
 
     assert_matches!(downloaded, Ok(42u32));
 }

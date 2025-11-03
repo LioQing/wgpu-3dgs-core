@@ -1,4 +1,5 @@
 use assert_matches::assert_matches;
+use pollster::FutureExt;
 use wgpu_3dgs_core::{BufferWrapper, Gaussian, GaussianPod, Gaussians, GaussiansBuffer};
 
 use crate::{
@@ -33,8 +34,9 @@ fn test_gaussians_buffer_new_with_usage_should_return_correct_buffer() {
         let usage = wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST;
         let gaussians_buffer = GaussiansBuffer::<G>::new_with_usage(&ctx.device, &gaussians, usage);
 
-        let gaussian_pods_downloaded =
-            pollster::block_on(gaussians_buffer.download::<G>(&ctx.device, &ctx.queue));
+        let gaussian_pods_downloaded = gaussians_buffer
+            .download::<G>(&ctx.device, &ctx.queue)
+            .block_on();
 
         assert_matches!(gaussian_pods_downloaded, Ok(pods) if pods == gaussian_pods);
         assert_eq!(gaussians_buffer.buffer().usage(), usage);
@@ -68,8 +70,9 @@ fn test_gaussians_buffer_new_with_pods_and_usage_should_return_correct_buffer() 
         let gaussians_buffer =
             GaussiansBuffer::<G>::new_with_pods_and_usage(&ctx.device, &gaussian_pods, usage);
 
-        let gaussian_pods_downloaded =
-            pollster::block_on(gaussians_buffer.download::<G>(&ctx.device, &ctx.queue));
+        let gaussian_pods_downloaded = gaussians_buffer
+            .download::<G>(&ctx.device, &ctx.queue)
+            .block_on();
 
         assert_matches!(gaussian_pods_downloaded, Ok(pods) if pods == gaussian_pods);
         assert_eq!(gaussians_buffer.buffer().usage(), usage);
@@ -165,8 +168,9 @@ fn test_gaussians_buffer_update_should_update_buffer_correctly() {
             .update(&ctx.queue, &new_gaussians)
             .expect("update");
 
-        let gaussian_pods_downloaded =
-            pollster::block_on(gaussians_buffer.download::<G>(&ctx.device, &ctx.queue));
+        let gaussian_pods_downloaded = gaussians_buffer
+            .download::<G>(&ctx.device, &ctx.queue)
+            .block_on();
 
         assert_matches!(gaussian_pods_downloaded, Ok(pods) if pods == gaussian_pods);
     }
@@ -241,8 +245,9 @@ fn test_gaussians_buffer_update_range_should_update_buffer_correctly() {
             )
             .expect("update_range");
 
-        let gaussian_pods_downloaded =
-            pollster::block_on(gaussians_buffer.download::<G>(&ctx.device, &ctx.queue));
+        let gaussian_pods_downloaded = gaussians_buffer
+            .download::<G>(&ctx.device, &ctx.queue)
+            .block_on();
 
         assert_matches!(gaussian_pods_downloaded, Ok(pods) if pods == gaussian_pods);
     }
@@ -263,16 +268,18 @@ fn test_gaussians_buffer_download_gaussians_should_download_buffer_successfully(
             GaussiansBuffer::<G>::DEFAULT_USAGES | wgpu::BufferUsages::COPY_SRC,
         );
 
-        let gaussian_pods_downloaded =
-            pollster::block_on(gaussians_buffer.download::<G>(&ctx.device, &ctx.queue))
-                .expect("download");
+        let gaussian_pods_downloaded = gaussians_buffer
+            .download::<G>(&ctx.device, &ctx.queue)
+            .block_on()
+            .expect("download");
         let gaussian_pods_gaussians = gaussian_pods_downloaded
             .into_iter()
             .map(Into::into)
             .collect::<Vec<Gaussian>>();
-        let gaussians_downloaded =
-            pollster::block_on(gaussians_buffer.download_gaussians(&ctx.device, &ctx.queue))
-                .expect("download_gaussians");
+        let gaussians_downloaded = gaussians_buffer
+            .download_gaussians(&ctx.device, &ctx.queue)
+            .block_on()
+            .expect("download_gaussians");
 
         assert_eq!(gaussians_downloaded, gaussian_pods_gaussians);
     }
@@ -296,7 +303,9 @@ mod test_gaussians_buffer_download_gaussians_when_configs_unsupported_should_pan
             GaussiansBuffer::<G>::DEFAULT_USAGES | wgpu::BufferUsages::COPY_SRC,
         );
 
-        let _ = pollster::block_on(gaussians_buffer.download_gaussians(&ctx.device, &ctx.queue));
+        let _ = gaussians_buffer
+            .download_gaussians(&ctx.device, &ctx.queue)
+            .block_on();
     }
 }
 
@@ -390,21 +399,20 @@ fn test_gaussians_buffer_try_from_and_into_wgpu_buffer_should_be_equal() {
             GaussiansBuffer::<G>::try_from(wgpu_buffer).expect("try_from");
         let wgpu_converted_buffer = wgpu::Buffer::from(converted_gaussians_buffer.clone());
 
-        let wgpu_downloaded = pollster::block_on(
-            gaussians_buffer
-                .buffer()
-                .download::<G>(&ctx.device, &ctx.queue),
-        )
-        .expect("download");
-        let converted_downloaded = pollster::block_on(
-            converted_gaussians_buffer
-                .buffer()
-                .download::<G>(&ctx.device, &ctx.queue),
-        )
-        .expect("download");
-        let wgpu_converted_downloaded =
-            pollster::block_on(wgpu_converted_buffer.download::<G>(&ctx.device, &ctx.queue))
-                .expect("download");
+        let wgpu_downloaded = gaussians_buffer
+            .buffer()
+            .download::<G>(&ctx.device, &ctx.queue)
+            .block_on()
+            .expect("download");
+        let converted_downloaded = converted_gaussians_buffer
+            .buffer()
+            .download::<G>(&ctx.device, &ctx.queue)
+            .block_on()
+            .expect("download");
+        let wgpu_converted_downloaded = wgpu_converted_buffer
+            .download::<G>(&ctx.device, &ctx.queue)
+            .block_on()
+            .expect("download");
 
         assert_eq!(wgpu_downloaded, converted_downloaded);
         assert_eq!(wgpu_downloaded, wgpu_converted_downloaded);
