@@ -63,10 +63,7 @@ fn test_gaussian_max_std_dev_new_when_value_is_invalid_should_return_none() {
     ];
 
     for &max_std_dev in &invalid_values {
-        assert!(
-            GaussianMaxStdDev::new(max_std_dev).is_none(),
-            "value {max_std_dev}"
-        );
+        assert_matches!(GaussianMaxStdDev::new(max_std_dev), None);
     }
 }
 
