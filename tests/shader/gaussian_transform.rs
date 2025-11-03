@@ -1,5 +1,6 @@
+use pollster::FutureExt;
 use wgpu_3dgs_core::{
-    BufferWrapper, ComputeBundleBuilder, GaussianDisplayMode, GaussianShDegree,
+    BufferWrapper, ComputeBundleBuilder, GaussianDisplayMode, GaussianMaxStdDev, GaussianShDegree,
     GaussianTransformBuffer, GaussianTransformPod,
 };
 
@@ -14,14 +15,14 @@ const TEST_PACKAGE: wesl::Pkg = inline_wesl_pkg!(
         gaussian_transform_display_mode,
         gaussian_transform_sh_deg,
         gaussian_transform_no_sh0,
-        gaussian_transform_std_dev,
+        gaussian_transform_max_std_dev,
     };
 
     struct Output {
         display_mode: u32,
         sh_deg: u32,
         no_sh0: u32,
-        std_dev: f32,
+        max_std_dev: f32,
     }
 
     @group(0) @binding(0)
@@ -43,7 +44,7 @@ const TEST_PACKAGE: wesl::Pkg = inline_wesl_pkg!(
         output.display_mode = gaussian_transform_display_mode(transform.flags);
         output.sh_deg = gaussian_transform_sh_deg(transform.flags);
         output.no_sh0 = select(0u, 1u, gaussian_transform_no_sh0(transform.flags));
-        output.std_dev = gaussian_transform_std_dev(transform.flags);
+        output.max_std_dev = gaussian_transform_max_std_dev(transform.flags);
     }
 );
 
@@ -80,7 +81,7 @@ struct Output {
     display_mode: u32,
     sh_deg: u32,
     no_sh0: u32,
-    std_dev: f32,
+    max_std_dev: f32,
 }
 
 #[test]
@@ -90,8 +91,8 @@ fn test_gaussian_transform_wesl_functions_should_return_correct_values() {
     let display_mode = GaussianDisplayMode::Ellipse;
     let sh_deg = GaussianShDegree::new(2).expect("new");
     let no_sh0 = true;
-    let std_dev = 3.0;
-    let transform = GaussianTransformPod::new(1.0, display_mode, sh_deg, no_sh0, std_dev);
+    let max_std_dev = GaussianMaxStdDev::new(3.0).unwrap();
+    let transform = GaussianTransformPod::new(1.0, display_mode, sh_deg, no_sh0, max_std_dev);
 
     let transform_buffer = GaussianTransformBuffer::new(&ctx.device);
     transform_buffer.update_with_pod(&ctx.queue, &transform);
@@ -132,16 +133,18 @@ fn test_gaussian_transform_wesl_functions_should_return_correct_values() {
 
     ctx.queue.submit(Some(encoder.finish()));
 
-    let downloaded = pollster::block_on(output_buffer.download::<Output>(&ctx.device, &ctx.queue))
+    let downloaded = output_buffer
+        .download::<Output>(&ctx.device, &ctx.queue)
+        .block_on()
         .expect("download")[0];
 
     assert_eq!(downloaded.display_mode, display_mode as u32);
-    assert_eq!(downloaded.sh_deg, sh_deg.degree() as u32);
+    assert_eq!(downloaded.sh_deg, sh_deg.get() as u32);
     assert_eq!(downloaded.no_sh0, no_sh0 as u32);
     assert!(
-        (downloaded.std_dev - std_dev).abs() < 1e-6,
+        (downloaded.max_std_dev - max_std_dev.get()).abs() < 1e-6,
         " left: {}\nright: {}",
-        downloaded.std_dev,
-        std_dev,
+        downloaded.max_std_dev,
+        max_std_dev.get(),
     );
 }
