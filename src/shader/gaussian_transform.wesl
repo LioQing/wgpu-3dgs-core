@@ -25,7 +25,7 @@ fn gaussian_transform_no_sh0(flags: u32) -> bool {
     return unpack4xU8(flags).z != 0u;
 }
 
-// Get the standard deviation from `GaussianTransform.flags`.
-fn gaussian_transform_std_dev(flags: u32) -> f32 {
+// Get the maximum standard deviation from `GaussianTransform.flags`.
+fn gaussian_transform_max_std_dev(flags: u32) -> f32 {
     return f32(unpack4xU8(flags).w) / 255.0 * 3.0;
 }

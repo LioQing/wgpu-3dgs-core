@@ -5,8 +5,9 @@ use crate::{BufferWrapper, FixedSizeBufferWrapper, FixedSizeBufferWrapperError};
 
 /// The Gaussian display modes.
 #[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
 pub enum GaussianDisplayMode {
+    #[default]
     Splat = 0,
     Ellipse = 1,
     Point = 2,
@@ -29,13 +30,70 @@ impl GaussianShDegree {
     }
 
     /// Create a new Gaussian SH degree without checking.
-    pub const fn new_unchecked(sh_deg: u8) -> Self {
+    ///
+    /// # Safety
+    ///
+    /// The degree must be in the range of \[0, 3\].
+    pub const unsafe fn new_unchecked(sh_deg: u8) -> Self {
         Self(sh_deg)
     }
 
     /// Get the degree.
-    pub const fn degree(&self) -> u8 {
+    pub const fn get(&self) -> u8 {
         self.0
+    }
+}
+
+impl Default for GaussianShDegree {
+    fn default() -> Self {
+        // SAFETY: 3 is in the range of [0, 3].
+        unsafe { Self::new_unchecked(3) }
+    }
+}
+
+/// The Gaussian's maximum standard deviation.
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GaussianMaxStdDev(u8);
+
+impl GaussianMaxStdDev {
+    /// Create a new Gaussian maximum standard deviation.
+    ///
+    /// Returns [`None`] if the maximum standard deviation is not in the range of \[0.0, 3.0\].
+    pub const fn new(max_std_dev: f32) -> Option<Self> {
+        match max_std_dev {
+            0.0..=3.0 => Some(Self((max_std_dev / 3.0 * 255.0) as u8)),
+            _ => None,
+        }
+    }
+
+    /// Create a new Gaussian maximum standard deviation without checking.
+    ///
+    /// # Safety
+    ///
+    /// The maximum standard deviation must be in the range of \[0.0, 3.0\].
+    pub const unsafe fn new_unchecked(max_std_dev: f32) -> Self {
+        Self((max_std_dev / 3.0 * 255.0) as u8)
+    }
+
+    /// Get the maximum standard deviation.
+    ///
+    /// Note that the returned value may have a small precision loss due to the internal
+    /// representation of [`prim@u8`].
+    pub const fn get(&self) -> f32 {
+        (self.0 as f32) / 255.0 * 3.0
+    }
+
+    /// Get the maximum standard deviation as the internal representation of [`prim@u8`].
+    pub const fn as_u8(&self) -> u8 {
+        self.0
+    }
+}
+
+impl Default for GaussianMaxStdDev {
+    fn default() -> Self {
+        // SAFETY: 3.0 is in the range of [0.0, 3.0].
+        unsafe { Self::new_unchecked(3.0) }
     }
 }
 
@@ -66,11 +124,11 @@ impl GaussianTransformBuffer {
         display_mode: GaussianDisplayMode,
         sh_deg: GaussianShDegree,
         no_sh0: bool,
-        std_dev: f32,
+        max_std_dev: GaussianMaxStdDev,
     ) {
         self.update_with_pod(
             queue,
-            &GaussianTransformPod::new(size, display_mode, sh_deg, no_sh0, std_dev),
+            &GaussianTransformPod::new(size, display_mode, sh_deg, no_sh0, max_std_dev),
         );
     }
 
@@ -121,16 +179,16 @@ impl GaussianTransformPod {
         display_mode: GaussianDisplayMode,
         sh_deg: GaussianShDegree,
         no_sh0: bool,
-        std_dev: f32,
+        max_std_dev: GaussianMaxStdDev,
     ) -> Self {
         let display_mode = display_mode as u8;
         let sh_deg = sh_deg.0;
         let no_sh0 = no_sh0 as u8;
-        let std_dev = (std_dev / 3.0 * 255.0) as u8;
+        let max_std_dev = max_std_dev.0;
 
         Self {
             size,
-            flags: u8vec4(display_mode, sh_deg, no_sh0, std_dev),
+            flags: u8vec4(display_mode, sh_deg, no_sh0, max_std_dev),
         }
     }
 }
@@ -139,10 +197,10 @@ impl Default for GaussianTransformPod {
     fn default() -> Self {
         Self::new(
             1.0,
-            GaussianDisplayMode::Splat,
-            GaussianShDegree::new_unchecked(3),
+            GaussianDisplayMode::default(),
+            GaussianShDegree::default(),
             false,
-            3.0,
+            GaussianMaxStdDev::default(),
         )
     }
 }
