@@ -1,4 +1,5 @@
 use assert_matches::assert_matches;
+use pollster::FutureExt;
 use wgpu::util::DeviceExt;
 use wgpu_3dgs_core::{
     BufferWrapper, ComputeBundleBuildError, ComputeBundleBuilder, ComputeBundleCreateError,
@@ -32,8 +33,10 @@ fn test_compute_bundle_when_with_bind_group_should_run_correctly() {
 
     ctx.queue.submit(Some(encoder.finish()));
 
-    let downloaded =
-        pollster::block_on(data.download::<u32>(&ctx.device, &ctx.queue)).expect("download");
+    let downloaded = data
+        .download::<u32>(&ctx.device, &ctx.queue)
+        .block_on()
+        .expect("download");
 
     assert_eq!(
         &downloaded,
@@ -63,8 +66,10 @@ fn test_compute_bundle_when_with_bind_group_should_run_correctly() {
 
     ctx.queue.submit(Some(encoder.finish()));
 
-    let downloaded =
-        pollster::block_on(new_data.download::<u32>(&ctx.device, &ctx.queue)).expect("download");
+    let downloaded = new_data
+        .download::<u32>(&ctx.device, &ctx.queue)
+        .block_on()
+        .expect("download");
 
     assert_eq!(&downloaded, &NEW_DATA.map(|v| v + 1));
 }
@@ -132,8 +137,10 @@ fn test_compute_bundle_when_all_options_and_without_bind_group_should_run_correc
 
     ctx.queue.submit(Some(encoder.finish()));
 
-    let downloaded =
-        pollster::block_on(data.download::<u32>(&ctx.device, &ctx.queue)).expect("download");
+    let downloaded = data
+        .download::<u32>(&ctx.device, &ctx.queue)
+        .block_on()
+        .expect("download");
 
     assert_eq!(
         &downloaded,
@@ -173,8 +180,10 @@ fn test_compute_bundle_when_all_options_and_without_bind_group_should_run_correc
 
     ctx.queue.submit(Some(encoder.finish()));
 
-    let downloaded =
-        pollster::block_on(data.download::<u32>(&ctx.device, &ctx.queue)).expect("download");
+    let downloaded = data
+        .download::<u32>(&ctx.device, &ctx.queue)
+        .block_on()
+        .expect("download");
 
     assert_eq!(
         &downloaded,

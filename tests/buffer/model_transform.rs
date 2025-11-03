@@ -1,6 +1,9 @@
 use glam::*;
+use pollster::FutureExt;
 use wgpu::util::DeviceExt;
-use wgpu_3dgs_core::{BufferWrapper, ModelTransformBuffer, ModelTransformPod};
+use wgpu_3dgs_core::{
+    BufferWrapper, FixedSizeBufferWrapper, ModelTransformBuffer, ModelTransformPod,
+};
 
 use crate::common::TestContext;
 
@@ -34,9 +37,10 @@ fn test_model_transform_buffer_update_should_update_buffer_correctly() {
 
     buffer.update(&ctx.queue, pos, rot, scale);
 
-    let downloaded =
-        pollster::block_on(buffer.download::<ModelTransformPod>(&ctx.device, &ctx.queue))
-            .expect("download")[0];
+    let downloaded = buffer
+        .download_single(&ctx.device, &ctx.queue)
+        .block_on()
+        .expect("download single");
 
     assert_eq!(downloaded, pod);
 }
@@ -60,16 +64,18 @@ fn test_model_transform_buffer_try_from_and_into_wgpu_buffer_should_be_equal() {
     let converted_buffer = ModelTransformBuffer::try_from(wgpu_buffer.clone()).expect("try_from");
     let wgpu_converted_buffer = wgpu::Buffer::from(converted_buffer.clone());
 
-    let wgpu_downloaded = pollster::block_on(
-        wgpu_converted_buffer.download::<ModelTransformPod>(&ctx.device, &ctx.queue),
-    )
-    .expect("download");
-    let converted_downloaded =
-        pollster::block_on(converted_buffer.download::<ModelTransformPod>(&ctx.device, &ctx.queue))
-            .expect("download");
-    let wgpu_converted_downloaded =
-        pollster::block_on(wgpu_buffer.download::<ModelTransformPod>(&ctx.device, &ctx.queue))
-            .expect("download");
+    let wgpu_downloaded = wgpu_converted_buffer
+        .download::<ModelTransformPod>(&ctx.device, &ctx.queue)
+        .block_on()
+        .expect("download");
+    let converted_downloaded = converted_buffer
+        .download::<ModelTransformPod>(&ctx.device, &ctx.queue)
+        .block_on()
+        .expect("download");
+    let wgpu_converted_downloaded = wgpu_buffer
+        .download::<ModelTransformPod>(&ctx.device, &ctx.queue)
+        .block_on()
+        .expect("download");
 
     assert_eq!(wgpu_downloaded, converted_downloaded);
     assert_eq!(wgpu_downloaded, wgpu_converted_downloaded);

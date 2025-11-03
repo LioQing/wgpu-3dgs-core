@@ -1,3 +1,4 @@
+use pollster::FutureExt;
 use wgpu::util::DeviceExt;
 use wgpu_3dgs_core::{
     BufferWrapper, ComputeBundleBuilder, ModelTransformBuffer, ModelTransformPod, glam::*,
@@ -155,7 +156,9 @@ fn test_model_transform_wesl_functions_should_return_correct_values() {
 
     ctx.queue.submit(Some(encoder.finish()));
 
-    let downloaded = pollster::block_on(output_buffer.download::<Output>(&ctx.device, &ctx.queue))
+    let downloaded = output_buffer
+        .download::<Output>(&ctx.device, &ctx.queue)
+        .block_on()
         .expect("download")[0];
 
     let expected_transform_mat = Mat4::from_scale_rotation_translation(scale, rot, pos);

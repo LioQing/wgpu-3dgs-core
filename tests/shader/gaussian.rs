@@ -1,3 +1,4 @@
+use pollster::FutureExt;
 use wgpu_3dgs_core::{
     BufferWrapper, ComputeBundleBuilder, GaussianCov3dConfig, GaussianPod,
     GaussianPodWithShHalfCov3dSingleConfigs, GaussianPodWithShNorm8Cov3dSingleConfigs,
@@ -151,8 +152,10 @@ fn dispatch_test<G: GaussianPod>(ctx: &TestContext, buffer: &GaussiansBuffer<G>)
 
     ctx.queue.submit(Some(encoder.finish()));
 
-    pollster::block_on(output_buffer.download::<Output>(&ctx.device, &ctx.queue)).expect("download")
-        [0]
+    output_buffer
+        .download::<Output>(&ctx.device, &ctx.queue)
+        .block_on()
+        .expect("download")[0]
 }
 
 #[test]
