@@ -88,7 +88,7 @@ fn test_model_transform_pod_new_should_return_correct_pod() {
     let scale = Vec3::new(2.0, 3.0, 4.0);
     let pod = ModelTransformPod::new(pos, rot, scale);
 
-    assert_eq!(pod.pos, pos);
+    assert_eq!(pod.pos, pos.to_vec3a());
     assert_eq!(pod.rot, rot);
-    assert_eq!(pod.scale, scale);
+    assert_eq!(pod.scale, scale.to_vec3a());
 }

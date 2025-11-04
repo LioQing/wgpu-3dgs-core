@@ -61,22 +61,18 @@ impl FixedSizeBufferWrapper for ModelTransformBuffer {
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct ModelTransformPod {
-    pub pos: Vec3,
-    pub padding_0: f32,
+    pub pos: Vec3A,
     pub rot: Quat,
-    pub scale: Vec3,
-    pub padding_1: f32,
+    pub scale: Vec3A,
 }
 
 impl ModelTransformPod {
     /// Create a new model transformation.
     pub const fn new(pos: Vec3, rot: Quat, scale: Vec3) -> Self {
         Self {
-            pos,
-            padding_0: 0.0,
+            pos: Vec3A::from_array(pos.to_array()),
             rot,
-            scale,
-            padding_1: 0.0,
+            scale: Vec3A::from_array(scale.to_array()),
         }
     }
 }
