@@ -50,7 +50,7 @@ const TEST_PACKAGE: wesl::Pkg = inline_wesl_pkg!(
 
         // TODO(#7): Switch to zero-based indexing.
         for (var i: u32 = 0u; i < 15u; i = i + 1u) {
-            let sh = gaussian_unpack_sh(gaussian, i + 1u);
+            let sh = gaussian_unpack_sh(gaussian, i);
             output.sh[i * 3u + 0u] = sh.x;
             output.sh[i * 3u + 1u] = sh.y;
             output.sh[i * 3u + 2u] = sh.z;
