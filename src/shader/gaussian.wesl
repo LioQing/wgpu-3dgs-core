@@ -28,15 +28,15 @@ fn gaussian_unpack_color(gaussian: Gaussian) -> vec4<f32> {
 // Unpack the SH coefficients from `Gaussian.sh`.
 @if(sh_single) fn gaussian_unpack_sh(gaussian: Gaussian, sh_index: u32) -> vec3<f32> {
     return vec3<f32>(
-        gaussian.sh[(sh_index - 1) * 3],
-        gaussian.sh[(sh_index - 1) * 3 + 1],
-        gaussian.sh[(sh_index - 1) * 3 + 2],
+        gaussian.sh[sh_index * 3],
+        gaussian.sh[sh_index * 3 + 1],
+        gaussian.sh[sh_index * 3 + 2],
     );
 }
 
 // Unpack the SH coefficients from `Gaussian.sh`.
 @if(sh_half) fn gaussian_unpack_sh(gaussian: Gaussian, sh_index: u32) -> vec3<f32> {
-    let i = (sh_index - 1) * 3;
+    let i = sh_index * 3;
     let xi = i / 2;
     let yi = (i + 1) / 2;
     let zi = (i + 2) / 2;
@@ -58,7 +58,7 @@ fn gaussian_unpack_color(gaussian: Gaussian) -> vec4<f32> {
 @if(sh_norm8) fn gaussian_unpack_sh(gaussian: Gaussian, sh_index: u32) -> vec3<f32> {
     let minmax = unpack2x16float(gaussian.sh[0]);
 
-    let i = (sh_index - 1) * 3;
+    let i = sh_index * 3;
     let xi = i / 4;
     let xj = i % 4;
     let yi = (i + 1) / 4;
