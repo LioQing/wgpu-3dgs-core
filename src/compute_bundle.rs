@@ -137,6 +137,7 @@ impl ComputeBundle {
     ///
     /// `shader_source` requires an overridable variable `workgroup_size` of `u32`, see docs of
     /// [`ComputeBundle`].
+    #[allow(clippy::too_many_arguments)]
     pub fn new<'a, 'b>(
         label: Option<&str>,
         device: &wgpu::Device,
@@ -145,6 +146,7 @@ impl ComputeBundle {
         compilation_options: wgpu::PipelineCompilationOptions,
         shader_source: wgpu::ShaderSource,
         entry_point: &str,
+        workgroup_size: Option<u32>,
     ) -> Result<Self, ComputeBundleCreateError> {
         let this = ComputeBundle::new_without_bind_groups(
             label,
@@ -153,7 +155,8 @@ impl ComputeBundle {
             compilation_options,
             shader_source,
             entry_point,
-        );
+            workgroup_size,
+        )?;
 
         let resources = resources.into_iter().collect::<Vec<_>>();
 
@@ -261,11 +264,21 @@ impl ComputeBundle<()> {
         compilation_options: wgpu::PipelineCompilationOptions,
         shader_source: wgpu::ShaderSource,
         entry_point: &str,
-    ) -> Self {
-        let workgroup_size = device
+        workgroup_size: Option<u32>,
+    ) -> Result<Self, ComputeBundleCreateError> {
+        let workgroup_size_limit = device
             .limits()
             .max_compute_workgroup_size_x
             .min(device.limits().max_compute_invocations_per_workgroup);
+
+        let workgroup_size = workgroup_size.unwrap_or(workgroup_size_limit);
+
+        if workgroup_size > workgroup_size_limit {
+            return Err(ComputeBundleCreateError::WorkgroupSizeExceedsDeviceLimit {
+                workgroup_size,
+                device_limit: workgroup_size_limit,
+            });
+        }
 
         log::debug!(
             "Creating {} bind group layouts",
@@ -318,13 +331,13 @@ impl ComputeBundle<()> {
 
         log::info!("{} created", label.unwrap_or("Compute Bundle"));
 
-        Self {
+        Ok(Self {
             label: label.map(String::from),
             workgroup_size,
             bind_group_layouts,
             bind_groups: Vec::new(),
             pipeline,
-        }
+        })
     }
 
     /// Dispatch the compute bundle for `count` instances.
@@ -357,6 +370,7 @@ pub struct ComputeBundleBuilder<'a, R: wesl::Resolver = wesl::StandardResolver> 
     pub wesl_compile_options: wesl::CompileOptions,
     pub resolver: Option<R>,
     pub mangler: Box<dyn wesl::Mangler + Send + Sync + 'static>,
+    pub workgroup_size: Option<u32>,
 }
 
 impl ComputeBundleBuilder<'_> {
@@ -371,6 +385,7 @@ impl ComputeBundleBuilder<'_> {
             wesl_compile_options: wesl::CompileOptions::default(),
             resolver: None,
             mangler: Box::new(wesl::NoMangler),
+            workgroup_size: None,
         }
     }
 }
@@ -432,6 +447,7 @@ impl<'a, R: wesl::Resolver> ComputeBundleBuilder<'a, R> {
             wesl_compile_options: self.wesl_compile_options,
             resolver: self.resolver,
             mangler: self.mangler,
+            workgroup_size: self.workgroup_size,
         }
     }
 
@@ -452,6 +468,7 @@ impl<'a, R: wesl::Resolver> ComputeBundleBuilder<'a, R> {
             wesl_compile_options: self.wesl_compile_options,
             resolver: Some(resolver),
             mangler: self.mangler,
+            workgroup_size: self.workgroup_size,
         }
     }
 
@@ -469,7 +486,14 @@ impl<'a, R: wesl::Resolver> ComputeBundleBuilder<'a, R> {
             wesl_compile_options: self.wesl_compile_options,
             resolver: self.resolver,
             mangler: Box::new(mangler),
+            workgroup_size: self.workgroup_size,
         }
+    }
+
+    /// Set the workgroup size.
+    pub fn workgroup_size(mut self, workgroup_size: u32) -> Self {
+        self.workgroup_size = Some(workgroup_size);
+        self
     }
 
     /// Build the compute bundle with bindings.
@@ -513,6 +537,7 @@ impl<'a, R: wesl::Resolver> ComputeBundleBuilder<'a, R> {
             self.pipeline_compile_options,
             shader_source,
             entry_point,
+            self.workgroup_size,
         )
         .map_err(Into::into)
     }
@@ -556,7 +581,8 @@ impl<'a, R: wesl::Resolver> ComputeBundleBuilder<'a, R> {
             self.pipeline_compile_options,
             shader_source,
             entry_point,
-        ))
+            self.workgroup_size,
+        )?)
     }
 }
 

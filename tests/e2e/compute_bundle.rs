@@ -12,13 +12,17 @@ fn test_compute_bundle_when_with_bind_group_should_run_correctly() {
     let ctx = TestContext::new();
 
     let data = shader::given::array_map_add_data(&ctx.device);
+    let workgroup_size = 1;
     let mut bundle = ComputeBundleBuilder::new()
         .bind_group_layout(&shader::ARRAY_MAP_ADD_BIND_GROUP_LAYOUT_DESCRIPTOR)
         .resolver(wesl::StandardResolver::new(shader::SHADER_DIR))
         .main_shader(shader::ARRAY_MAP_ADD_MODULE_PATH.parse().expect("parse"))
         .entry_point(shader::SHADER_ENTRY_POINT)
+        .workgroup_size(workgroup_size)
         .build(&ctx.device, [[data.as_entire_binding()]])
         .expect("build");
+
+    assert_eq!(bundle.workgroup_size(), workgroup_size);
 
     let mut encoder = ctx
         .device
@@ -75,11 +79,48 @@ fn test_compute_bundle_when_with_bind_group_should_run_correctly() {
 }
 
 #[test]
+fn test_compute_bundle_builder_build_when_workgroup_size_exceeds_device_limit_should_return_error()
+{
+    let ctx = TestContext::new();
+    let data = shader::given::array_map_add_data(&ctx.device);
+
+    let workgroup_size_limit = ctx
+        .device
+        .limits()
+        .max_compute_workgroup_size_x
+        .min(ctx.device.limits().max_compute_invocations_per_workgroup);
+    let invalid_workgroup_size = workgroup_size_limit + 1;
+
+    let result = ComputeBundleBuilder::new()
+        .bind_group_layout(&shader::ARRAY_MAP_ADD_BIND_GROUP_LAYOUT_DESCRIPTOR)
+        .resolver(wesl::StandardResolver::new(shader::SHADER_DIR))
+        .main_shader(shader::ARRAY_MAP_ADD_MODULE_PATH.parse().expect("parse"))
+        .entry_point(shader::SHADER_ENTRY_POINT)
+        .workgroup_size(invalid_workgroup_size)
+        .build(&ctx.device, [[data.as_entire_binding()]]);
+
+    assert_matches!(
+        result,
+        Err(ComputeBundleBuildError::Create(
+            ComputeBundleCreateError::WorkgroupSizeExceedsDeviceLimit {
+                workgroup_size,
+                device_limit,
+            }
+        )) if workgroup_size == invalid_workgroup_size && device_limit == workgroup_size_limit
+    );
+}
+
+#[test]
 fn test_compute_bundle_when_all_options_and_without_bind_group_should_run_correctly() {
     let ctx = TestContext::new();
 
     let data = shader::given::array_map_add_data(&ctx.device);
     let additional_value = shader::given::array_map_add_additional_uniform(&ctx.device);
+    let workgroup_size = ctx
+        .device
+        .limits()
+        .max_compute_workgroup_size_x
+        .min(ctx.device.limits().max_compute_invocations_per_workgroup);
     let bundle = ComputeBundleBuilder::default()
         .label("Compute Bundle")
         .bind_group_layouts([
@@ -104,8 +145,11 @@ fn test_compute_bundle_when_all_options_and_without_bind_group_should_run_correc
         .mangler(wesl::NoMangler)
         .main_shader(shader::ARRAY_MAP_ADD_MODULE_PATH.parse().expect("parse"))
         .entry_point(shader::SHADER_ENTRY_POINT)
+        .workgroup_size(workgroup_size)
         .build_without_bind_groups(&ctx.device)
         .expect("build");
+
+    assert_eq!(bundle.workgroup_size(), workgroup_size);
 
     let bind_groups = (0..2)
         .map(|i| {
