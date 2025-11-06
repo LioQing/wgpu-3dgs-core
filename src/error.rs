@@ -64,6 +64,14 @@ pub enum ComputeBundleCreateError {
         resource_count: usize,
         bind_group_layout_count: usize,
     },
+    #[error(
+        "workgroup size exceeds device limit: \
+        {workgroup_size} > {device_limit}"
+    )]
+    WorkgroupSizeExceedsDeviceLimit {
+        workgroup_size: u32,
+        device_limit: u32,
+    },
 }
 
 /// The error type for [`ComputeBundleBuilder::build`](crate::ComputeBundleBuilder::build) function.
