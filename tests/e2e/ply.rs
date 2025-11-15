@@ -130,6 +130,27 @@ fn test_gaussians_write_ply_and_read_ply_should_be_equal() {
 }
 
 #[test]
+fn test_gaussians_write_ply_file_and_read_ply_file_should_be_equal() {
+    let gaussians = given::gaussians().convert::<PlyGaussianPod>();
+    let path = given::temp_path(".ply");
+
+    gaussians.write_ply_file(&path).unwrap();
+    let gaussians_read = Gaussians::read_ply_file(&path).unwrap();
+
+    assert_eq!(gaussians.gaussians.len(), gaussians_read.gaussians.len());
+
+    for (a, b) in gaussians
+        .gaussians
+        .iter()
+        .zip(gaussians_read.gaussians.iter())
+    {
+        assert::ply_gaussian_pod(a, b);
+    }
+
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
 fn test_gaussians_read_ply_when_format_is_custom_and_ascii_should_match_original_gaussian() {
     let gaussians = given::gaussians().convert::<PlyGaussianPod>();
     let buffer =

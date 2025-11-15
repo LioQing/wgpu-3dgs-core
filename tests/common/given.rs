@@ -1,5 +1,17 @@
 use wgpu_3dgs_core::{Gaussian, Gaussians, glam::*};
 
+pub fn temp_path(suffix: &str) -> std::path::PathBuf {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+
+    std::env::temp_dir().join(format!(
+        "wgpu-3dgs-core-test-{}-{nanos}{suffix}",
+        std::process::id()
+    ))
+}
+
 pub fn gaussian_with_seed(seed: u32) -> Gaussian {
     let base = seed as f32;
 
