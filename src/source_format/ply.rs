@@ -257,7 +257,14 @@ impl Gaussians<PlyGaussianPod> {
         "rot_3",
     ];
 
-    /// Read a PLY file.
+    /// Read a PLY from file.
+    pub fn read_ply_file(path: impl AsRef<std::path::Path>) -> Result<Self, std::io::Error> {
+        let file = std::fs::File::open(path)?;
+        let mut reader = std::io::BufReader::new(file);
+        Self::read_ply(&mut reader)
+    }
+
+    /// Read a PLY from buffer.
     ///
     /// The PLY file is expected to be the same format as the one used in the original Inria
     /// implementation, or a custom PLY file with the same properties.
@@ -378,8 +385,15 @@ impl Gaussians<PlyGaussianPod> {
     }
 
     /// Write the Gaussians to a PLY file.
+    pub fn write_ply_file(&self, path: impl AsRef<std::path::Path>) -> Result<(), std::io::Error> {
+        let file = std::fs::File::create(path)?;
+        let mut writer = std::io::BufWriter::new(file);
+        self.write_ply(&mut writer)
+    }
+
+    /// Write the Gaussians to a PLY buffer.
     ///
-    /// The output PLY file will be in binary little endian format with the same properties as the
+    /// The output PLY buffer will be in binary little endian format with the same properties as the
     /// original Inria implementation.
     ///
     /// See [`Gaussians::PLY_PROPERTIES`] for a list of the properties.

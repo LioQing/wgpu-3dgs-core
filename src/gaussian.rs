@@ -148,6 +148,60 @@ impl Gaussian {
             rot,
         }
     }
+
+    /// Convert from [`spz_rs::UnpackedGaussian`].
+    pub fn from_spz(spz: &spz_rs::UnpackedGaussian) -> Self {
+        let pos = Vec3::from_array(spz.position);
+        let rot = Quat::from_array(spz.rotation);
+        let scale = Vec3::from_array(spz.scale);
+        let color = U8Vec4::from_array([
+            (spz.color[0] * 255.0) as u8,
+            (spz.color[1] * 255.0) as u8,
+            (spz.color[2] * 255.0) as u8,
+            (spz.alpha * 255.0) as u8,
+        ]);
+        let sh = std::array::from_fn(|i| Vec3::new(spz.sh_r[i], spz.sh_g[i], spz.sh_b[i]));
+
+        Self {
+            rot,
+            pos,
+            color,
+            sh,
+            scale,
+        }
+    }
+
+    /// Convert to [`spz_rs::UnpackedGaussian`].
+    pub fn to_spz(&self) -> spz_rs::UnpackedGaussian {
+        let position = self.pos.to_array();
+        let rotation = self.rot.to_array();
+        let scale = self.scale.to_array();
+        let color = [
+            self.color.x as f32 / 255.0,
+            self.color.y as f32 / 255.0,
+            self.color.z as f32 / 255.0,
+        ];
+        let alpha = self.color.w as f32 / 255.0;
+        let mut sh_r = [0.0; 15];
+        let mut sh_g = [0.0; 15];
+        let mut sh_b = [0.0; 15];
+        for i in 0..15 {
+            sh_r[i] = self.sh[i].x;
+            sh_g[i] = self.sh[i].y;
+            sh_b[i] = self.sh[i].z;
+        }
+
+        spz_rs::UnpackedGaussian {
+            position,
+            rotation,
+            scale,
+            color,
+            alpha,
+            sh_r,
+            sh_g,
+            sh_b,
+        }
+    }
 }
 
 impl From<&Gaussian> for Gaussian {
@@ -165,5 +219,17 @@ impl From<PlyGaussianPod> for Gaussian {
 impl From<&PlyGaussianPod> for Gaussian {
     fn from(ply: &PlyGaussianPod) -> Self {
         Self::from_ply(ply)
+    }
+}
+
+impl From<spz_rs::UnpackedGaussian> for Gaussian {
+    fn from(spz: spz_rs::UnpackedGaussian) -> Self {
+        Self::from_spz(&spz)
+    }
+}
+
+impl From<&spz_rs::UnpackedGaussian> for Gaussian {
+    fn from(spz: &spz_rs::UnpackedGaussian) -> Self {
+        Self::from_spz(spz)
     }
 }

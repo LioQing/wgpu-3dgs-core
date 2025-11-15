@@ -1,4 +1,5 @@
 $BASE_DIR = $PSScriptRoot
+$EXAMPLES_PATH = "$BASE_DIR/../examples"
 $LCOV_PATH = "$BASE_DIR/lcov.info"
 
 echo "Running coverage..."
@@ -9,7 +10,10 @@ echo "Running 'write-ply' example"
 cargo llvm-cov run --example write-ply -- "$BASE_DIR/output.ply"
 
 echo "Running 'read-ply' example"
-cargo llvm-cov run --example read-ply -- "$BASE_DIR/model.ply"
+cargo llvm-cov run --example read-ply -- "$EXAMPLES_PATH/model.ply"
+
+echo "Running 'read-spz' example"
+cargo llvm-cov run --example read-spz -- "$EXAMPLES_PATH/model.spz"
 
 # `--doctests` flag is currently unstable
 # echo "Running doctests"
