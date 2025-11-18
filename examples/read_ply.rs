@@ -37,7 +37,7 @@ async fn main() {
 
     println!("Reading gaussians from {}", model_path);
 
-    let gaussians = gs::Gaussians::read_ply_file(&model_path).expect("gaussians");
+    let gaussians = gs::PlyGaussians::read_ply_file(&model_path).expect("gaussians");
 
     let gaussians_buffer = gs::GaussiansBuffer::<GaussianPod>::new(&device, &gaussians);
 

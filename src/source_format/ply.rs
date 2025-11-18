@@ -2,7 +2,7 @@ use std::io::{BufRead, Write};
 
 use bytemuck::Zeroable;
 
-use crate::{Gaussian, Gaussians};
+use crate::{Gaussian, IterGaussian};
 
 /// The POD representation of Gaussian in PLY format.
 ///
@@ -128,7 +128,7 @@ impl From<&Gaussian> for PlyGaussianPod {
 
 /// Header of PLY file.
 ///
-/// This represents the header parsed by [`Gaussians::read_ply_header`](crate::Gaussians::read_ply_header).
+/// This represents the header parsed by [`Gaussians::read_ply_header`].
 #[derive(Debug, Clone)]
 pub enum PlyHeader {
     /// The Inria PLY format.
@@ -190,7 +190,10 @@ fn vertex_element_not_found_error() -> std::io::Error {
     )
 }
 
-impl Gaussians<PlyGaussianPod> {
+#[derive(Debug, Default, Clone)]
+pub struct PlyGaussians(pub Vec<PlyGaussianPod>);
+
+impl PlyGaussians {
     /// The list of properties in the PLY file.
     pub const PLY_PROPERTIES: &[&str] = &[
         "x",
@@ -257,6 +260,26 @@ impl Gaussians<PlyGaussianPod> {
         "rot_3",
     ];
 
+    /// Get the number of Gaussians.
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    /// Check if there are no Gaussians.
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// Iterate over the Gaussians.
+    pub fn iter(&self) -> impl Iterator<Item = &PlyGaussianPod> {
+        self.0.iter()
+    }
+
+    /// Iterate over the Gaussians mutably.
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut PlyGaussianPod> {
+        self.0.iter_mut()
+    }
+
     /// Read a PLY from file.
     pub fn read_ply_file(path: impl AsRef<std::path::Path>) -> Result<Self, std::io::Error> {
         let file = std::fs::File::open(path)?;
@@ -282,7 +305,7 @@ impl Gaussians<PlyGaussianPod> {
             gaussians.push(gaussian?);
         }
 
-        Ok(Self { gaussians })
+        Ok(Self(gaussians))
     }
 
     /// Read a PLY header.
@@ -405,16 +428,34 @@ impl Gaussians<PlyGaussianPod> {
 
         writeln!(writer, "ply")?;
         writeln!(writer, "format {SYSTEM_ENDIANNESS} 1.0")?;
-        writeln!(writer, "element vertex {}", self.gaussians.len())?;
+        writeln!(writer, "element vertex {}", self.0.len())?;
         for property in Self::PLY_PROPERTIES {
             writeln!(writer, "property float {property}")?;
         }
         writeln!(writer, "end_header")?;
 
-        self.gaussians
+        self.0
             .iter()
             .try_for_each(|gaussian| writer.write_all(bytemuck::bytes_of(gaussian)))?;
 
         Ok(())
+    }
+}
+
+impl IterGaussian for PlyGaussians {
+    fn iter_gaussian(&self) -> impl Iterator<Item = Gaussian> + '_ {
+        self.iter().map(Gaussian::from_ply)
+    }
+}
+
+impl From<Vec<PlyGaussianPod>> for PlyGaussians {
+    fn from(gaussians: Vec<PlyGaussianPod>) -> Self {
+        Self(gaussians)
+    }
+}
+
+impl FromIterator<PlyGaussianPod> for PlyGaussians {
+    fn from_iter<T: IntoIterator<Item = PlyGaussianPod>>(iter: T) -> Self {
+        Self(iter.into_iter().collect())
     }
 }
