@@ -1,4 +1,4 @@
-use wgpu_3dgs_core::{Gaussian, Gaussians, glam::*};
+use wgpu_3dgs_core::{Gaussian, PlyGaussians, glam::*};
 
 pub fn temp_path(suffix: &str) -> std::path::PathBuf {
     let nanos = std::time::SystemTime::now()
@@ -47,8 +47,11 @@ pub fn gaussian_with_seed(seed: u32) -> Gaussian {
     }
 }
 
-pub fn gaussians() -> Gaussians<Gaussian> {
-    Gaussians::new(vec![gaussian_with_seed(42), gaussian_with_seed(123)])
+pub fn gaussians() -> PlyGaussians {
+    PlyGaussians(vec![
+        gaussian_with_seed(42).to_ply(),
+        gaussian_with_seed(123).to_ply(),
+    ])
 }
 
 pub fn gaussian() -> Gaussian {

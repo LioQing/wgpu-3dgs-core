@@ -3,7 +3,7 @@ use wgpu_3dgs_core::{
     BufferWrapper, ComputeBundleBuilder, GaussianCov3dConfig, GaussianPod,
     GaussianPodWithShHalfCov3dSingleConfigs, GaussianPodWithShNorm8Cov3dSingleConfigs,
     GaussianPodWithShSingleCov3dHalfConfigs, GaussianPodWithShSingleCov3dRotScaleConfigs,
-    GaussianPodWithShSingleCov3dSingleConfigs, Gaussians, GaussiansBuffer, glam::*,
+    GaussianPodWithShSingleCov3dSingleConfigs, GaussiansBuffer, glam::*,
 };
 
 use crate::{
@@ -164,7 +164,7 @@ fn test_gaussian_unpack_color_should_return_correct_value() {
     type G = GaussianPodWithShSingleCov3dSingleConfigs;
 
     let gaussian = given::gaussian();
-    let gaussians = Gaussians::new(vec![gaussian]);
+    let gaussians = vec![gaussian];
     let buffer = GaussiansBuffer::<G>::new_with_usage(
         &ctx.device,
         &gaussians,
@@ -190,7 +190,7 @@ fn test_gaussian_unpack_sh_when_config_is_single_should_return_correct_value() {
     type G = GaussianPodWithShSingleCov3dSingleConfigs;
 
     let gaussian = given::gaussian();
-    let gaussians = Gaussians::new(vec![gaussian]);
+    let gaussians = vec![gaussian];
     let buffer = GaussiansBuffer::<G>::new_with_usage(
         &ctx.device,
         &gaussians,
@@ -199,7 +199,7 @@ fn test_gaussian_unpack_sh_when_config_is_single_should_return_correct_value() {
 
     let output = dispatch_test(&ctx, &buffer);
 
-    let expected_sh = gaussian.sh.as_slice();
+    let expected_sh = gaussian.sh;
 
     assert!(
         expected_sh
@@ -219,7 +219,7 @@ fn test_gaussian_unpack_sh_when_config_is_half_should_return_correct_value() {
     type G = GaussianPodWithShHalfCov3dSingleConfigs;
 
     let gaussian = given::gaussian();
-    let gaussians = Gaussians::new(vec![gaussian]);
+    let gaussians = vec![gaussian];
     let buffer = GaussiansBuffer::<G>::new_with_usage(
         &ctx.device,
         &gaussians,
@@ -228,7 +228,7 @@ fn test_gaussian_unpack_sh_when_config_is_half_should_return_correct_value() {
 
     let output = dispatch_test(&ctx, &buffer);
 
-    let expected_sh = gaussian.sh.as_slice();
+    let expected_sh = gaussian.sh;
 
     assert!(
         expected_sh
@@ -248,7 +248,7 @@ fn test_gaussian_unpack_sh_when_config_is_norm_8_should_return_correct_value() {
     type G = GaussianPodWithShNorm8Cov3dSingleConfigs;
 
     let gaussian = given::gaussian();
-    let gaussians = Gaussians::new(vec![gaussian]);
+    let gaussians = vec![gaussian];
     let buffer = GaussiansBuffer::<G>::new_with_usage(
         &ctx.device,
         &gaussians,
@@ -257,7 +257,7 @@ fn test_gaussian_unpack_sh_when_config_is_norm_8_should_return_correct_value() {
 
     let output = dispatch_test(&ctx, &buffer);
 
-    let expected_sh = gaussian.sh.as_slice();
+    let expected_sh = gaussian.sh;
 
     assert!(
         expected_sh
@@ -277,7 +277,7 @@ fn test_gaussian_unpack_cov3d_when_config_is_rot_scale_should_return_correct_val
     type G = GaussianPodWithShSingleCov3dRotScaleConfigs;
 
     let gaussian = given::gaussian();
-    let gaussians = Gaussians::new(vec![gaussian]);
+    let gaussians = vec![gaussian];
     let buffer = GaussiansBuffer::<G>::new_with_usage(
         &ctx.device,
         &gaussians,
@@ -309,7 +309,7 @@ fn test_gaussian_unpack_cov3d_when_config_is_single_should_return_correct_value(
     type G = GaussianPodWithShSingleCov3dSingleConfigs;
 
     let gaussian = given::gaussian();
-    let gaussians = Gaussians::new(vec![gaussian]);
+    let gaussians = vec![gaussian];
     let buffer = GaussiansBuffer::<G>::new_with_usage(
         &ctx.device,
         &gaussians,
@@ -341,7 +341,7 @@ fn test_gaussian_unpack_cov3d_when_config_is_half_should_return_correct_value() 
     type G = GaussianPodWithShSingleCov3dHalfConfigs;
 
     let gaussian = given::gaussian();
-    let gaussians = Gaussians::new(vec![gaussian]);
+    let gaussians = vec![gaussian];
     let buffer = GaussiansBuffer::<G>::new_with_usage(
         &ctx.device,
         &gaussians,
