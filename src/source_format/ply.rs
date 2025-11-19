@@ -128,7 +128,7 @@ impl From<&Gaussian> for PlyGaussianPod {
 
 /// Header of PLY file.
 ///
-/// This represents the header parsed by [`Gaussians::read_ply_header`].
+/// This represents the header parsed by [`PlyGaussians::read_ply_header`].
 #[derive(Debug, Clone)]
 pub enum PlyHeader {
     /// The Inria PLY format.
@@ -292,7 +292,7 @@ impl PlyGaussians {
     /// The PLY file is expected to be the same format as the one used in the original Inria
     /// implementation, or a custom PLY file with the same properties.
     ///
-    /// See [`Gaussians::PLY_PROPERTIES`] for a list of expected properties.
+    /// See [`PlyGaussians::PLY_PROPERTIES`] for a list of expected properties.
     pub fn read_ply(reader: &mut impl BufRead) -> Result<Self, std::io::Error> {
         let ply_header = Self::read_ply_header(reader)?;
 
@@ -310,7 +310,7 @@ impl PlyGaussians {
 
     /// Read a PLY header.
     ///
-    /// See [`Gaussians::PLY_PROPERTIES`] for a list of expected properties.
+    /// See [`PlyGaussians::PLY_PROPERTIES`] for a list of expected properties.
     pub fn read_ply_header(reader: &mut impl BufRead) -> Result<PlyHeader, std::io::Error> {
         let parser = ply_rs::parser::Parser::<ply_rs::ply::DefaultElement>::new();
         let header = parser.read_header(reader)?;
@@ -344,17 +344,15 @@ impl PlyGaussians {
 
     /// Read the PLY Gaussians into [`PlyGaussianPod`].
     ///
-    /// `ply_header` may be parsed by calling [`Gaussians::read_ply_header`].
+    /// `header` may be parsed by calling [`PlyGaussians::read_ply_header`].
     pub fn read_ply_gaussians(
         reader: &mut impl BufRead,
-        ply_header: PlyHeader,
+        header: PlyHeader,
     ) -> Result<impl Iterator<Item = Result<PlyGaussianPod, std::io::Error>>, std::io::Error> {
-        let count = ply_header
-            .count()
-            .ok_or_else(vertex_element_not_found_error)?;
+        let count = header.count().ok_or_else(vertex_element_not_found_error)?;
         log::info!("Reading PLY format with {count} Gaussians");
 
-        Ok(match ply_header {
+        Ok(match header {
             PlyHeader::Inria(..) => PlyGaussianIter::Inria((0..count).map(|_| {
                 let mut gaussian = PlyGaussianPod::zeroed();
                 reader.read_exact(bytemuck::bytes_of_mut(&mut gaussian))?;
@@ -419,7 +417,7 @@ impl PlyGaussians {
     /// The output PLY buffer will be in binary little endian format with the same properties as the
     /// original Inria implementation.
     ///
-    /// See [`Gaussians::PLY_PROPERTIES`] for a list of the properties.
+    /// See [`PlyGaussians::PLY_PROPERTIES`] for a list of the properties.
     pub fn write_ply(&self, writer: &mut impl Write) -> Result<(), std::io::Error> {
         const SYSTEM_ENDIANNESS: ply_rs::ply::Encoding = match cfg!(target_endian = "little") {
             true => ply_rs::ply::Encoding::BinaryLittleEndian,
