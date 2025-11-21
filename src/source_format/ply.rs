@@ -190,6 +190,7 @@ fn vertex_element_not_found_error() -> std::io::Error {
     )
 }
 
+/// A collection of Gaussians in PLY format.
 #[derive(Debug, Default, Clone)]
 pub struct PlyGaussians(pub Vec<PlyGaussianPod>);
 

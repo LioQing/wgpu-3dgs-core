@@ -1,5 +1,62 @@
 use thiserror::Error;
 
+use crate::{SpzGaussianPosition, SpzGaussianRotation, SpzGaussianSh};
+
+/// The error type for [`SpzGaussians::from_gaussian_slice_with_options`](crate::SpzGaussians::from_gaussian_slice_with_options).
+#[derive(Debug, Error)]
+pub enum SpzGaussiansFromGaussianSliceError {
+    #[error("{0}")]
+    Fromiter(#[from] SpzGaussiansFromIterError),
+    #[error("{0}")]
+    Io(#[from] std::io::Error),
+}
+
+/// The error type for [`SpzGaussians::from_iter`](crate::SpzGaussians::from_iter).
+#[derive(Debug, Error)]
+pub enum SpzGaussiansFromIterError {
+    #[error("invalid mixed position variant: {0:?}")]
+    InvalidMixedPositionVariant(SpzGaussiansCollectError<SpzGaussianPosition>),
+    #[error("invalid mixed rotation variant: {0:?}")]
+    InvalidMixedRotationVariant(SpzGaussiansCollectError<SpzGaussianRotation>),
+    #[error("invalid mixed SH variant: {0:?}")]
+    InvalidMixedShVariant(SpzGaussiansCollectError<SpzGaussianSh>),
+    #[error("Gaussians count mismatch: {actual_count} != {header_count}")]
+    CountMismatch {
+        actual_count: usize,
+        header_count: usize,
+    },
+    #[error("Position float16 format mismatch: {is_float16} != {header_uses_float16}")]
+    PositionFloat16Mismatch {
+        is_float16: bool,
+        header_uses_float16: bool,
+    },
+    #[error(
+        "Rotation smallest three format mismatch: \
+        {is_quat_smallest_three} != {header_uses_quat_smallest_three}\
+        "
+    )]
+    RotationQuatSmallestThreeMismatch {
+        is_quat_smallest_three: bool,
+        header_uses_quat_smallest_three: bool,
+    },
+    #[error("SH degree mismatch: {sh_degree} != {header_sh_degree}")]
+    ShDegreeMismatch { sh_degree: u8, header_sh_degree: u8 },
+    #[error("{0}")]
+    Io(#[from] std::io::Error),
+}
+
+/// The error type for collecting SPZ Gaussians.
+#[derive(Debug, Error)]
+pub enum SpzGaussiansCollectError<T> {
+    #[error("invalid mixed variant: {first_variant} != {current_variant}")]
+    InvalidMixedVariant {
+        first_variant: T,
+        current_variant: T,
+    },
+    #[error("empty iterator")]
+    EmptyIterator,
+}
+
 /// The error type for downloading buffer.
 #[derive(Debug, Error)]
 pub enum DownloadBufferError {
