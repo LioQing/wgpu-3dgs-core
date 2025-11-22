@@ -12,6 +12,7 @@ pub fn ply_gaussian_pod(a: &PlyGaussianPod, b: &PlyGaussianPod) {
         a.rot,
         b.rot
     );
+
     assert!(
         a.pos
             .into_iter()
