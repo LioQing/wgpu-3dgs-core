@@ -31,6 +31,12 @@ pub struct Gaussian {
 }
 
 impl Gaussian {
+    /// The constant to convert from SH coefficient at degree 0 to linear color.
+    pub const SH0_TO_LINEAR_FACTOR: f32 = 0.2820948;
+
+    /// The constant to convert from SH coefficient at degree 0 to linear color in SPZ.
+    pub const SPZ_SH0_TO_LINEAR_FACTOR: f32 = 0.15;
+
     /// Convert from [`PlyGaussianPod`].
     pub fn from_ply(ply: &PlyGaussianPod) -> Self {
         let pos = Vec3::from_array(ply.pos);
@@ -39,9 +45,9 @@ impl Gaussian {
 
         let scale = Vec3::from_array(ply.scale).exp();
 
-        const SH_C0: f32 = 0.2820948;
-        let color = ((Vec3::splat(0.5) + Vec3::from_array(ply.color) * SH_C0) * 255.0)
-            .extend((1.0 / (1.0 + (-ply.alpha).exp())) * 255.0)
+        let color = ((Vec3::from_array(ply.color) * Self::SH0_TO_LINEAR_FACTOR + Vec3::splat(0.5))
+            * 256.0)
+            .extend((1.0 / (1.0 + (-ply.alpha).exp())) * 256.0)
             .clamp(Vec4::splat(0.0), Vec4::splat(255.0))
             .as_u8vec4();
 
@@ -64,9 +70,8 @@ impl Gaussian {
 
         let scale = self.scale.map(|x| x.ln()).to_array();
 
-        const SH_C0: f32 = 0.2820948;
         let rgba = self.color.as_vec4() / 255.0;
-        let color = ((rgba.xyz() / SH_C0) - Vec3::splat(0.5 / SH_C0)).to_array();
+        let color = ((rgba.xyz() - Vec3::splat(0.5)) / Self::SH0_TO_LINEAR_FACTOR).to_array();
 
         let alpha = -(1.0 / rgba.w - 1.0).ln();
 
@@ -89,6 +94,12 @@ impl Gaussian {
             rot,
         }
     }
+
+    const SPZ_COLOR_TO_LINEAR_FRAC_A_B: f32 =
+        Gaussian::SH0_TO_LINEAR_FACTOR / Gaussian::SPZ_SH0_TO_LINEAR_FACTOR;
+    const SPZ_COLOR_TO_LINEAR_FRAC_F2_F1: f32 = 0.5 * 256.0;
+    const SPZ_COLOR_TO_LINEAR_C: f32 =
+        (1.0 - Self::SPZ_COLOR_TO_LINEAR_FRAC_A_B) * Self::SPZ_COLOR_TO_LINEAR_FRAC_F2_F1;
 
     /// Convert from [`SpzGaussianRef`].
     pub fn from_spz(spz: &SpzGaussianRef, header: &SpzGaussiansHeader) -> Self {
@@ -156,11 +167,16 @@ impl Gaussian {
             }
         };
 
-        let color = U8Vec3::from_array(*spz.color).extend(*spz.alpha);
+        let color = U8Vec3::from_array(spz.color.map(|c| {
+            (c as f32 / 255.0 * 256.0 * Self::SPZ_COLOR_TO_LINEAR_FRAC_A_B
+                + Self::SPZ_COLOR_TO_LINEAR_C)
+                .clamp(0.0, 255.0) as u8
+        }))
+        .extend(*spz.alpha);
 
         let mut sh = [Vec3::ZERO; 15];
-        for (from_sh, to_sh) in spz.sh.iter().zip(sh.iter_mut()) {
-            *to_sh = Vec3::from_array(from_sh.map(|c| (c as f32 - 128.0) / 128.0));
+        for (src, dst) in spz.sh.iter().zip(sh.iter_mut()) {
+            *dst = Vec3::from_array(src.map(|c| (c as f32 - 128.0) / 128.0));
         }
 
         Self {
@@ -173,6 +189,13 @@ impl Gaussian {
     }
 
     /// Convert to [`SpzGaussian`].
+    ///
+    /// User usually don't need to call this directly due to the overhead of constructing a
+    /// valid [`SpzGaussiansHeader`]. Instead, use one of the following methods to convert a
+    /// collection of [`Gaussian`] to [`SpzGaussians`](crate::SpzGaussians) properly:
+    ///
+    /// - [`SpzGaussians::from_gaussian_slice`](crate::SpzGaussians::from_gaussian_slice)
+    /// - [`SpzGaussians::from_gaussian_slice_with_options`](crate::SpzGaussians::from_gaussian_slice_with_options)
     pub fn to_spz(
         &self,
         header: &SpzGaussiansHeader,
@@ -246,7 +269,14 @@ impl Gaussian {
 
         let alpha = self.color.w;
 
-        let color = self.color.xyz().to_array();
+        let color = self
+            .color
+            .map(|c| {
+                ((c as f32 - Self::SPZ_COLOR_TO_LINEAR_C) / Self::SPZ_COLOR_TO_LINEAR_FRAC_A_B)
+                    .clamp(0.0, 255.0) as u8
+            })
+            .xyz()
+            .to_array();
 
         let sh = match header.sh_degree() {
             0 => SpzGaussianSh::Zero,
@@ -258,14 +288,14 @@ impl Gaussian {
                     _ => unreachable!(),
                 };
 
-                fn quantize_sh(x: f32, bucket_size: u32) -> i8 {
+                fn quantize_sh(x: f32, bucket_size: u32) -> u8 {
                     let q = (x * 128.0 + 128.0).round() as u32;
                     let q = if bucket_size >= 8 {
                         q
                     } else {
                         (q + bucket_size / 2) / bucket_size * bucket_size
                     };
-                    q.clamp(0, 255) as u8 as i8
+                    q.clamp(0, 255) as u8
                 }
 
                 for (src, dst) in self.sh.iter().zip(sh.iter_mut()) {

@@ -12,8 +12,11 @@ cargo llvm-cov run --example write-ply -- "$BASE_DIR/output.ply"
 echo "Running 'read-ply' example"
 cargo llvm-cov run --example read-ply -- "$EXAMPLES_PATH/model.ply"
 
-# echo "Running 'read-spz' example"
-# cargo llvm-cov run --example read-spz -- "$EXAMPLES_PATH/model.spz"
+echo "Running 'write-spz' example"
+cargo llvm-cov run --example write-spz -- "$BASE_DIR/output.spz"
+
+echo "Running 'read-spz' example"
+cargo llvm-cov run --example read-spz -- "$EXAMPLES_PATH/model.spz"
 
 # `--doctests` flag is currently unstable
 # echo "Running doctests"
@@ -55,5 +58,6 @@ $badge_color = if ($badge_percentage -ge 80) {
 
 echo "Cleaning up"
 rm "$BASE_DIR/output.ply"
+rm "$BASE_DIR/output.spz"
 
 echo "Done"
