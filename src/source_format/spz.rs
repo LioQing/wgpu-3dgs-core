@@ -206,9 +206,9 @@ gaussian_field! {
     #[docname = "SH coefficients"]
     Sh {
         Zero,
-        One([[i8; 3]; 3]),
-        Two([[i8; 3]; 8]),
-        Three([[i8; 3]; 15]),
+        One([[u8; 3]; 3]),
+        Two([[u8; 3]; 8]),
+        Three([[u8; 3]; 15]),
     }
 }
 
@@ -227,7 +227,7 @@ pub struct SpzGaussian {
 
 impl SpzGaussianSh {
     /// Get an iterator over SH coefficients.
-    pub fn iter(&self) -> impl Iterator<Item = &[i8; 3]> {
+    pub fn iter(&self) -> impl Iterator<Item = &[u8; 3]> {
         match self {
             SpzGaussianSh::Zero => [].iter(),
             SpzGaussianSh::One(sh) => sh.iter(),
@@ -237,7 +237,7 @@ impl SpzGaussianSh {
     }
 
     /// Get an iterator over mutable SH coefficients.
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut [i8; 3]> {
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut [u8; 3]> {
         match self {
             SpzGaussianSh::Zero => [].iter_mut(),
             SpzGaussianSh::One(sh) => sh.iter_mut(),
@@ -260,7 +260,7 @@ pub struct SpzGaussianRef<'a> {
 
 impl SpzGaussianShRef<'_> {
     /// Get an iterator over SH coefficients.
-    pub fn iter(&self) -> impl Iterator<Item = &[i8; 3]> + '_ {
+    pub fn iter(&self) -> impl Iterator<Item = &[u8; 3]> + '_ {
         match self {
             SpzGaussianShRef::Zero => [].iter(),
             SpzGaussianShRef::One(sh) => sh.iter(),
@@ -497,17 +497,17 @@ impl SpzGaussiansShs {
         match sh_degree {
             0 => Ok(SpzGaussiansShs::Zero),
             1 => {
-                let mut sh_coeffs = vec![[[0i8; 3]; 3]; count];
+                let mut sh_coeffs = vec![[[0u8; 3]; 3]; count];
                 reader.read_exact(bytemuck::cast_slice_mut(&mut sh_coeffs))?;
                 Ok(SpzGaussiansShs::One(sh_coeffs))
             }
             2 => {
-                let mut sh_coeffs = vec![[[0i8; 3]; 8]; count];
+                let mut sh_coeffs = vec![[[0u8; 3]; 8]; count];
                 reader.read_exact(bytemuck::cast_slice_mut(&mut sh_coeffs))?;
                 Ok(SpzGaussiansShs::Two(sh_coeffs))
             }
             3 => {
-                let mut sh_coeffs = vec![[[0i8; 3]; 15]; count];
+                let mut sh_coeffs = vec![[[0u8; 3]; 15]; count];
                 reader.read_exact(bytemuck::cast_slice_mut(&mut sh_coeffs))?;
                 Ok(SpzGaussiansShs::Three(sh_coeffs))
             }
@@ -551,6 +551,13 @@ pub struct SpzGaussians {
 }
 
 impl SpzGaussians {
+    /// Read a SPZ from file.
+    pub fn read_spz_file(path: impl AsRef<std::path::Path>) -> Result<Self, std::io::Error> {
+        let file = std::fs::File::open(path)?;
+        let mut reader = std::io::BufReader::new(file);
+        Self::read_spz(&mut reader)
+    }
+
     /// Read a SPZ from buffer.
     ///
     /// `reader` should be a gzip compressed SPZ buffer.
@@ -592,16 +599,16 @@ impl SpzGaussians {
 
         let positions = SpzGaussiansPositions::read_from(reader, count, uses_float16)?;
 
-        let mut scales = vec![[0u8; 3]; count];
-        reader.read_exact(bytemuck::cast_slice_mut(&mut scales))?;
-
-        let rotations = SpzGaussiansRotations::read_from(reader, count, uses_quat_smallest_three)?;
-
         let mut alphas = vec![0u8; count];
         reader.read_exact(bytemuck::cast_slice_mut(&mut alphas))?;
 
         let mut colors = vec![[0u8; 3]; count];
         reader.read_exact(bytemuck::cast_slice_mut(&mut colors))?;
+
+        let mut scales = vec![[0u8; 3]; count];
+        reader.read_exact(bytemuck::cast_slice_mut(&mut scales))?;
+
+        let rotations = SpzGaussiansRotations::read_from(reader, count, uses_quat_smallest_three)?;
 
         let shs = SpzGaussiansShs::read_from(reader, count, header.sh_degree())?;
 
@@ -614,6 +621,13 @@ impl SpzGaussians {
             colors,
             shs,
         })
+    }
+
+    /// Write the Gaussians to a SPZ file.
+    pub fn write_spz_file(&self, path: impl AsRef<std::path::Path>) -> Result<(), std::io::Error> {
+        let file = std::fs::File::create(path)?;
+        let mut writer = std::io::BufWriter::new(file);
+        self.write_spz(&mut writer)
     }
 
     /// Write the Gaussians to a SPZ buffer.
@@ -636,13 +650,13 @@ impl SpzGaussians {
 
         self.positions.write_to(writer)?;
 
-        writer.write_all(bytemuck::cast_slice(&self.scales))?;
-
-        self.rotations.write_to(writer)?;
-
         writer.write_all(bytemuck::cast_slice(&self.alphas))?;
 
         writer.write_all(bytemuck::cast_slice(&self.colors))?;
+
+        writer.write_all(bytemuck::cast_slice(&self.scales))?;
+
+        self.rotations.write_to(writer)?;
 
         self.shs.write_to(writer)?;
 

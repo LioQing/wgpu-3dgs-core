@@ -34,6 +34,16 @@ name = "read-ply"
 path = "examples/read_ply.rs"
 doc-scrape-examples = true
 
+[[example]]
+name = "write-spz"
+path = "examples/write_spz.rs"
+doc-scrape-examples = true
+
+[[example]]
+name = "read-spz"
+path = "examples/read_spz.rs"
+doc-scrape-examples = true
+
 [package.metadata.docs.rs]
 all-features = true
 cargo-args = ["-Zunstable-options", "-Zrustdoc-scrape-examples"]
