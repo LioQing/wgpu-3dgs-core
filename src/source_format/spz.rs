@@ -30,7 +30,7 @@ macro_rules! gaussian_field {
             #[doc = "A single SPZ Gaussian "]
             #[doc = $docname]
             #[doc = " field."]
-            #[derive(Debug, Clone)]
+            #[derive(Debug, Clone, PartialEq)]
             pub enum [< SpzGaussian $name >]  {
                 $(
                     $(#[doc = $doc])?
@@ -41,7 +41,7 @@ macro_rules! gaussian_field {
             #[doc = "Reference to SPZ Gaussian "]
             #[doc = $docname]
             #[doc = " field."]
-            #[derive(Debug, Clone)]
+            #[derive(Debug, Clone, Copy, PartialEq)]
             pub enum [< SpzGaussian $name Ref>]<'a> {
                 $(
                     $(#[doc = $doc])?
@@ -86,7 +86,7 @@ macro_rules! gaussian_field {
             #[doc = "Representation of SPZ Gaussians "]
             #[doc = $docname]
             #[doc = "s."]
-            #[derive(Debug, Clone)]
+            #[derive(Debug, Clone, PartialEq)]
             pub enum [< SpzGaussians $name s>] {
                 $(
                     $(#[doc = $doc])?
@@ -212,19 +212,6 @@ gaussian_field! {
     }
 }
 
-/// A single SPZ Gaussian.
-///
-/// This is usually only used for [`SpzGaussians::from_iter`].
-#[derive(Debug, Clone)]
-pub struct SpzGaussian {
-    pub position: SpzGaussianPosition,
-    pub scale: [u8; 3],
-    pub rotation: SpzGaussianRotation,
-    pub alpha: u8,
-    pub color: [u8; 3],
-    pub sh: SpzGaussianSh,
-}
-
 impl SpzGaussianSh {
     /// Get an iterator over SH coefficients.
     pub fn iter(&self) -> impl Iterator<Item = &[u8; 3]> {
@@ -247,8 +234,48 @@ impl SpzGaussianSh {
     }
 }
 
+/// A single SPZ Gaussian.
+///
+/// This is usually only used for [`SpzGaussians::from_iter`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct SpzGaussian {
+    pub position: SpzGaussianPosition,
+    pub scale: [u8; 3],
+    pub rotation: SpzGaussianRotation,
+    pub alpha: u8,
+    pub color: [u8; 3],
+    pub sh: SpzGaussianSh,
+}
+
+impl SpzGaussian {
+    /// Get a [`SpzGaussianRef`] reference to this Gaussian.
+    pub fn as_ref(&self) -> SpzGaussianRef<'_> {
+        SpzGaussianRef {
+            position: match &self.position {
+                SpzGaussianPosition::Float16(v) => SpzGaussianPositionRef::Float16(v),
+                SpzGaussianPosition::FixedPoint24(v) => SpzGaussianPositionRef::FixedPoint24(v),
+            },
+            scale: &self.scale,
+            rotation: match &self.rotation {
+                SpzGaussianRotation::QuatFirstThree(v) => SpzGaussianRotationRef::QuatFirstThree(v),
+                SpzGaussianRotation::QuatSmallestThree(v) => {
+                    SpzGaussianRotationRef::QuatSmallestThree(v)
+                }
+            },
+            alpha: &self.alpha,
+            color: &self.color,
+            sh: match &self.sh {
+                SpzGaussianSh::Zero => SpzGaussianShRef::Zero,
+                SpzGaussianSh::One(v) => SpzGaussianShRef::One(v),
+                SpzGaussianSh::Two(v) => SpzGaussianShRef::Two(v),
+                SpzGaussianSh::Three(v) => SpzGaussianShRef::Three(v),
+            },
+        }
+    }
+}
+
 /// Reference to a SPZ Gaussian.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SpzGaussianRef<'a> {
     pub position: SpzGaussianPositionRef<'a>,
     pub scale: &'a [u8; 3],
@@ -272,7 +299,7 @@ impl SpzGaussianShRef<'_> {
 
 /// Header of SPZ Gaussians file.
 #[repr(C)]
-#[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct SpzGaussiansHeaderPod {
     pub magic: u32,
     pub version: u32,
@@ -288,7 +315,7 @@ pub struct SpzGaussiansHeaderPod {
 /// This is the validated version of [`SpzGaussiansHeaderPod`]. This is simply a wrapper around
 /// [`SpzGaussiansHeaderPod`] that ensures the values are valid, we could also implement
 /// specialized structs for each field but it would be overkill for now.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SpzGaussiansHeader(SpzGaussiansHeaderPod);
 
 impl SpzGaussiansHeader {
@@ -381,6 +408,13 @@ impl SpzGaussiansHeader {
     /// Get the version of the SPZ file.
     pub fn version(&self) -> u32 {
         self.0.version
+    }
+
+    /// Set the number of points.
+    ///
+    /// Setting the number of points does not invalidate the header.
+    pub fn set_num_points(&mut self, num_points: u32) {
+        self.0.num_points = num_points;
     }
 
     /// Get the number of points in the SPZ file.
@@ -530,7 +564,7 @@ impl SpzGaussiansShs {
 }
 
 /// A collection of Gaussians in SPZ format.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SpzGaussians {
     pub header: SpzGaussiansHeader,
 
@@ -551,6 +585,16 @@ pub struct SpzGaussians {
 }
 
 impl SpzGaussians {
+    /// Get the number of Gaussians.
+    pub fn len(&self) -> usize {
+        self.header.num_points()
+    }
+
+    /// Check if there are no Gaussians.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     /// Read a SPZ from file.
     pub fn read_spz_file(path: impl AsRef<std::path::Path>) -> Result<Self, std::io::Error> {
         let file = std::fs::File::open(path)?;
@@ -664,8 +708,8 @@ impl SpzGaussians {
     }
 
     /// Convert from a slice of [`Gaussian`]s.
-    pub fn from_gaussian_slice(gaussians: &[Gaussian]) -> Self {
-        Self::from_gaussian_slice_with_options(
+    pub fn from_gaussians<'a>(gaussians: impl IntoIterator<Item = &'a Gaussian>) -> Self {
+        Self::from_gaussians_with_options(
             gaussians,
             &SpzGaussiansFromGaussianSliceOptions::default(),
         )
@@ -673,20 +717,20 @@ impl SpzGaussians {
     }
 
     /// Convert from a slice of [`Gaussian`]s with options.
-    pub fn from_gaussian_slice_with_options(
-        gaussians: &[Gaussian],
+    pub fn from_gaussians_with_options<'a>(
+        gaussians: impl IntoIterator<Item = &'a Gaussian>,
         options: &SpzGaussiansFromGaussianSliceOptions,
     ) -> Result<Self, SpzGaussiansFromGaussianSliceError> {
-        let header = SpzGaussiansHeader::new(
+        let mut header = SpzGaussiansHeader::new(
             options.version,
-            gaussians.len() as u32,
+            0,
             options.sh_degree,
             options.fractional_bits as u8,
             options.antialiased,
         )?;
 
         let gaussians = gaussians
-            .iter()
+            .into_iter()
             .map(|g| {
                 g.to_spz(
                     &header,
@@ -696,6 +740,8 @@ impl SpzGaussians {
                 )
             })
             .collect::<Vec<_>>();
+
+        header.set_num_points(gaussians.len() as u32);
 
         Ok(Self::from_iter(header, gaussians)?)
     }
@@ -821,13 +867,13 @@ impl IterGaussian for SpzGaussians {
     }
 }
 
-impl From<&[Gaussian]> for SpzGaussians {
-    fn from(gaussians: &[Gaussian]) -> Self {
-        Self::from_gaussian_slice(gaussians)
+impl<'a, I: IntoIterator<Item = &'a Gaussian>> From<I> for SpzGaussians {
+    fn from(gaussians: I) -> Self {
+        Self::from_gaussians(gaussians)
     }
 }
 
-/// Options for [`SpzGaussians::from_gaussian_slice_with_options`].
+/// Options for [`SpzGaussians::from_gaussians_with_options`].
 ///
 /// The fields are not validated.
 #[derive(Debug, Clone)]

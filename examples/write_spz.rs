@@ -39,7 +39,7 @@ fn main() {
     ];
 
     // Altneratively, use `SpzGaussians::from_gaussian_slice` for default options.
-    let gaussians = gs::SpzGaussians::from_gaussian_slice_with_options(
+    let gaussians = gs::SpzGaussians::from_gaussians_with_options(
         gaussians.as_slice(),
         &gs::SpzGaussiansFromGaussianSliceOptions {
             version: 2,

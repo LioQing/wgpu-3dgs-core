@@ -194,8 +194,8 @@ impl Gaussian {
     /// valid [`SpzGaussiansHeader`]. Instead, use one of the following methods to convert a
     /// collection of [`Gaussian`] to [`SpzGaussians`](crate::SpzGaussians) properly:
     ///
-    /// - [`SpzGaussians::from_gaussian_slice`](crate::SpzGaussians::from_gaussian_slice)
-    /// - [`SpzGaussians::from_gaussian_slice_with_options`](crate::SpzGaussians::from_gaussian_slice_with_options)
+    /// - [`SpzGaussians::from_gaussians`](crate::SpzGaussians::from_gaussians)
+    /// - [`SpzGaussians::from_gaussians_with_options`](crate::SpzGaussians::from_gaussians_with_options)
     pub fn to_spz(
         &self,
         header: &SpzGaussiansHeader,

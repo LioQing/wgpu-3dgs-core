@@ -2,7 +2,7 @@ use thiserror::Error;
 
 use crate::{SpzGaussianPosition, SpzGaussianRotation, SpzGaussianSh};
 
-/// The error type for [`SpzGaussians::from_gaussian_slice_with_options`](crate::SpzGaussians::from_gaussian_slice_with_options).
+/// The error type for [`SpzGaussians::from_gaussians_with_options`](crate::SpzGaussians::from_gaussians_with_options).
 #[derive(Debug, Error)]
 pub enum SpzGaussiansFromGaussianSliceError {
     #[error("{0}")]
