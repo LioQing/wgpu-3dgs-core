@@ -2,15 +2,6 @@ use thiserror::Error;
 
 use crate::{SpzGaussianPosition, SpzGaussianRotation, SpzGaussianSh};
 
-/// The error type for [`SpzGaussians::from_gaussians_with_options`](crate::SpzGaussians::from_gaussians_with_options).
-#[derive(Debug, Error)]
-pub enum SpzGaussiansFromGaussianSliceError {
-    #[error("{0}")]
-    Fromiter(#[from] SpzGaussiansFromIterError),
-    #[error("{0}")]
-    Io(#[from] std::io::Error),
-}
-
 /// The error type for [`SpzGaussians::from_iter`](crate::SpzGaussians::from_iter).
 #[derive(Debug, Error)]
 pub enum SpzGaussiansFromIterError {
