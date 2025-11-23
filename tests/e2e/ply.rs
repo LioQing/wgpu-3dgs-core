@@ -83,59 +83,6 @@ fn test_ply_gaussian_pod_len_and_is_empty_should_be_correct() {
 }
 
 #[test]
-fn test_ply_gaussians_write_ply_file_and_read_ply_file_should_be_equal() {
-    let gaussians = given::ply_gaussians();
-    let path = given::temp_file_path(".ply");
-
-    gaussians.write_ply_file(&path).unwrap();
-    let gaussians_read = PlyGaussians::read_ply_file(&path).unwrap();
-
-    assert_eq!(gaussians.len(), gaussians_read.len());
-
-    for (a, b) in gaussians.iter().zip(gaussians_read.iter()) {
-        assert::ply_gaussian_pod(a, b);
-    }
-}
-
-#[test]
-fn test_ply_gaussians_write_ply_and_read_ply_should_be_equal() {
-    let gaussians = given::ply_gaussians();
-
-    let mut buffer = Vec::new();
-    gaussians.write_ply(&mut buffer).unwrap();
-    let gaussians_read = PlyGaussians::read_ply(&mut buffer.as_slice()).unwrap();
-
-    assert_eq!(gaussians.len(), gaussians_read.len());
-
-    for (a, b) in gaussians.iter().zip(gaussians_read.iter()) {
-        assert::ply_gaussian_pod(a, b);
-    }
-}
-
-#[test]
-fn test_ply_gaussians_from_vec_from_iter_and_iter_iter_mut_iter_gaussian_should_be_equal() {
-    let original = given::ply_gaussians();
-    let original_vec = original.0.clone();
-
-    let from_vec = PlyGaussians::from(original_vec.clone());
-    let from_iter: PlyGaussians = original_vec.clone().into_iter().collect();
-    let mut from_iter_mut = from_iter.clone();
-
-    for (original, vec, iter, iter_mut, iter_gaussian) in itertools::izip!(
-        original_vec.iter(),
-        from_vec.iter(),
-        from_iter.iter(),
-        from_iter_mut.iter_mut(),
-        from_iter.iter_gaussian(),
-    ) {
-        assert::ply_gaussian_pod(original, vec);
-        assert::ply_gaussian_pod(original, iter);
-        assert::ply_gaussian_pod(original, iter_mut);
-        assert::ply_gaussian_pod(original, &iter_gaussian.to_ply());
-    }
-}
-
-#[test]
 fn test_ply_gaussians_read_ply_when_format_is_custom_and_ascii_should_match_original_gaussian() {
     let gaussians = given::ply_gaussians();
     let buffer = given_custom_gaussians_ply_buffer(&gaussians.0, ply_rs::ply::Encoding::Ascii);
@@ -249,4 +196,57 @@ fn test_ply_gaussians_read_ply_when_missing_value_should_return_error() {
         Err(e) if e.kind() == std::io::ErrorKind::InvalidData &&
             e.to_string() == "Gaussian element property invalid or missing in PLY"
     );
+}
+
+#[test]
+fn test_ply_gaussians_write_ply_file_and_read_ply_file_should_be_equal() {
+    let gaussians = given::ply_gaussians();
+    let path = given::temp_file_path(".ply");
+
+    gaussians.write_ply_file(&path).unwrap();
+    let gaussians_read = PlyGaussians::read_ply_file(&path).unwrap();
+
+    assert_eq!(gaussians.len(), gaussians_read.len());
+
+    for (a, b) in gaussians.iter().zip(gaussians_read.iter()) {
+        assert::ply_gaussian_pod(a, b);
+    }
+}
+
+#[test]
+fn test_ply_gaussians_write_ply_and_read_ply_should_be_equal() {
+    let gaussians = given::ply_gaussians();
+
+    let mut buffer = Vec::new();
+    gaussians.write_ply(&mut buffer).unwrap();
+    let gaussians_read = PlyGaussians::read_ply(&mut buffer.as_slice()).unwrap();
+
+    assert_eq!(gaussians.len(), gaussians_read.len());
+
+    for (a, b) in gaussians.iter().zip(gaussians_read.iter()) {
+        assert::ply_gaussian_pod(a, b);
+    }
+}
+
+#[test]
+fn test_ply_gaussians_from_vec_from_iter_and_iter_iter_mut_iter_gaussian_should_be_equal() {
+    let original = given::ply_gaussians();
+    let original_vec = original.0.clone();
+
+    let from_vec = PlyGaussians::from(original_vec.clone());
+    let from_iter: PlyGaussians = original_vec.clone().into_iter().collect();
+    let mut from_iter_mut = from_iter.clone();
+
+    for (original, vec, iter, iter_mut, iter_gaussian) in itertools::izip!(
+        original_vec.iter(),
+        from_vec.iter(),
+        from_iter.iter(),
+        from_iter_mut.iter_mut(),
+        from_iter.iter_gaussian(),
+    ) {
+        assert::ply_gaussian_pod(original, vec);
+        assert::ply_gaussian_pod(original, iter);
+        assert::ply_gaussian_pod(original, iter_mut);
+        assert::ply_gaussian_pod(original, &iter_gaussian.to_ply());
+    }
 }

@@ -6,10 +6,7 @@ use std::{
 use flate2::{read::GzDecoder, write::GzEncoder};
 use itertools::Itertools;
 
-use crate::{
-    Gaussian, GaussianToSpzOptions, IterGaussian, SpzGaussiansFromGaussianSliceError,
-    SpzGaussiansFromIterError,
-};
+use crate::{Gaussian, GaussianToSpzOptions, IterGaussian, SpzGaussiansFromIterError};
 
 macro_rules! gaussian_field {
     (
@@ -150,28 +147,34 @@ macro_rules! gaussian_field {
                         return Err($crate::error::SpzGaussiansCollectError::EmptyIterator);
                     };
 
+                    #[allow(unused_variables)]
+                    let first_value = ();
                     match first {
                         $(
                             #[allow(clippy::redundant_pattern)]
                             [< SpzGaussian $name >]:: $variant $( (first_value @ noop!($ty _)) )? => {
-                                $(
-                                    noop!($ty);
-                                    let vec = std::iter::once(Ok(first_value))
-                                        .chain(
-                                            iter.map(|v| {
-                                                match v {
-                                                    [< SpzGaussian $name >]:: $variant (value) => Ok(value),
-                                                    other => Err(
-                                                        $crate::error::SpzGaussiansCollectError::InvalidMixedVariant {
-                                                            first_variant: [< SpzGaussian $name >]:: $variant (first_value),
-                                                            current_variant: other,
-                                                        }
-                                                    ),
-                                                }
-                                            })
-                                        )
-                                        .collect::<Result<Vec<_>, _>>()?;
-                                )?
+                                #[allow(unused_variables)]
+                                let value = ();
+                                #[allow(unused_variables)]
+                                let vec = std::iter::once(Ok(first_value))
+                                    .chain(
+                                        iter.map(|v| {
+                                            match v {
+                                                [< SpzGaussian $name >]:: $variant $( (
+                                                    value @ noop!($ty _)
+                                                ) )? => Ok(value),
+                                                other => Err(
+                                                    $crate::error::SpzGaussiansCollectError::InvalidMixedVariant {
+                                                        first_variant: [< SpzGaussian $name >]:: $variant $( (
+                                                            { noop!($ty); first_value }
+                                                        ) )?,
+                                                        current_variant: other,
+                                                    }
+                                                ),
+                                            }
+                                        })
+                                    )
+                                    .collect::<Result<Vec<_>, _>>()?;
                                 Ok([< SpzGaussians $name s>]:: $variant $( ({ noop!($ty); vec }) )?)
                             }
                         )+
@@ -439,8 +442,8 @@ impl SpzGaussiansHeader {
     }
 
     /// Get the number of fractional bits.
-    pub fn fractional_bits(&self) -> usize {
-        self.0.fractional_bits as usize
+    pub fn fractional_bits(&self) -> u8 {
+        self.0.fractional_bits
     }
 
     /// Check if the antialiased flag is set.
@@ -720,12 +723,12 @@ impl SpzGaussians {
     pub fn from_gaussians_with_options<'a>(
         gaussians: impl IntoIterator<Item = &'a Gaussian>,
         options: &SpzGaussiansFromGaussianSliceOptions,
-    ) -> Result<Self, SpzGaussiansFromGaussianSliceError> {
+    ) -> Result<Self, std::io::Error> {
         let mut header = SpzGaussiansHeader::new(
             options.version,
             0,
             options.sh_degree,
-            options.fractional_bits as u8,
+            options.fractional_bits,
             options.antialiased,
         )?;
 
@@ -743,7 +746,8 @@ impl SpzGaussians {
 
         header.set_num_points(gaussians.len() as u32);
 
-        Ok(Self::from_iter(header, gaussians)?)
+        Ok(Self::from_iter(header, gaussians)
+            .expect("gaussians from valid Gaussians with valid header are valid"))
     }
 
     /// Convert from an [`IntoIterator`] of [`SpzGaussian`]s.
@@ -862,8 +866,7 @@ impl SpzGaussians {
 
 impl IterGaussian for SpzGaussians {
     fn iter_gaussian(&self) -> impl Iterator<Item = Gaussian> + '_ {
-        self.iter()
-            .map(|spz| Gaussian::from_spz(&spz, &self.header))
+        self.iter().map(|spz| Gaussian::from_spz(spz, &self.header))
     }
 }
 
@@ -885,7 +888,7 @@ pub struct SpzGaussiansFromGaussianSliceOptions {
     pub sh_degree: u8,
 
     /// Number of fractional bits to use for position fixed point encoding.
-    pub fractional_bits: usize,
+    pub fractional_bits: u8,
 
     /// Whether to use antialiased encoding.
     pub antialiased: bool,

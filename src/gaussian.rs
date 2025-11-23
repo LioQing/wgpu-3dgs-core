@@ -102,7 +102,7 @@ impl Gaussian {
         (1.0 - Self::SPZ_COLOR_TO_LINEAR_FRAC_A_B) * Self::SPZ_COLOR_TO_LINEAR_FRAC_F2_F1;
 
     /// Convert from [`SpzGaussianRef`].
-    pub fn from_spz(spz: &SpzGaussianRef, header: &SpzGaussiansHeader) -> Self {
+    pub fn from_spz(spz: SpzGaussianRef, header: &SpzGaussiansHeader) -> Self {
         let pos = match spz.position {
             SpzGaussianPositionRef::Float16(pos) => {
                 // The Niantic SPZ format matches the `half` crate's f16 const conversion.
