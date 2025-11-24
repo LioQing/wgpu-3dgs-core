@@ -1,9 +1,9 @@
-//! This example generates a PLY file containing 3 hardcoded Gaussians.
+//! This example generates a SPZ file containing 3 hardcoded Gaussians.
 //!
 //! Run with:
 //!
 //! ```sh
-//! cargo run --example write_ply -- "path/to/output.ply"
+//! cargo run --example write_spz -- "path/to/output.spz"
 //! ```
 
 use glam::*;
@@ -12,7 +12,7 @@ use wgpu_3dgs_core as gs;
 fn main() {
     let model_path = std::env::args()
         .nth(1)
-        .unwrap_or_else(|| "target/output.ply".to_string());
+        .unwrap_or_else(|| "target/output.spz".to_string());
 
     let gaussians = vec![
         gs::Gaussian {
@@ -38,16 +38,25 @@ fn main() {
         },
     ];
 
-    let gaussians = gs::PlyGaussians::from(
-        gaussians
-            .iter()
-            .map(gs::Gaussian::to_ply)
-            .collect::<Vec<_>>(),
+    // Alternatively, use `SpzGaussians::from_gaussians` for default options.
+    let gaussians = gs::SpzGaussians::from_gaussians_with_options(
+        gaussians.as_slice(),
+        &gs::SpzGaussiansFromGaussianSliceOptions {
+            version: 2,
+            ..Default::default()
+        },
+    )
+    .expect("valid options");
+
+    println!("Header: {:?}", gaussians.header);
+
+    println!(
+        "Writing {} gaussians to {}",
+        gaussians.header.num_points(),
+        model_path
     );
 
-    println!("Writing {} gaussians to {}", gaussians.0.len(), model_path);
-
     gaussians
-        .write_ply_file(&model_path)
-        .expect("write PLY file");
+        .write_spz_file(&model_path)
+        .expect("write SPZ file");
 }

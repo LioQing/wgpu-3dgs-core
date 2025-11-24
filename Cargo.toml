@@ -34,6 +34,16 @@ name = "read-ply"
 path = "examples/read_ply.rs"
 doc-scrape-examples = true
 
+[[example]]
+name = "write-spz"
+path = "examples/write_spz.rs"
+doc-scrape-examples = true
+
+[[example]]
+name = "read-spz"
+path = "examples/read_spz.rs"
+doc-scrape-examples = true
+
 [package.metadata.docs.rs]
 all-features = true
 cargo-args = ["-Zunstable-options", "-Zrustdoc-scrape-examples"]
@@ -53,6 +63,8 @@ ply-rs = "0.1"
 thiserror = "2.0"
 wgpu = "26.0"
 wesl = { version = "0.2", features = ["quote"] }
+flate2 = "1.1"
+itertools = "0.14"
 
 [dev-dependencies]
 assert_matches = { version = "1.5" }

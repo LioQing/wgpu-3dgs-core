@@ -1,9 +1,9 @@
-//! This example reads a PLY file containing Gaussians and uploads them to a GPU buffer.
+//! This example reads a SPZ file containing Gaussians and uploads them to a GPU buffer.
 //!
 //! Run with:
 //!
 //! ```sh
-//! cargo run --example write_ply -- "path/to/input.ply"
+//! cargo run --example read_spz -- "path/to/input.spz"
 //! ```
 
 use glam::*;
@@ -15,7 +15,7 @@ type GaussianPod = gs::GaussianPodWithShHalfCov3dHalfConfigs;
 async fn main() {
     let model_path = std::env::args()
         .nth(1)
-        .unwrap_or_else(|| "examples/model.ply".to_string());
+        .unwrap_or_else(|| "examples/model.spz".to_string());
 
     let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
 
@@ -37,7 +37,9 @@ async fn main() {
 
     println!("Reading gaussians from {}", model_path);
 
-    let gaussians = gs::PlyGaussians::read_ply_file(&model_path).expect("gaussians");
+    let gaussians = gs::SpzGaussians::read_spz_file(&model_path).expect("gaussians");
+
+    println!("Header: {:?}", gaussians.header);
 
     let gaussians_buffer = gs::GaussiansBuffer::<GaussianPod>::new(&device, &gaussians);
 
