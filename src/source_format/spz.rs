@@ -216,6 +216,16 @@ gaussian_field! {
 }
 
 impl SpzGaussianSh {
+    /// Get the SH degree.
+    pub fn degree(&self) -> SpzGaussianShDegree {
+        match self {
+            SpzGaussianSh::Zero => unsafe { SpzGaussianShDegree::new_unchecked(0) },
+            SpzGaussianSh::One(_) => unsafe { SpzGaussianShDegree::new_unchecked(1) },
+            SpzGaussianSh::Two(_) => unsafe { SpzGaussianShDegree::new_unchecked(2) },
+            SpzGaussianSh::Three(_) => unsafe { SpzGaussianShDegree::new_unchecked(3) },
+        }
+    }
+
     /// Get an iterator over SH coefficients.
     pub fn iter(&self) -> impl Iterator<Item = &[u8; 3]> {
         match self {
@@ -234,6 +244,89 @@ impl SpzGaussianSh {
             SpzGaussianSh::Two(sh) => sh.iter_mut(),
             SpzGaussianSh::Three(sh) => sh.iter_mut(),
         }
+    }
+}
+
+impl SpzGaussianShRef<'_> {
+    /// Get the SH degree.
+    pub fn degree(&self) -> SpzGaussianShDegree {
+        match self {
+            SpzGaussianShRef::Zero => unsafe { SpzGaussianShDegree::new_unchecked(0) },
+            SpzGaussianShRef::One(_) => unsafe { SpzGaussianShDegree::new_unchecked(1) },
+            SpzGaussianShRef::Two(_) => unsafe { SpzGaussianShDegree::new_unchecked(2) },
+            SpzGaussianShRef::Three(_) => unsafe { SpzGaussianShDegree::new_unchecked(3) },
+        }
+    }
+
+    /// Get an iterator over SH coefficients.
+    pub fn iter(&self) -> impl Iterator<Item = &[u8; 3]> + '_ {
+        match self {
+            SpzGaussianShRef::Zero => [].iter(),
+            SpzGaussianShRef::One(sh) => sh.iter(),
+            SpzGaussianShRef::Two(sh) => sh.iter(),
+            SpzGaussianShRef::Three(sh) => sh.iter(),
+        }
+    }
+}
+
+impl SpzGaussiansShs {
+    /// Get the SH degree.
+    pub fn degree(&self) -> SpzGaussianShDegree {
+        match self {
+            SpzGaussiansShs::Zero => unsafe { SpzGaussianShDegree::new_unchecked(0) },
+            SpzGaussiansShs::One(_) => unsafe { SpzGaussianShDegree::new_unchecked(1) },
+            SpzGaussiansShs::Two(_) => unsafe { SpzGaussianShDegree::new_unchecked(2) },
+            SpzGaussiansShs::Three(_) => unsafe { SpzGaussianShDegree::new_unchecked(3) },
+        }
+    }
+}
+
+/// The SPZ Gaussian spherical harmonics degrees.
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct SpzGaussianShDegree(u8);
+
+impl SpzGaussianShDegree {
+    /// Create a new SPZ Gaussian SH degree.
+    ///
+    /// Returns [`None`] if the degree is not in the range of [`SpzGaussiansHeader::SUPPORTED_SH_DEGREES`].
+    pub const fn new(sh_deg: u8) -> Option<Self> {
+        match sh_deg {
+            0..=3 => Some(Self(sh_deg)),
+            _ => None,
+        }
+    }
+
+    /// Create a new SPZ Gaussian SH degree without checking.
+    ///
+    /// # Safety
+    ///
+    /// The degree must be in the range of [`SpzGaussiansHeader::SUPPORTED_SH_DEGREES`].
+    pub const unsafe fn new_unchecked(sh_deg: u8) -> Self {
+        Self(sh_deg)
+    }
+
+    /// Get the degree.
+    pub const fn get(&self) -> u8 {
+        self.0
+    }
+
+    /// Get the number of SH coefficients.
+    pub const fn num_coefficients(&self) -> usize {
+        match self.0 {
+            0 => 0,
+            1 => 3,
+            2 => 8,
+            3 => 15,
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl Default for SpzGaussianShDegree {
+    fn default() -> Self {
+        // SAFETY: 3 is in the range of [0, 3].
+        unsafe { Self::new_unchecked(3) }
     }
 }
 
@@ -288,14 +381,31 @@ pub struct SpzGaussianRef<'a> {
     pub sh: SpzGaussianShRef<'a>,
 }
 
-impl SpzGaussianShRef<'_> {
-    /// Get an iterator over SH coefficients.
-    pub fn iter(&self) -> impl Iterator<Item = &[u8; 3]> + '_ {
-        match self {
-            SpzGaussianShRef::Zero => [].iter(),
-            SpzGaussianShRef::One(sh) => sh.iter(),
-            SpzGaussianShRef::Two(sh) => sh.iter(),
-            SpzGaussianShRef::Three(sh) => sh.iter(),
+impl SpzGaussianRef<'_> {
+    /// Convert to [`SpzGaussian`].
+    pub fn to_inner_owned(&self) -> SpzGaussian {
+        SpzGaussian {
+            position: match self.position {
+                SpzGaussianPositionRef::Float16(v) => SpzGaussianPosition::Float16(*v),
+                SpzGaussianPositionRef::FixedPoint24(v) => SpzGaussianPosition::FixedPoint24(*v),
+            },
+            scale: *self.scale,
+            rotation: match self.rotation {
+                SpzGaussianRotationRef::QuatFirstThree(v) => {
+                    SpzGaussianRotation::QuatFirstThree(*v)
+                }
+                SpzGaussianRotationRef::QuatSmallestThree(v) => {
+                    SpzGaussianRotation::QuatSmallestThree(*v)
+                }
+            },
+            alpha: *self.alpha,
+            color: *self.color,
+            sh: match self.sh {
+                SpzGaussianShRef::Zero => SpzGaussianSh::Zero,
+                SpzGaussianShRef::One(v) => SpzGaussianSh::One(*v),
+                SpzGaussianShRef::Two(v) => SpzGaussianSh::Two(*v),
+                SpzGaussianShRef::Three(v) => SpzGaussianSh::Three(*v),
+            },
         }
     }
 }
@@ -307,7 +417,7 @@ pub struct SpzGaussiansHeaderPod {
     pub magic: u32,
     pub version: u32,
     pub num_points: u32,
-    pub sh_degree: u8,
+    pub sh_degree: SpzGaussianShDegree,
     pub fractional_bits: u8,
     pub flags: u8,
     pub reserved: u8,
@@ -337,7 +447,7 @@ impl SpzGaussiansHeader {
     pub fn new(
         version: u32,
         num_points: u32,
-        sh_degree: u8,
+        sh_degree: SpzGaussianShDegree,
         fractional_bits: u8,
         antialiased: bool,
     ) -> Result<Self, std::io::Error> {
@@ -376,28 +486,17 @@ impl SpzGaussiansHeader {
             ));
         }
 
-        if !Self::SUPPORTED_SH_DEGREES.contains(&pod.sh_degree) {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!(
-                    "Unsupported SH degree: {}, expected one of {:?}",
-                    pod.sh_degree,
-                    Self::SUPPORTED_SH_DEGREES
-                ),
-            ));
-        }
-
         Ok(Self(pod))
     }
 
     /// Create a default [`SpzGaussiansHeader`] from number of points and SH degree.
-    pub fn default(num_points: u32, sh_degree: u8) -> Result<Self, std::io::Error> {
+    pub fn default(num_points: u32) -> Result<Self, std::io::Error> {
         Self::new(
             Self::SUPPORTED_VERSIONS
                 .last()
                 .expect("at least one supported version"),
             num_points,
-            sh_degree,
+            SpzGaussianShDegree::default(),
             12,
             false,
         )
@@ -426,19 +525,13 @@ impl SpzGaussiansHeader {
     }
 
     /// Get the SH degree of the SPZ file.
-    pub fn sh_degree(&self) -> u8 {
+    pub fn sh_degree(&self) -> SpzGaussianShDegree {
         self.0.sh_degree
     }
 
     /// Get the number of SH coefficients.
     pub fn sh_num_coefficients(&self) -> usize {
-        match self.0.sh_degree {
-            0 => 0,
-            1 => 3,
-            2 => 8,
-            3 => 15,
-            _ => unreachable!(),
-        }
+        self.0.sh_degree.num_coefficients()
     }
 
     /// Get the number of fractional bits.
@@ -529,9 +622,9 @@ impl SpzGaussiansShs {
     pub fn read_from(
         reader: &mut impl Read,
         count: usize,
-        sh_degree: u8,
+        sh_degree: SpzGaussianShDegree,
     ) -> Result<Self, std::io::Error> {
-        match sh_degree {
+        match sh_degree.get() {
             0 => Ok(SpzGaussiansShs::Zero),
             1 => {
                 let mut sh_coeffs = vec![[[0u8; 3]; 3]; count];
@@ -548,10 +641,10 @@ impl SpzGaussiansShs {
                 reader.read_exact(bytemuck::cast_slice_mut(&mut sh_coeffs))?;
                 Ok(SpzGaussiansShs::Three(sh_coeffs))
             }
-            _ => Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("Unsupported SH degree: {}", sh_degree),
-            )),
+            _ => {
+                // SAFETY: SpzGaussianShDegree guarantees the degree is in [0, 3].
+                unreachable!()
+            }
         }
     }
 
@@ -812,20 +905,9 @@ impl SpzGaussians {
             );
         }
 
-        if !matches!(
-            (&shs, header.sh_degree()),
-            (SpzGaussiansShs::Zero, 0)
-                | (SpzGaussiansShs::One(_), 1)
-                | (SpzGaussiansShs::Two(_), 2)
-                | (SpzGaussiansShs::Three(_), 3)
-        ) {
+        if shs.degree() != header.sh_degree() {
             return Err(SpzGaussiansFromIterError::ShDegreeMismatch {
-                sh_degree: match &shs {
-                    SpzGaussiansShs::Zero => 0,
-                    SpzGaussiansShs::One(_) => 1,
-                    SpzGaussiansShs::Two(_) => 2,
-                    SpzGaussiansShs::Three(_) => 3,
-                },
+                sh_degree: shs.degree(),
                 header_sh_degree: header.sh_degree(),
             });
         }
@@ -885,7 +967,7 @@ pub struct SpzGaussiansFromGaussianSliceOptions {
     pub version: u32,
 
     /// SH degree to use.
-    pub sh_degree: u8,
+    pub sh_degree: SpzGaussianShDegree,
 
     /// Number of fractional bits to use for position fixed point encoding.
     pub fractional_bits: u8,
@@ -899,7 +981,7 @@ pub struct SpzGaussiansFromGaussianSliceOptions {
 
 impl Default for SpzGaussiansFromGaussianSliceOptions {
     fn default() -> Self {
-        let default_header = SpzGaussiansHeader::default(0, 3).expect("default header");
+        let default_header = SpzGaussiansHeader::default(0).expect("default header");
         let default_gaussian_to_spz_options = GaussianToSpzOptions::default();
         Self {
             version: default_header.version(),

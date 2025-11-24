@@ -2,8 +2,9 @@ use assert_matches::assert_matches;
 use glam::*;
 use wgpu_3dgs_core::{
     Gaussian, IterGaussian, SpzGaussian, SpzGaussianPosition, SpzGaussianRef, SpzGaussianRotation,
-    SpzGaussianSh, SpzGaussians, SpzGaussiansCollectError, SpzGaussiansFromGaussianSliceOptions,
-    SpzGaussiansFromIterError, SpzGaussiansHeader,
+    SpzGaussianSh, SpzGaussianShDegree, SpzGaussianShRef, SpzGaussians, SpzGaussiansCollectError,
+    SpzGaussiansFromGaussianSliceOptions, SpzGaussiansFromIterError, SpzGaussiansHeader,
+    SpzGaussiansHeaderPod, SpzGaussiansPositions, SpzGaussiansRotations, SpzGaussiansShs,
 };
 
 use crate::common::{assert, given};
@@ -34,7 +35,7 @@ fn given_spz_gaussian_and_header(
             },
             alpha: 0,
             color: [0; 3],
-            sh: match options.sh_degree {
+            sh: match options.sh_degree.get() {
                 0 => SpzGaussianSh::Zero,
                 1 => SpzGaussianSh::One([[0; 3]; 3]),
                 2 => SpzGaussianSh::Two([[0; 3]; 8]),
@@ -123,7 +124,7 @@ fn test_spz_gaussians_write_spz_with_options_when_sh_degrees_and_read_spz_should
         println!("SH Degree: {sh_degree}");
         test_spz_gaussians_write_spz_with_options_and_read_spz_should_be_equal(
             &SpzGaussiansFromGaussianSliceOptions {
-                sh_degree,
+                sh_degree: SpzGaussianShDegree::new(sh_degree).expect("valid SH degree"),
                 ..Default::default()
             },
         );
@@ -202,7 +203,7 @@ fn test_spz_gaussians_from_gaussians_with_options_and_iter_when_sh_degrees_shoul
         println!("SH Degree: {sh_degree}");
         test_spz_gaussians_from_gaussians_with_options_and_iter_should_be_equal(
             &SpzGaussiansFromGaussianSliceOptions {
-                sh_degree,
+                sh_degree: SpzGaussianShDegree::new(sh_degree).expect("valid SH degree"),
                 ..Default::default()
             },
             |spz_gaussian_ref, gaussian, header| {
@@ -287,25 +288,6 @@ fn test_spz_gaussians_from_gaussians_with_options_when_header_version_is_invalid
         Err(e)
         if e.kind() == std::io::ErrorKind::InvalidData &&
             e.to_string() == "Unsupported SPZ version: 999, expected one of 1..=3"
-    );
-}
-
-#[test]
-fn test_spz_gaussians_from_gaussians_with_options_when_header_sh_degree_is_invalid_should_return_error()
- {
-    let gaussians = given::gaussians();
-    let options = wgpu_3dgs_core::SpzGaussiansFromGaussianSliceOptions {
-        sh_degree: 99,
-        ..Default::default()
-    };
-
-    let result = SpzGaussians::from_gaussians_with_options(gaussians.iter(), &options);
-
-    assert_matches!(
-        result,
-        Err(e)
-        if e.kind() == std::io::ErrorKind::InvalidData &&
-            e.to_string() == "Unsupported SH degree: 99, expected one of 0..=3"
     );
 }
 
@@ -442,19 +424,184 @@ fn test_spz_gaussians_from_iter_when_header_rotation_quat_smallest_three_mismatc
 
 #[test]
 fn test_spz_gaussians_from_iter_when_header_sh_degree_mismatched_should_return_error() {
-    let (gaussian, header) = given_spz_gaussian_and_header(1, &Default::default());
-    let gaussians = vec![SpzGaussian {
-        sh: SpzGaussianSh::One([[0; 3]; 3]),
-        ..gaussian.clone()
-    }];
+    for (sh, header_sh_degree) in [
+        (
+            SpzGaussianSh::Zero,
+            SpzGaussianShDegree::new(1).expect("valid SH degree"),
+        ),
+        (
+            SpzGaussianSh::One([[0; 3]; 3]),
+            SpzGaussianShDegree::new(2).expect("valid SH degree"),
+        ),
+        (
+            SpzGaussianSh::Two([[0; 3]; 8]),
+            SpzGaussianShDegree::new(3).expect("valid SH degree"),
+        ),
+        (
+            SpzGaussianSh::Three([[0; 3]; 15]),
+            SpzGaussianShDegree::new(0).expect("valid SH degree"),
+        ),
+    ] {
+        let (gaussian, header) = given_spz_gaussian_and_header(
+            1,
+            &SpzGaussiansFromGaussianSliceOptions {
+                sh_degree: header_sh_degree,
+                ..Default::default()
+            },
+        );
+        let gaussians = vec![SpzGaussian {
+            sh: sh.clone(),
+            ..gaussian.clone()
+        }];
 
-    let result = SpzGaussians::from_iter(header, gaussians);
+        let result = SpzGaussians::from_iter(header, gaussians);
+
+        assert_matches!(
+            result,
+            Err(SpzGaussiansFromIterError::ShDegreeMismatch {
+                sh_degree,
+                header_sh_degree,
+            })
+            if sh_degree == sh.degree() && header_sh_degree == header_sh_degree
+        );
+    }
+}
+
+#[test]
+fn test_sh_gaussians_header_try_from_pod_when_magic_is_incorrect_should_return_error() {
+    let pod = SpzGaussiansHeaderPod {
+        magic: 0,
+        version: 1,
+        num_points: 0,
+        sh_degree: SpzGaussianShDegree::default(),
+        fractional_bits: 0,
+        flags: 0,
+        reserved: 0,
+    };
+
+    let result = SpzGaussiansHeader::try_from_pod(pod);
 
     assert_matches!(
         result,
-        Err(SpzGaussiansFromIterError::ShDegreeMismatch {
-            sh_degree: 1,
-            header_sh_degree: 3
-        })
+        Err(e) if e.kind() == std::io::ErrorKind::InvalidData &&
+            e.to_string() == "Invalid SPZ magic number: 0, expected 5053474E"
     );
+}
+
+#[test]
+fn test_spz_gaussian_sh_degree_should_be_correct() {
+    assert_eq!(SpzGaussianSh::Zero.degree().get(), 0);
+    assert_eq!(SpzGaussianSh::One([[0; 3]; 3]).degree().get(), 1);
+    assert_eq!(SpzGaussianSh::Two([[0; 3]; 8]).degree().get(), 2);
+    assert_eq!(SpzGaussianSh::Three([[0; 3]; 15]).degree().get(), 3);
+}
+
+#[test]
+fn test_spz_gaussian_sh_ref_degree_should_be_correct() {
+    assert_eq!(SpzGaussianShRef::Zero.degree().get(), 0);
+    assert_eq!(SpzGaussianShRef::One(&[[0; 3]; 3]).degree().get(), 1);
+    assert_eq!(SpzGaussianShRef::Two(&[[0; 3]; 8]).degree().get(), 2);
+    assert_eq!(SpzGaussianShRef::Three(&[[0; 3]; 15]).degree().get(), 3);
+}
+
+#[test]
+fn test_spz_gaussians_shs_degree_should_be_correct() {
+    assert_eq!(SpzGaussiansShs::Zero.degree().get(), 0);
+    assert_eq!(SpzGaussiansShs::One(vec![]).degree().get(), 1);
+    assert_eq!(SpzGaussiansShs::Two(vec![]).degree().get(), 2);
+    assert_eq!(SpzGaussiansShs::Three(vec![]).degree().get(), 3);
+}
+
+#[test]
+fn test_spz_gaussian_sh_iter_should_be_correct() {
+    let sh = SpzGaussianSh::One([[1, 2, 3], [4, 5, 6], [7, 8, 9]]);
+    let coeffs: Vec<_> = sh.iter().collect();
+    assert_eq!(coeffs, vec![&[1, 2, 3], &[4, 5, 6], &[7, 8, 9]]);
+}
+
+#[test]
+fn test_spz_gaussian_sh_iter_mut_should_be_correct() {
+    let mut sh = SpzGaussianSh::One([[0; 3]; 3]);
+    for coeff in sh.iter_mut() {
+        *coeff = [1, 1, 1];
+    }
+    assert_eq!(sh, SpzGaussianSh::One([[1, 1, 1]; 3]));
+}
+
+#[test]
+fn test_spz_gaussians_positions_len_and_is_empty_should_be_correct() {
+    assert_eq!(SpzGaussiansPositions::Float16(vec![]).len(), 0);
+    assert!(SpzGaussiansPositions::Float16(vec![]).is_empty());
+
+    assert_eq!(SpzGaussiansPositions::Float16(vec![[0; 3]]).len(), 1);
+    assert!(!SpzGaussiansPositions::Float16(vec![[0; 3]]).is_empty());
+
+    assert_eq!(SpzGaussiansPositions::FixedPoint24(vec![]).len(), 0);
+    assert!(SpzGaussiansPositions::FixedPoint24(vec![]).is_empty());
+
+    assert_eq!(
+        SpzGaussiansPositions::FixedPoint24(vec![[[0; 3]; 3]]).len(),
+        1
+    );
+    assert!(!SpzGaussiansPositions::FixedPoint24(vec![[[0; 3]; 3]]).is_empty());
+}
+
+#[test]
+fn test_spz_gaussians_rotations_len_and_is_empty_should_be_correct() {
+    assert_eq!(SpzGaussiansRotations::QuatFirstThree(vec![]).len(), 0);
+    assert!(SpzGaussiansRotations::QuatFirstThree(vec![]).is_empty());
+
+    assert_eq!(SpzGaussiansRotations::QuatFirstThree(vec![[0; 3]]).len(), 1);
+    assert!(!SpzGaussiansRotations::QuatFirstThree(vec![[0; 3]]).is_empty());
+
+    assert_eq!(SpzGaussiansRotations::QuatSmallestThree(vec![]).len(), 0);
+    assert!(SpzGaussiansRotations::QuatSmallestThree(vec![]).is_empty());
+
+    assert_eq!(
+        SpzGaussiansRotations::QuatSmallestThree(vec![[0; 4]]).len(),
+        1
+    );
+    assert!(!SpzGaussiansRotations::QuatSmallestThree(vec![[0; 4]]).is_empty());
+}
+
+#[test]
+fn test_spz_gaussians_shs_len_and_is_empty_should_be_correct() {
+    assert_eq!(SpzGaussiansShs::Zero.len(), 0);
+    assert!(SpzGaussiansShs::Zero.is_empty());
+
+    assert_eq!(SpzGaussiansShs::One(vec![]).len(), 0);
+    assert!(SpzGaussiansShs::One(vec![]).is_empty());
+
+    assert_eq!(SpzGaussiansShs::One(vec![[[0; 3]; 3]]).len(), 1);
+    assert!(!SpzGaussiansShs::One(vec![[[0; 3]; 3]]).is_empty());
+
+    assert_eq!(SpzGaussiansShs::Two(vec![]).len(), 0);
+    assert!(SpzGaussiansShs::Two(vec![]).is_empty());
+
+    assert_eq!(SpzGaussiansShs::Two(vec![[[0; 3]; 8]]).len(), 1);
+    assert!(!SpzGaussiansShs::Two(vec![[[0; 3]; 8]]).is_empty());
+
+    assert_eq!(SpzGaussiansShs::Three(vec![]).len(), 0);
+    assert!(SpzGaussiansShs::Three(vec![]).is_empty());
+
+    assert_eq!(SpzGaussiansShs::Three(vec![[[0; 3]; 15]]).len(), 1);
+    assert!(!SpzGaussiansShs::Three(vec![[[0; 3]; 15]]).is_empty());
+}
+
+#[test]
+fn test_spz_gaussian_as_ref_and_ref_to_inner_owned_should_be_equal() {
+    for version in SpzGaussiansHeader::SUPPORTED_VERSIONS {
+        for sh_degree in SpzGaussiansHeader::SUPPORTED_SH_DEGREES {
+            let (gaussian, _) = given_spz_gaussian_and_header(
+                1,
+                &SpzGaussiansFromGaussianSliceOptions {
+                    version,
+                    sh_degree: SpzGaussianShDegree::new(sh_degree).expect("valid SH degree"),
+                    ..Default::default()
+                },
+            );
+
+            assert_eq!(gaussian.as_ref().to_inner_owned(), gaussian);
+        }
+    }
 }

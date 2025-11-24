@@ -278,7 +278,7 @@ impl Gaussian {
             .xyz()
             .to_array();
 
-        let sh = match header.sh_degree() {
+        let sh = match header.sh_degree().get() {
             0 => SpzGaussianSh::Zero,
             deg @ 1..=3 => {
                 let mut sh = match deg {
@@ -307,7 +307,10 @@ impl Gaussian {
 
                 sh
             }
-            _ => unreachable!(),
+            _ => {
+                // SAFETY: SpzGaussianShDegree is guaranteed to be in [0, 3].
+                unreachable!()
+            }
         };
 
         SpzGaussian {
