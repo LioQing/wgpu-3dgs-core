@@ -65,14 +65,14 @@ pub fn gaussian(
     }: GaussianOptions,
 ) {
     assert!(
-        a.rot.abs_diff_eq(b.rot, pos_epsilon),
+        a.rot.abs_diff_eq(b.rot, rot_epsilon),
         "rotation assertion failed\n left: {:?}\nright: {:?}",
         a.rot,
         b.rot
     );
 
     assert!(
-        a.pos.abs_diff_eq(b.pos, rot_epsilon),
+        a.pos.abs_diff_eq(b.pos, pos_epsilon),
         "position assertion failed\n left: {:?}\nright: {:?}",
         a.pos,
         b.pos
