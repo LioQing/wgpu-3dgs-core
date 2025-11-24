@@ -23,7 +23,15 @@ pub fn ply_gaussian_pod(a: &PlyGaussianPod, b: &PlyGaussianPod) {
         b.pos
     );
 
-    assert_eq!(a.color, b.color);
+    assert!(
+        a.normal
+            .into_iter()
+            .zip(b.normal.into_iter())
+            .all(|(x, y)| (x - y).abs() < EPSILON),
+        "normal assertion failed\n left: {:?}\nright: {:?}",
+        a.normal,
+        b.normal
+    );
 
     assert!(
         a.sh.into_iter()
