@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::{SpzGaussianPosition, SpzGaussianRotation, SpzGaussianSh};
+use crate::{SpzGaussianPosition, SpzGaussianRotation, SpzGaussianSh, SpzGaussianShDegree};
 
 /// The error type for [`SpzGaussians::from_iter`](crate::SpzGaussians::from_iter).
 #[derive(Debug, Error)]
@@ -30,8 +30,11 @@ pub enum SpzGaussiansFromIterError {
         is_quat_smallest_three: bool,
         header_uses_quat_smallest_three: bool,
     },
-    #[error("SH degree mismatch: {sh_degree} != {header_sh_degree}")]
-    ShDegreeMismatch { sh_degree: u8, header_sh_degree: u8 },
+    #[error("SH degree mismatch: {sh_degree:?} != {header_sh_degree:?}")]
+    ShDegreeMismatch {
+        sh_degree: SpzGaussianShDegree,
+        header_sh_degree: SpzGaussianShDegree,
+    },
     #[error("{0}")]
     Io(#[from] std::io::Error),
 }

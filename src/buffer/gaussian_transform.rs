@@ -5,7 +5,7 @@ use crate::{BufferWrapper, FixedSizeBufferWrapper, FixedSizeBufferWrapperError};
 
 /// The Gaussian display modes.
 #[repr(u8)]
-#[derive(Debug, Default, Clone, Copy, PartialEq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum GaussianDisplayMode {
     #[default]
     Splat = 0,
@@ -15,7 +15,7 @@ pub enum GaussianDisplayMode {
 
 /// The Gaussian spherical harmonics degrees.
 #[repr(transparent)]
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GaussianShDegree(u8);
 
 impl GaussianShDegree {
@@ -53,7 +53,7 @@ impl Default for GaussianShDegree {
 
 /// The Gaussian's maximum standard deviation.
 #[repr(transparent)]
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GaussianMaxStdDev(u8);
 
 impl GaussianMaxStdDev {
