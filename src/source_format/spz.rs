@@ -711,7 +711,7 @@ impl SpzGaussians {
     /// `reader` should be decompressed SPZ buffer.
     pub fn read_spz_decompressed(reader: &mut impl Read) -> Result<Self, std::io::Error> {
         let header = Self::read_spz_header(reader)?;
-        Self::read_spz_guassians(reader, header)
+        Self::read_spz_gaussians(reader, header)
     }
 
     /// Read a SPZ header.
@@ -729,7 +729,7 @@ impl SpzGaussians {
     /// `reader` should be decompressed SPZ buffer positioned after the header.
     ///
     /// `header` may be parsed by calling [`SpzGaussians::read_spz_header`].
-    pub fn read_spz_guassians(
+    pub fn read_spz_gaussians(
         reader: &mut impl Read,
         header: SpzGaussiansHeader,
     ) -> Result<Self, std::io::Error> {

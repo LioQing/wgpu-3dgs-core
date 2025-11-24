@@ -46,8 +46,8 @@ impl Gaussian {
         let scale = Vec3::from_array(ply.scale).exp();
 
         let color = ((Vec3::from_array(ply.color) * Self::SH0_TO_LINEAR_FACTOR + Vec3::splat(0.5))
-            * 256.0)
-            .extend((1.0 / (1.0 + (-ply.alpha).exp())) * 256.0)
+            * 255.0)
+            .extend((1.0 / (1.0 + (-ply.alpha).exp())) * 255.0)
             .clamp(Vec4::splat(0.0), Vec4::splat(255.0))
             .as_u8vec4();
 
@@ -97,7 +97,7 @@ impl Gaussian {
 
     const SPZ_COLOR_TO_LINEAR_FRAC_A_B: f32 =
         Gaussian::SH0_TO_LINEAR_FACTOR / Gaussian::SPZ_SH0_TO_LINEAR_FACTOR;
-    const SPZ_COLOR_TO_LINEAR_FRAC_F2_F1: f32 = 0.5 * 256.0;
+    const SPZ_COLOR_TO_LINEAR_FRAC_F2_F1: f32 = 0.5 * 255.0;
     const SPZ_COLOR_TO_LINEAR_C: f32 =
         (1.0 - Self::SPZ_COLOR_TO_LINEAR_FRAC_A_B) * Self::SPZ_COLOR_TO_LINEAR_FRAC_F2_F1;
 
@@ -168,8 +168,7 @@ impl Gaussian {
         };
 
         let color = U8Vec3::from_array(spz.color.map(|c| {
-            (c as f32 / 255.0 * 256.0 * Self::SPZ_COLOR_TO_LINEAR_FRAC_A_B
-                + Self::SPZ_COLOR_TO_LINEAR_C)
+            (c as f32 * Self::SPZ_COLOR_TO_LINEAR_FRAC_A_B + Self::SPZ_COLOR_TO_LINEAR_C)
                 .clamp(0.0, 255.0) as u8
         }))
         .extend(*spz.alpha);
