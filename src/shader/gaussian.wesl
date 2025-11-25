@@ -10,7 +10,7 @@ struct Gaussian {
     @if(sh_half)
         sh: array<u32, ((3 * 15 + 1) / 2)>,
     @if(sh_norm8)
-        sh: array<u32, (1 + (3 * 15 + 3) / 4)>,
+        sh: array<u32, ((3 * 15 + 3) / 4)>,
 
     @if(cov3d_rot_scale)
         cov3d: array<f32, 7>,
@@ -56,8 +56,6 @@ fn gaussian_unpack_color(gaussian: Gaussian) -> vec4<f32> {
 
 // Unpack the SH coefficients from `Gaussian.sh`.
 @if(sh_norm8) fn gaussian_unpack_sh(gaussian: Gaussian, sh_index: u32) -> vec3<f32> {
-    let minmax = unpack2x16float(gaussian.sh[0]);
-
     let i = sh_index * 3;
     let xi = i / 4;
     let xj = i % 4;
@@ -66,13 +64,11 @@ fn gaussian_unpack_color(gaussian: Gaussian) -> vec4<f32> {
     let zi = (i + 2) / 4;
     let zj = (i + 2) % 4;
     
-    let norm = vec3<f32>(
-        unpack4x8unorm(gaussian.sh[1 + xi])[xj],
-        unpack4x8unorm(gaussian.sh[1 + yi])[yj],
-        unpack4x8unorm(gaussian.sh[1 + zi])[zj],
+    return vec3<f32>(
+        unpack4x8snorm(gaussian.sh[xi])[xj],
+        unpack4x8snorm(gaussian.sh[yi])[yj],
+        unpack4x8snorm(gaussian.sh[zi])[zj],
     );
-
-    return minmax.x + norm * (minmax.y - minmax.x);
 }
 
 // Unpack the SH coefficients from `Gaussian.sh`.
