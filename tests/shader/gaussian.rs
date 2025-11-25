@@ -263,7 +263,7 @@ fn test_gaussian_unpack_sh_when_config_is_norm_8_should_return_correct_value() {
         expected_sh
             .iter()
             .zip(output.sh().iter())
-            .all(|(a, b)| a.abs_diff_eq(*b, 1.0)),
+            .all(|(a, b)| a.abs_diff_eq(*b, 1e-1)),
         " left: {:?}\nright: {:?}",
         output.sh(),
         expected_sh,
