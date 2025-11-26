@@ -8,8 +8,8 @@ use half::f16;
 ///     - Format: 15 * [`Vec3`]
 /// - Half precision [`GaussianShHalfConfig`](crate::GaussianShHalfConfig)
 ///     - Format: (15 * 3 + 1) * [`struct@f16`]
-/// - Min max 8 bit normalized [`GaussianShNorm8Config`](crate::GaussianShNorm8Config)
-///     - Format: (15 * 3 + 3 + 4) * [`prim@u8`]
+/// - 8 bit normalized [`GaussianShNorm8Config`](crate::GaussianShNorm8Config)
+///     - Format: (15 * 3 + 3) * [`prim@i8`]
 /// - None [`GaussianShNoneConfig`](crate::GaussianShNoneConfig)
 ///    - Cannot be converted back to SH
 pub trait GaussianShConfig {
@@ -79,47 +79,35 @@ impl GaussianShConfig for GaussianShHalfConfig {
     }
 }
 
-/// The min max 8 bit normalized SH configuration of Gaussian.
+/// The 8 bit signed normalized SH configuration of Gaussian.
+///
+/// This is by the fact that SH coefficients are within \[-1, 1\].
 pub struct GaussianShNorm8Config;
 
 impl GaussianShConfig for GaussianShNorm8Config {
     const FEATURE: &'static str = "sh_norm8";
 
-    type Field = [u8; 4 + (3 * 15 + 3)]; // ([f16; 2], [U8Vec3; (3 * 15 + 3) / 4])
+    type Field = [i8; 3 * 15 + 3];
 
     fn from_sh(sh: &[Vec3; 15]) -> Self::Field {
-        let mut sh_pod = [0; 4 + (3 * 15 + 3)];
-
-        let sh = sh.iter().flat_map(|sh| sh.to_array()).collect::<Vec<_>>();
-        let (min, max) = sh.iter().fold((f32::MAX, f32::MIN), |(min, max), &x| {
-            (min.min(x), max.max(x))
-        });
-        let scale = max - min;
-
-        sh_pod[0..2].copy_from_slice(&f16::from_f32(min).to_ne_bytes());
-        sh_pod[2..4].copy_from_slice(&f16::from_f32(max).to_ne_bytes());
-        sh_pod[4..].copy_from_slice(
-            &sh.iter()
-                .map(|&x| ((x - min) / scale * 255.0).round() as u8)
-                .chain(std::iter::repeat_n(0, 3))
-                .collect::<Vec<_>>(),
-        );
-
-        sh_pod
+        sh.iter()
+            .flat_map(|sh| sh.to_array())
+            .map(|v| (v * 127.0).clamp(-127.0, 127.0) as i8)
+            .chain(std::iter::repeat_n(0, 3))
+            .collect::<Vec<_>>()
+            .try_into()
+            .expect("SH norm8")
     }
 
     fn to_sh(field: &Self::Field) -> [Vec3; 15] {
-        let min = f16::to_f32(f16::from_ne_bytes([field[0], field[1]]));
-        let max = f16::to_f32(f16::from_ne_bytes([field[2], field[3]]));
-        let scale = max - min;
-
-        field[4..field.len() - 3]
+        field
             .chunks_exact(3)
+            .take(15)
             .map(|chunk| {
                 Vec3::new(
-                    (chunk[0] as f32 / 255.0) * scale + min,
-                    (chunk[1] as f32 / 255.0) * scale + min,
-                    (chunk[2] as f32 / 255.0) * scale + min,
+                    ((chunk[0] as f32) / 127.0).max(-1.0),
+                    ((chunk[1] as f32) / 127.0).max(-1.0),
+                    ((chunk[2] as f32) / 127.0).max(-1.0),
                 )
             })
             .collect::<Vec<_>>()
