@@ -65,7 +65,7 @@ pub fn gaussian_with_seed(seed: u32) -> Gaussian {
 
     let mut sh = [Vec3::ZERO; 15];
     for (i, sh) in sh.iter_mut().enumerate() {
-        let sh_base = base + (i as f32);
+        let sh_base = base + (i as f32 * 0.3);
         *sh = Vec3::new(sh_base + 0.1, sh_base + 0.2, sh_base + 0.3) % Vec3::splat(2.0) - Vec3::ONE;
     }
 
