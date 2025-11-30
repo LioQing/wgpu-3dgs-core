@@ -118,7 +118,7 @@ fn test_gaussians_len_and_is_empty_should_be_correct() {
 }
 
 #[test]
-fn test_gaussians_from_iter_should_internal_source() {
+fn test_gaussians_from_iter_should_have_internal_source() {
     let original = given::gaussians();
     let gaussians: Gaussians = original.into_iter().collect();
 
