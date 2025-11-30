@@ -191,7 +191,7 @@ fn vertex_element_not_found_error() -> std::io::Error {
 }
 
 /// A collection of Gaussians in PLY format.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PlyGaussians(pub Vec<PlyGaussianPod>);
 
 impl PlyGaussians {
@@ -450,6 +450,12 @@ impl IterGaussian for PlyGaussians {
 impl From<Vec<PlyGaussianPod>> for PlyGaussians {
     fn from(gaussians: Vec<PlyGaussianPod>) -> Self {
         Self(gaussians)
+    }
+}
+
+impl<G: AsRef<Gaussian>> FromIterator<G> for PlyGaussians {
+    fn from_iter<T: IntoIterator<Item = G>>(iter: T) -> Self {
+        Self(iter.into_iter().map(|g| g.as_ref().to_ply()).collect())
     }
 }
 

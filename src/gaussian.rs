@@ -1,12 +1,13 @@
 use glam::*;
 
 use crate::{
-    PlyGaussianPod, SpzGaussian, SpzGaussianPosition, SpzGaussianPositionRef, SpzGaussianRef,
-    SpzGaussianRotation, SpzGaussianRotationRef, SpzGaussianSh, SpzGaussiansHeader,
+    PlyGaussianPod, PlyGaussians, SpzGaussian, SpzGaussianPosition, SpzGaussianPositionRef,
+    SpzGaussianRef, SpzGaussianRotation, SpzGaussianRotationRef, SpzGaussianSh, SpzGaussians,
+    SpzGaussiansHeader,
 };
 
 /// A trait of representing an iterable collection of [`Gaussian`].
-pub trait IterGaussian {
+pub trait IterGaussian: FromIterator<Gaussian> {
     /// Iterate over [`Gaussian`].
     fn iter_gaussian(&self) -> impl Iterator<Item = Gaussian> + '_;
 }
@@ -323,6 +324,15 @@ impl Gaussian {
     }
 }
 
+// It can be useful to implement `AsRef` for `Gaussian` and `&Gaussian` due to the frequent use of
+// `from_iter` for other source formats.
+
+impl AsRef<Gaussian> for Gaussian {
+    fn as_ref(&self) -> &Gaussian {
+        self
+    }
+}
+
 /// Extra options for [`Gaussian::to_spz`].
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GaussianToSpzOptions {
@@ -349,6 +359,143 @@ impl Default for GaussianToSpzOptions {
     fn default() -> Self {
         Self {
             sh_quantize_bits: [5, 4, 4],
+        }
+    }
+}
+
+/// A discriminant representation of [`Gaussians`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GaussiansSource {
+    Internal,
+    Ply,
+    Spz,
+}
+
+impl From<&Gaussians> for GaussiansSource {
+    fn from(value: &Gaussians) -> Self {
+        match value {
+            Gaussians::Internal(_) => GaussiansSource::Internal,
+            Gaussians::Ply(_) => GaussiansSource::Ply,
+            Gaussians::Spz(_) => GaussiansSource::Spz,
+        }
+    }
+}
+
+/// A unified Gaussian representation.
+///
+/// [`Gaussians::Internal`] variant contains Gaussians in the [`Gaussian`] format, which is the one
+/// converted to [`GaussianPod`](crate::GaussianPod) directly.
+///
+/// Other variants contain Gaussians in their respective source file formats.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Gaussians {
+    Internal(Vec<Gaussian>),
+    Ply(PlyGaussians),
+    Spz(SpzGaussians),
+}
+
+impl Gaussians {
+    /// Create a collection of Gaussians from an iterator of [`Gaussian`] with the given source.
+    pub fn from_gaussians_iter(
+        iter: impl Iterator<Item = Gaussian>,
+        source: GaussiansSource,
+    ) -> Self {
+        match source {
+            GaussiansSource::Internal => Gaussians::Internal(iter.collect()),
+            GaussiansSource::Ply => Gaussians::Ply(iter.collect()),
+            GaussiansSource::Spz => Gaussians::Spz(iter.collect()),
+        }
+    }
+
+    /// Get the source representation of the Gaussians.
+    pub fn source(&self) -> GaussiansSource {
+        GaussiansSource::from(self)
+    }
+
+    /// Get the number of Gaussians.
+    pub fn len(&self) -> usize {
+        match self {
+            Gaussians::Internal(gaussians) => gaussians.len(),
+            Gaussians::Ply(ply_gaussians) => ply_gaussians.len(),
+            Gaussians::Spz(spz_gaussians) => spz_gaussians.len(),
+        }
+    }
+
+    /// Check if there is no Gaussian.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+impl From<Vec<Gaussian>> for Gaussians {
+    fn from(value: Vec<Gaussian>) -> Self {
+        Gaussians::Internal(value)
+    }
+}
+
+impl From<PlyGaussians> for Gaussians {
+    fn from(value: PlyGaussians) -> Self {
+        Gaussians::Ply(value)
+    }
+}
+
+impl From<SpzGaussians> for Gaussians {
+    fn from(value: SpzGaussians) -> Self {
+        Gaussians::Spz(value)
+    }
+}
+
+impl IterGaussian for Gaussians {
+    fn iter_gaussian(&self) -> impl Iterator<Item = Gaussian> + '_ {
+        match self {
+            Gaussians::Internal(gaussians) => GaussiansIter::Internal(gaussians.iter_gaussian()),
+            Gaussians::Ply(ply_gaussians) => GaussiansIter::Ply(ply_gaussians.iter_gaussian()),
+            Gaussians::Spz(spz_gaussians) => GaussiansIter::Spz(spz_gaussians.iter_gaussian()),
+        }
+    }
+}
+
+impl FromIterator<Gaussian> for Gaussians {
+    fn from_iter<T: IntoIterator<Item = Gaussian>>(iter: T) -> Self {
+        Gaussians::Internal(iter.into_iter().collect())
+    }
+}
+
+/// Trait to extend [`Iterator`] of [`Gaussian`] to collect into [`Gaussians`].
+pub trait IteratorGaussianExt: Iterator<Item = Gaussian> + Sized {
+    /// Collect the iterator into [`Gaussians`] with the given source.
+    fn collect_gaussians(self, source: GaussiansSource) -> Gaussians {
+        Gaussians::from_gaussians_iter(self, source)
+    }
+}
+
+impl<T: Iterator<Item = Gaussian>> IteratorGaussianExt for T {}
+
+/// Iterator for [`Gaussians`].
+#[derive(Debug, Clone)]
+pub enum GaussiansIter<
+    InternalIter: Iterator<Item = Gaussian>,
+    PlyIter: Iterator<Item = Gaussian>,
+    SpzIter: Iterator<Item = Gaussian>,
+> {
+    Internal(InternalIter),
+    Ply(PlyIter),
+    Spz(SpzIter),
+}
+
+impl<
+    InternalIter: Iterator<Item = Gaussian>,
+    PlyIter: Iterator<Item = Gaussian>,
+    SpzIter: Iterator<Item = Gaussian>,
+> Iterator for GaussiansIter<InternalIter, PlyIter, SpzIter>
+{
+    type Item = Gaussian;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            GaussiansIter::Internal(iter) => iter.next(),
+            GaussiansIter::Ply(iter) => iter.next(),
+            GaussiansIter::Spz(iter) => iter.next(),
         }
     }
 }

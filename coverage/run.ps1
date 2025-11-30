@@ -21,6 +21,7 @@ cargo llvm-cov run --example read-spz -- "$EXAMPLES_PATH/model.spz"
 # `--doctests` flag is currently unstable
 # echo "Running doctests"
 # cargo llvm-cov --no-report --doctests
+cargo test --doc  # Run doctests without tracking coverage
 
 echo "Running tests"
 cargo llvm-cov --no-report nextest
