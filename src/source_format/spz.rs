@@ -804,7 +804,7 @@ impl SpzGaussians {
     }
 
     /// Convert from a slice of [`Gaussian`]s.
-    pub fn from_gaussians<'a>(gaussians: impl IntoIterator<Item = &'a Gaussian>) -> Self {
+    pub fn from_gaussians(gaussians: impl IntoIterator<Item = impl AsRef<Gaussian>>) -> Self {
         Self::from_gaussians_with_options(
             gaussians,
             &SpzGaussiansFromGaussianSliceOptions::default(),
@@ -813,8 +813,8 @@ impl SpzGaussians {
     }
 
     /// Convert from a slice of [`Gaussian`]s with options.
-    pub fn from_gaussians_with_options<'a>(
-        gaussians: impl IntoIterator<Item = &'a Gaussian>,
+    pub fn from_gaussians_with_options(
+        gaussians: impl IntoIterator<Item = impl AsRef<Gaussian>>,
         options: &SpzGaussiansFromGaussianSliceOptions,
     ) -> Result<Self, std::io::Error> {
         let mut header = SpzGaussiansHeader::new(
@@ -828,7 +828,7 @@ impl SpzGaussians {
         let gaussians = gaussians
             .into_iter()
             .map(|g| {
-                g.to_spz(
+                g.as_ref().to_spz(
                     &header,
                     &GaussianToSpzOptions {
                         sh_quantize_bits: options.sh_quantize_bits,
@@ -952,9 +952,9 @@ impl IterGaussian for SpzGaussians {
     }
 }
 
-impl<'a, I: IntoIterator<Item = &'a Gaussian>> From<I> for SpzGaussians {
-    fn from(gaussians: I) -> Self {
-        Self::from_gaussians(gaussians)
+impl<G: AsRef<Gaussian>> FromIterator<G> for SpzGaussians {
+    fn from_iter<T: IntoIterator<Item = G>>(iter: T) -> Self {
+        Self::from_gaussians(iter)
     }
 }
 

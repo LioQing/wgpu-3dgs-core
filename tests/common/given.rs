@@ -80,16 +80,16 @@ pub fn gaussian_with_seed(seed: u32) -> Gaussian {
     }
 }
 
-pub fn gaussians() -> [Gaussian; 2] {
-    [gaussian_with_seed(42), gaussian_with_seed(123)]
+pub fn gaussians() -> Vec<Gaussian> {
+    vec![gaussian_with_seed(42), gaussian_with_seed(123)]
 }
 
 pub fn ply_gaussians() -> PlyGaussians {
-    PlyGaussians(gaussians().iter().map(Gaussian::to_ply).collect())
+    gaussians().iter().collect()
 }
 
 pub fn spz_gaussians() -> SpzGaussians {
-    SpzGaussians::from(&gaussians())
+    gaussians().iter().collect()
 }
 
 pub fn gaussian() -> Gaussian {
