@@ -145,24 +145,24 @@ fn test_spz_gaussians_write_spz_with_options_when_fractional_bits_and_read_spz_s
 }
 
 #[test]
-fn test_spz_gaussians_from_slice_and_iter_iter_gaussian_should_be_equal() {
+fn test_spz_gaussians_from_iter_and_iter_iter_gaussian_should_be_equal() {
     let gaussians = given::gaussians();
     let original_spz = given::spz_gaussians(); // `spz_gaussians` uses the same as `gaussians`
 
-    let from_slice = SpzGaussians::from(gaussians.as_slice());
+    let from_iter = gaussians.iter().collect::<SpzGaussians>();
 
-    assert_eq!(original_spz, from_slice);
+    assert_eq!(original_spz, from_iter);
 
-    for (original_ref, slice_ref, slice_gaussian) in itertools::izip!(
+    for (original_ref, iter_ref, slice_gaussian) in itertools::izip!(
         original_spz.iter(),
-        from_slice.iter(),
-        from_slice.iter_gaussian(),
+        from_iter.iter(),
+        from_iter.iter_gaussian(),
     ) {
-        assert_eq!(original_ref, slice_ref);
+        assert_eq!(original_ref, iter_ref);
         assert::gaussian(
             &slice_gaussian,
-            &Gaussian::from_spz(slice_ref, &from_slice.header),
-            ASSERT_GAUSSIAN_OPTIONS,
+            &Gaussian::from_spz(iter_ref, &from_iter.header),
+            &ASSERT_GAUSSIAN_OPTIONS,
         );
     }
 }
@@ -191,7 +191,7 @@ fn test_spz_gaussians_from_gaussians_with_options_and_iter_when_versions_should_
             },
             |spz_gaussian_ref, gaussian, header| {
                 let gaussian_from_spz = Gaussian::from_spz(spz_gaussian_ref, header);
-                assert::gaussian(&gaussian_from_spz, gaussian, ASSERT_GAUSSIAN_OPTIONS);
+                assert::gaussian(&gaussian_from_spz, gaussian, &ASSERT_GAUSSIAN_OPTIONS);
             },
         );
     }
@@ -223,7 +223,7 @@ fn test_spz_gaussians_from_gaussians_with_options_and_iter_when_sh_degrees_shoul
                             .expect("SH coefficient with 15 elements"),
                         ..*gaussian
                     },
-                    ASSERT_GAUSSIAN_OPTIONS,
+                    &ASSERT_GAUSSIAN_OPTIONS,
                 );
             },
         );
@@ -241,7 +241,7 @@ fn test_spz_gaussians_from_gaussians_and_with_options_iter_when_fractional_bits_
             },
             |spz_gaussian_ref, gaussian, header| {
                 let gaussian_from_spz = Gaussian::from_spz(spz_gaussian_ref, header);
-                assert::gaussian(&gaussian_from_spz, gaussian, ASSERT_GAUSSIAN_OPTIONS);
+                assert::gaussian(&gaussian_from_spz, gaussian, &ASSERT_GAUSSIAN_OPTIONS);
             },
         );
     }
@@ -266,7 +266,7 @@ fn test_spz_gaussians_from_gaussians_with_options_and_iter_when_sh_quantize_bits
             },
             |spz_gaussian_ref, gaussian, header| {
                 let gaussian_from_spz = Gaussian::from_spz(spz_gaussian_ref, header);
-                assert::gaussian(&gaussian_from_spz, gaussian, ASSERT_GAUSSIAN_OPTIONS);
+                assert::gaussian(&gaussian_from_spz, gaussian, &ASSERT_GAUSSIAN_OPTIONS);
             },
         );
     }

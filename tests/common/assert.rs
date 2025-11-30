@@ -53,6 +53,7 @@ pub fn ply_gaussian_pod(a: &PlyGaussianPod, b: &PlyGaussianPod) {
     );
 }
 
+#[derive(Debug, Clone)]
 pub struct GaussianOptions {
     pub pos_epsilon: f32,
     pub rot_epsilon: f32,
@@ -64,13 +65,13 @@ pub struct GaussianOptions {
 pub fn gaussian(
     a: &Gaussian,
     b: &Gaussian,
-    GaussianOptions {
+    &GaussianOptions {
         pos_epsilon,
         rot_epsilon,
         color_tolerance,
         sh_epsilon,
         scale_epsilon,
-    }: GaussianOptions,
+    }: &GaussianOptions,
 ) {
     assert!(
         a.rot.abs_diff_eq(b.rot, rot_epsilon),

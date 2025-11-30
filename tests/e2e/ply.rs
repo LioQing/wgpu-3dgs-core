@@ -230,11 +230,12 @@ fn test_ply_gaussians_write_ply_and_read_ply_should_be_equal() {
 
 #[test]
 fn test_ply_gaussians_from_vec_from_iter_and_iter_iter_mut_iter_gaussian_should_be_equal() {
-    let original = given::ply_gaussians();
-    let original_vec = original.0.clone();
+    let original = given::gaussians();
+    let original_ply = given::ply_gaussians();
+    let original_vec = original_ply.0.clone();
 
     let from_vec = PlyGaussians::from(original_vec.clone());
-    let from_iter: PlyGaussians = original_vec.clone().into_iter().collect();
+    let from_iter: PlyGaussians = original.iter().collect();
     let mut from_iter_mut = from_iter.clone();
 
     for (original, vec, iter, iter_mut, iter_gaussian) in itertools::izip!(
