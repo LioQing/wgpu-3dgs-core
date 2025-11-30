@@ -363,7 +363,7 @@ impl Default for GaussianToSpzOptions {
     }
 }
 
-/// An discriminant representation of [`Gaussians`].
+/// A discriminant representation of [`Gaussians`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GaussiansSource {
     Internal,
@@ -381,7 +381,7 @@ impl From<&Gaussians> for GaussiansSource {
     }
 }
 
-/// An unified Gaussian representation.
+/// A unified Gaussian representation.
 ///
 /// [`Gaussians::Internal`] variant contains Gaussians in the [`Gaussian`] format, which is the one
 /// converted to [`GaussianPod`](crate::GaussianPod) directly.
@@ -395,7 +395,7 @@ pub enum Gaussians {
 }
 
 impl Gaussians {
-    /// Create a a collection of Gaussians from an iterator of [`Gaussian`] with the given source.
+    /// Create a collection of Gaussians from an iterator of [`Gaussian`] with the given source.
     pub fn from_gaussians_iter(
         iter: impl Iterator<Item = Gaussian>,
         source: GaussiansSource,
