@@ -6,7 +6,10 @@ use std::{
 use flate2::{read::GzDecoder, write::GzEncoder};
 use itertools::Itertools;
 
-use crate::{Gaussian, GaussianToSpzOptions, IterGaussian, SpzGaussiansFromIterError};
+use crate::{
+    Gaussian, GaussianToSpzOptions, IterGaussian, ReadIterGaussian, SpzGaussiansFromIterError,
+    WriteIterGaussian,
+};
 
 macro_rules! gaussian_field {
     (
@@ -691,33 +694,18 @@ impl SpzGaussians {
         self.len() == 0
     }
 
-    /// Read a SPZ from file.
-    pub fn read_spz_file(path: impl AsRef<std::path::Path>) -> Result<Self, std::io::Error> {
-        let file = std::fs::File::open(path)?;
-        let mut reader = std::io::BufReader::new(file);
-        Self::read_spz(&mut reader)
-    }
-
-    /// Read a SPZ from buffer.
-    ///
-    /// `reader` should be a gzip compressed SPZ buffer.
-    pub fn read_spz(reader: &mut impl Read) -> Result<Self, std::io::Error> {
-        let mut decoder = GzDecoder::new(reader);
-        Self::read_spz_decompressed(&mut decoder)
-    }
-
     /// Read a SPZ from a decompressed buffer.
     ///
     /// `reader` should be decompressed SPZ buffer.
-    pub fn read_spz_decompressed(reader: &mut impl Read) -> Result<Self, std::io::Error> {
-        let header = Self::read_spz_header(reader)?;
-        Self::read_spz_gaussians(reader, header)
+    pub fn read_decompressed(reader: &mut impl Read) -> Result<Self, std::io::Error> {
+        let header = Self::read_header(reader)?;
+        Self::read_gaussians(reader, header)
     }
 
     /// Read a SPZ header.
     ///
     /// `reader` should be decompressed SPZ buffer.
-    pub fn read_spz_header(reader: &mut impl Read) -> Result<SpzGaussiansHeader, std::io::Error> {
+    pub fn read_header(reader: &mut impl Read) -> Result<SpzGaussiansHeader, std::io::Error> {
         let mut header_bytes = [0u8; std::mem::size_of::<SpzGaussiansHeaderPod>()];
         reader.read_exact(&mut header_bytes)?;
         let header: SpzGaussiansHeaderPod = bytemuck::cast(header_bytes);
@@ -729,7 +717,7 @@ impl SpzGaussians {
     /// `reader` should be decompressed SPZ buffer positioned after the header.
     ///
     /// `header` may be parsed by calling [`SpzGaussians::read_spz_header`].
-    pub fn read_spz_gaussians(
+    pub fn read_gaussians(
         reader: &mut impl Read,
         header: SpzGaussiansHeader,
     ) -> Result<Self, std::io::Error> {
@@ -763,27 +751,10 @@ impl SpzGaussians {
         })
     }
 
-    /// Write the Gaussians to a SPZ file.
-    pub fn write_spz_file(&self, path: impl AsRef<std::path::Path>) -> Result<(), std::io::Error> {
-        let file = std::fs::File::create(path)?;
-        let mut writer = std::io::BufWriter::new(file);
-        self.write_spz(&mut writer)
-    }
-
-    /// Write the Gaussians to a SPZ buffer.
-    ///
-    /// `writer` should receive the gzip compressed SPZ buffer.
-    pub fn write_spz(&self, writer: &mut impl Write) -> Result<(), std::io::Error> {
-        let mut encoder = GzEncoder::new(writer, flate2::Compression::default());
-        self.write_spz_decompressed(&mut encoder)?;
-        encoder.finish()?;
-        Ok(())
-    }
-
     /// Write the Gaussians to a SPZ buffer.
     ///
     /// `writer` will receive the decompressed SPZ buffer.
-    pub fn write_spz_decompressed(&self, writer: &mut impl Write) -> Result<(), std::io::Error> {
+    pub fn write_decompressed(&self, writer: &mut impl Write) -> Result<(), std::io::Error> {
         writer.write_all(bytemuck::cast_slice(std::slice::from_ref(
             self.header.as_pod(),
         )))?;
@@ -949,6 +920,22 @@ impl SpzGaussians {
 impl IterGaussian for SpzGaussians {
     fn iter_gaussian(&self) -> impl Iterator<Item = Gaussian> + '_ {
         self.iter().map(|spz| Gaussian::from_spz(spz, &self.header))
+    }
+}
+
+impl ReadIterGaussian for SpzGaussians {
+    fn read_from(reader: &mut impl std::io::BufRead) -> std::io::Result<Self> {
+        let mut decoder = GzDecoder::new(reader);
+        Self::read_decompressed(&mut decoder)
+    }
+}
+
+impl WriteIterGaussian for SpzGaussians {
+    fn write_to(&self, writer: &mut impl std::io::Write) -> std::io::Result<()> {
+        let mut encoder = GzEncoder::new(writer, flate2::Compression::default());
+        self.write_decompressed(&mut encoder)?;
+        encoder.finish()?;
+        Ok(())
     }
 }
 

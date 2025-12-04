@@ -1,3 +1,5 @@
+use std::io::BufRead;
+
 use glam::*;
 
 use crate::{
@@ -15,6 +17,32 @@ pub trait IterGaussian: FromIterator<Gaussian> {
 impl IterGaussian for Vec<Gaussian> {
     fn iter_gaussian(&self) -> impl Iterator<Item = Gaussian> + '_ {
         self.iter().copied()
+    }
+}
+
+/// A trait of representing a [`IterGaussian`] that can be read from a buffer.
+pub trait ReadIterGaussian: IterGaussian {
+    /// Read from a buffer.
+    fn read_from(reader: &mut impl BufRead) -> std::io::Result<Self>;
+
+    /// Read from a file.
+    fn read_from_file(path: impl AsRef<std::path::Path>) -> std::io::Result<Self> {
+        let file = std::fs::File::open(path)?;
+        let mut reader = std::io::BufReader::new(file);
+        Self::read_from(&mut reader)
+    }
+}
+
+/// A trait of representing a [`IterGaussian`] that can be written to a buffer.
+pub trait WriteIterGaussian: IterGaussian {
+    /// Write to a buffer.
+    fn write_to(&self, writer: &mut impl std::io::Write) -> std::io::Result<()>;
+
+    /// Write to a file.
+    fn write_to_file(&self, path: impl AsRef<std::path::Path>) -> std::io::Result<()> {
+        let file = std::fs::File::create(path)?;
+        let mut writer = std::io::BufWriter::new(file);
+        self.write_to(&mut writer)
     }
 }
 
@@ -424,6 +452,69 @@ impl Gaussians {
     /// Check if there is no Gaussian.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    /// Read from a file with the given source.
+    pub fn read_from_file(
+        path: impl AsRef<std::path::Path>,
+        source: GaussiansSource,
+    ) -> std::io::Result<Self> {
+        match source {
+            GaussiansSource::Internal => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "cannot read Internal Gaussians from file",
+            )),
+            GaussiansSource::Ply => {
+                let ply_gaussians = PlyGaussians::read_from_file(path)?;
+                Ok(Gaussians::Ply(ply_gaussians))
+            }
+            GaussiansSource::Spz => {
+                let spz_gaussians = SpzGaussians::read_from_file(path)?;
+                Ok(Gaussians::Spz(spz_gaussians))
+            }
+        }
+    }
+
+    /// Read from a buffer with the given source.
+    pub fn read_from(reader: &mut impl BufRead, source: GaussiansSource) -> std::io::Result<Self> {
+        match source {
+            GaussiansSource::Internal => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "cannot read Internal Gaussians from buffer",
+            )),
+            GaussiansSource::Ply => {
+                let ply_gaussians = PlyGaussians::read_from(reader)?;
+                Ok(Gaussians::Ply(ply_gaussians))
+            }
+            GaussiansSource::Spz => {
+                let spz_gaussians = SpzGaussians::read_from(reader)?;
+                Ok(Gaussians::Spz(spz_gaussians))
+            }
+        }
+    }
+
+    /// Write to a file with the given source.
+    pub fn write_to_file(&self, path: impl AsRef<std::path::Path>) -> std::io::Result<()> {
+        match self {
+            Gaussians::Internal(_) => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "cannot write Internal Gaussians to file",
+            )),
+            Gaussians::Ply(ply_gaussians) => ply_gaussians.write_to_file(path),
+            Gaussians::Spz(spz_gaussians) => spz_gaussians.write_to_file(path),
+        }
+    }
+
+    /// Write to a buffer with the given source.
+    pub fn write_to(&self, writer: &mut impl std::io::Write) -> std::io::Result<()> {
+        match self {
+            Gaussians::Internal(_) => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "cannot write Internal Gaussians to buffer",
+            )),
+            Gaussians::Ply(ply_gaussians) => ply_gaussians.write_to(writer),
+            Gaussians::Spz(spz_gaussians) => spz_gaussians.write_to(writer),
+        }
     }
 }
 

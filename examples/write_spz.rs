@@ -7,7 +7,7 @@
 //! ```
 
 use glam::*;
-use wgpu_3dgs_core as gs;
+use wgpu_3dgs_core::{self as gs, WriteIterGaussian};
 
 fn main() {
     let model_path = std::env::args()
@@ -57,6 +57,6 @@ fn main() {
     );
 
     gaussians
-        .write_spz_file(&model_path)
+        .write_to_file(&model_path)
         .expect("write SPZ file");
 }

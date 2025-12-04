@@ -7,7 +7,7 @@
 //! ```
 
 use glam::*;
-use wgpu_3dgs_core as gs;
+use wgpu_3dgs_core::{self as gs, WriteIterGaussian};
 
 fn main() {
     let model_path = std::env::args()
@@ -48,6 +48,6 @@ fn main() {
     println!("Writing {} gaussians to {}", gaussians.0.len(), model_path);
 
     gaussians
-        .write_ply_file(&model_path)
+        .write_to_file(&model_path)
         .expect("write PLY file");
 }
