@@ -716,7 +716,7 @@ impl SpzGaussians {
     ///
     /// `reader` should be decompressed SPZ buffer positioned after the header.
     ///
-    /// `header` may be parsed by calling [`SpzGaussians::read_spz_header`].
+    /// `header` may be parsed by calling [`SpzGaussians::read_header`].
     pub fn read_gaussians(
         reader: &mut impl Read,
         header: SpzGaussiansHeader,

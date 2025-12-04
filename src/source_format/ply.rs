@@ -322,7 +322,7 @@ impl PlyGaussians {
 
     /// Read the PLY Gaussians into [`PlyGaussianPod`].
     ///
-    /// `header` may be parsed by calling [`PlyGaussians::read_ply_header`].
+    /// `header` may be parsed by calling [`PlyGaussians::read_header`].
     pub fn read_gaussians(
         reader: &mut impl BufRead,
         header: PlyHeader,
