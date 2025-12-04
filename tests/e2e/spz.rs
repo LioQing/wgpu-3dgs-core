@@ -1,10 +1,11 @@
 use assert_matches::assert_matches;
 use glam::*;
 use wgpu_3dgs_core::{
-    Gaussian, IterGaussian, SpzGaussian, SpzGaussianPosition, SpzGaussianRef, SpzGaussianRotation,
-    SpzGaussianSh, SpzGaussianShDegree, SpzGaussianShRef, SpzGaussians, SpzGaussiansCollectError,
-    SpzGaussiansFromGaussianSliceOptions, SpzGaussiansFromIterError, SpzGaussiansHeader,
-    SpzGaussiansHeaderPod, SpzGaussiansPositions, SpzGaussiansRotations, SpzGaussiansShs,
+    Gaussian, IterGaussian, ReadIterGaussian, SpzGaussian, SpzGaussianPosition, SpzGaussianRef,
+    SpzGaussianRotation, SpzGaussianSh, SpzGaussianShDegree, SpzGaussianShRef, SpzGaussians,
+    SpzGaussiansCollectError, SpzGaussiansFromGaussianSliceOptions, SpzGaussiansFromIterError,
+    SpzGaussiansHeader, SpzGaussiansHeaderPod, SpzGaussiansPositions, SpzGaussiansRotations,
+    SpzGaussiansShs, WriteIterGaussian,
 };
 
 use crate::common::{assert, given};
@@ -63,12 +64,12 @@ fn test_spz_gaussian_pod_len_and_is_empty_should_be_correct() {
 }
 
 #[test]
-fn test_spz_gaussians_write_spz_file_and_read_spz_file_should_be_equal() {
+fn test_spz_gaussians_write_to_file_and_read_from_file_should_be_equal() {
     let spz_gaussians = given::spz_gaussians();
     let path = given::temp_file_path(".spz");
 
-    spz_gaussians.write_spz_file(&path).unwrap();
-    let spz_gaussians_read = SpzGaussians::read_spz_file(&path).unwrap();
+    spz_gaussians.write_to_file(&path).unwrap();
+    let spz_gaussians_read = SpzGaussians::read_from_file(&path).unwrap();
 
     assert_eq!(spz_gaussians.len(), spz_gaussians_read.len());
 
@@ -78,12 +79,12 @@ fn test_spz_gaussians_write_spz_file_and_read_spz_file_should_be_equal() {
 }
 
 #[test]
-fn test_spz_gaussians_write_spz_and_read_spz_should_be_equal() {
+fn test_spz_gaussians_write_to_and_read_from_should_be_equal() {
     let spz_gaussians = given::spz_gaussians();
 
     let mut buffer = Vec::new();
-    spz_gaussians.write_spz(&mut buffer).unwrap();
-    let spz_gaussians_read = SpzGaussians::read_spz(&mut buffer.as_slice()).unwrap();
+    spz_gaussians.write_to(&mut buffer).unwrap();
+    let spz_gaussians_read = SpzGaussians::read_from(&mut buffer.as_slice()).unwrap();
 
     assert_eq!(spz_gaussians.len(), spz_gaussians_read.len());
 
@@ -92,7 +93,7 @@ fn test_spz_gaussians_write_spz_and_read_spz_should_be_equal() {
     }
 }
 
-fn test_spz_gaussians_write_spz_with_options_and_read_spz_should_be_equal(
+fn test_spz_gaussians_write_to_with_options_and_read_from_should_be_equal(
     options: &SpzGaussiansFromGaussianSliceOptions,
 ) {
     let gaussians = given::gaussians();
@@ -100,16 +101,16 @@ fn test_spz_gaussians_write_spz_with_options_and_read_spz_should_be_equal(
         SpzGaussians::from_gaussians_with_options(gaussians.as_slice(), options).unwrap();
 
     let mut buffer = Vec::new();
-    from_options.write_spz(&mut buffer).unwrap();
-    let spz_gaussians_read = SpzGaussians::read_spz(&mut buffer.as_slice()).unwrap();
+    from_options.write_to(&mut buffer).unwrap();
+    let spz_gaussians_read = SpzGaussians::read_from(&mut buffer.as_slice()).unwrap();
     assert_eq!(from_options.len(), spz_gaussians_read.len());
 }
 
 #[test]
-fn test_spz_gaussians_write_spz_with_options_when_versions_and_read_spz_should_be_equal() {
+fn test_spz_gaussians_write_to_with_options_when_versions_and_read_from_should_be_equal() {
     for version in SpzGaussiansHeader::SUPPORTED_VERSIONS {
         println!("Version: {version}");
-        test_spz_gaussians_write_spz_with_options_and_read_spz_should_be_equal(
+        test_spz_gaussians_write_to_with_options_and_read_from_should_be_equal(
             &SpzGaussiansFromGaussianSliceOptions {
                 version,
                 ..Default::default()
@@ -119,10 +120,10 @@ fn test_spz_gaussians_write_spz_with_options_when_versions_and_read_spz_should_b
 }
 
 #[test]
-fn test_spz_gaussians_write_spz_with_options_when_sh_degrees_and_read_spz_should_be_equal() {
+fn test_spz_gaussians_write_to_with_options_when_sh_degrees_and_read_from_should_be_equal() {
     for sh_degree in SpzGaussiansHeader::SUPPORTED_SH_DEGREES {
         println!("SH Degree: {sh_degree}");
-        test_spz_gaussians_write_spz_with_options_and_read_spz_should_be_equal(
+        test_spz_gaussians_write_to_with_options_and_read_from_should_be_equal(
             &SpzGaussiansFromGaussianSliceOptions {
                 sh_degree: SpzGaussianShDegree::new(sh_degree).expect("valid SH degree"),
                 ..Default::default()
@@ -132,10 +133,10 @@ fn test_spz_gaussians_write_spz_with_options_when_sh_degrees_and_read_spz_should
 }
 
 #[test]
-fn test_spz_gaussians_write_spz_with_options_when_fractional_bits_and_read_spz_should_be_equal() {
+fn test_spz_gaussians_write_to_with_options_when_fractional_bits_and_read_from_should_be_equal() {
     for fractional_bits in [8, 12, 16] {
         println!("Fractional Bits: {fractional_bits}");
-        test_spz_gaussians_write_spz_with_options_and_read_spz_should_be_equal(
+        test_spz_gaussians_write_to_with_options_and_read_from_should_be_equal(
             &SpzGaussiansFromGaussianSliceOptions {
                 fractional_bits,
                 ..Default::default()

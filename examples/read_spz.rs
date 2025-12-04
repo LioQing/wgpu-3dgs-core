@@ -7,7 +7,7 @@
 //! ```
 
 use glam::*;
-use wgpu_3dgs_core::{self as gs, BufferWrapper};
+use wgpu_3dgs_core::{self as gs, BufferWrapper, ReadIterGaussian};
 
 type GaussianPod = gs::GaussianPodWithShHalfCov3dHalfConfigs;
 
@@ -37,7 +37,7 @@ async fn main() {
 
     println!("Reading gaussians from {}", model_path);
 
-    let gaussians = gs::SpzGaussians::read_spz_file(&model_path).expect("gaussians");
+    let gaussians = gs::SpzGaussians::read_from_file(&model_path).expect("gaussians");
 
     println!("Header: {:?}", gaussians.header);
 

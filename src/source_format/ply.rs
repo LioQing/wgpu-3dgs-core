@@ -1,8 +1,8 @@
-use std::io::{BufRead, Write};
+use std::io::BufRead;
 
 use bytemuck::Zeroable;
 
-use crate::{Gaussian, IterGaussian};
+use crate::{Gaussian, IterGaussian, ReadIterGaussian, WriteIterGaussian};
 
 /// The POD representation of Gaussian in PLY format.
 ///
@@ -191,6 +191,11 @@ fn vertex_element_not_found_error() -> std::io::Error {
 }
 
 /// A collection of Gaussians in PLY format.
+///
+/// The PLY file is expected to be the same format as the one used in the original Inria
+/// implementation, or a custom PLY file with the same properties.
+///
+/// See [`PlyGaussians::PLY_PROPERTIES`] for a list of expected properties.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlyGaussians(pub Vec<PlyGaussianPod>);
 
@@ -281,38 +286,10 @@ impl PlyGaussians {
         self.0.iter_mut()
     }
 
-    /// Read a PLY from file.
-    pub fn read_ply_file(path: impl AsRef<std::path::Path>) -> Result<Self, std::io::Error> {
-        let file = std::fs::File::open(path)?;
-        let mut reader = std::io::BufReader::new(file);
-        Self::read_ply(&mut reader)
-    }
-
-    /// Read a PLY from buffer.
-    ///
-    /// The PLY file is expected to be the same format as the one used in the original Inria
-    /// implementation, or a custom PLY file with the same properties.
-    ///
-    /// See [`PlyGaussians::PLY_PROPERTIES`] for a list of expected properties.
-    pub fn read_ply(reader: &mut impl BufRead) -> Result<Self, std::io::Error> {
-        let ply_header = Self::read_ply_header(reader)?;
-
-        let count = ply_header
-            .count()
-            .ok_or_else(vertex_element_not_found_error)?;
-        let mut gaussians = Vec::with_capacity(count);
-
-        for gaussian in Self::read_ply_gaussians(reader, ply_header)? {
-            gaussians.push(gaussian?);
-        }
-
-        Ok(Self(gaussians))
-    }
-
     /// Read a PLY header.
     ///
     /// See [`PlyGaussians::PLY_PROPERTIES`] for a list of expected properties.
-    pub fn read_ply_header(reader: &mut impl BufRead) -> Result<PlyHeader, std::io::Error> {
+    pub fn read_header(reader: &mut impl BufRead) -> Result<PlyHeader, std::io::Error> {
         let parser = ply_rs::parser::Parser::<ply_rs::ply::DefaultElement>::new();
         let header = parser.read_header(reader)?;
         let vertex = header
@@ -346,7 +323,7 @@ impl PlyGaussians {
     /// Read the PLY Gaussians into [`PlyGaussianPod`].
     ///
     /// `header` may be parsed by calling [`PlyGaussians::read_ply_header`].
-    pub fn read_ply_gaussians(
+    pub fn read_gaussians(
         reader: &mut impl BufRead,
         header: PlyHeader,
     ) -> Result<impl Iterator<Item = Result<PlyGaussianPod, std::io::Error>>, std::io::Error> {
@@ -405,21 +382,33 @@ impl PlyGaussians {
             }
         })
     }
+}
 
-    /// Write the Gaussians to a PLY file.
-    pub fn write_ply_file(&self, path: impl AsRef<std::path::Path>) -> Result<(), std::io::Error> {
-        let file = std::fs::File::create(path)?;
-        let mut writer = std::io::BufWriter::new(file);
-        self.write_ply(&mut writer)
+impl IterGaussian for PlyGaussians {
+    fn iter_gaussian(&self) -> impl Iterator<Item = Gaussian> + '_ {
+        self.iter().map(Gaussian::from_ply)
     }
+}
 
-    /// Write the Gaussians to a PLY buffer.
-    ///
-    /// The output PLY buffer will be in binary little endian format with the same properties as the
-    /// original Inria implementation.
-    ///
-    /// See [`PlyGaussians::PLY_PROPERTIES`] for a list of the properties.
-    pub fn write_ply(&self, writer: &mut impl Write) -> Result<(), std::io::Error> {
+impl ReadIterGaussian for PlyGaussians {
+    fn read_from(reader: &mut impl BufRead) -> std::io::Result<Self> {
+        let ply_header = Self::read_header(reader)?;
+
+        let count = ply_header
+            .count()
+            .ok_or_else(vertex_element_not_found_error)?;
+        let mut gaussians = Vec::with_capacity(count);
+
+        for gaussian in Self::read_gaussians(reader, ply_header)? {
+            gaussians.push(gaussian?);
+        }
+
+        Ok(Self(gaussians))
+    }
+}
+
+impl WriteIterGaussian for PlyGaussians {
+    fn write_to(&self, writer: &mut impl std::io::Write) -> std::io::Result<()> {
         const SYSTEM_ENDIANNESS: ply_rs::ply::Encoding = match cfg!(target_endian = "little") {
             true => ply_rs::ply::Encoding::BinaryLittleEndian,
             false => ply_rs::ply::Encoding::BinaryBigEndian,
@@ -438,12 +427,6 @@ impl PlyGaussians {
             .try_for_each(|gaussian| writer.write_all(bytemuck::bytes_of(gaussian)))?;
 
         Ok(())
-    }
-}
-
-impl IterGaussian for PlyGaussians {
-    fn iter_gaussian(&self) -> impl Iterator<Item = Gaussian> + '_ {
-        self.iter().map(Gaussian::from_ply)
     }
 }
 
