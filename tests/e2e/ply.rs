@@ -1,7 +1,9 @@
 use std::io::Write;
 
 use assert_matches::assert_matches;
-use wgpu_3dgs_core::{IterGaussian, PlyGaussianPod, PlyGaussians, glam::*};
+use wgpu_3dgs_core::{
+    IterGaussian, PlyGaussianPod, PlyGaussians, ReadIterGaussian, WriteIterGaussian, glam::*,
+};
 
 use crate::common::{assert, given};
 
@@ -83,42 +85,42 @@ fn test_ply_gaussian_pod_len_and_is_empty_should_be_correct() {
 }
 
 #[test]
-fn test_ply_gaussians_read_ply_when_format_is_custom_and_ascii_should_match_original_gaussian() {
+fn test_ply_gaussians_read_from_when_format_is_custom_and_ascii_should_match_original_gaussian() {
     let gaussians = given::ply_gaussians();
     let buffer = given_custom_gaussians_ply_buffer(&gaussians.0, ply_rs::ply::Encoding::Ascii);
 
-    let gaussians_read = PlyGaussians::read_ply(&mut buffer.as_slice()).unwrap();
+    let gaussians_read = PlyGaussians::read_from(&mut buffer.as_slice()).unwrap();
     assert_eq!(gaussians_read.len(), 2);
     assert::ply_gaussian_pod(&gaussians.0[0], &gaussians_read.0[0]);
     assert::ply_gaussian_pod(&gaussians.0[1], &gaussians_read.0[1]);
 }
 
 #[test]
-fn test_ply_gaussians_read_ply_when_format_is_custom_and_be_should_match_original_gaussian() {
+fn test_ply_gaussians_read_from_when_format_is_custom_and_be_should_match_original_gaussian() {
     let gaussians = given::ply_gaussians();
     let buffer =
         given_custom_gaussians_ply_buffer(&gaussians.0, ply_rs::ply::Encoding::BinaryBigEndian);
 
-    let gaussians_read = PlyGaussians::read_ply(&mut buffer.as_slice()).unwrap();
+    let gaussians_read = PlyGaussians::read_from(&mut buffer.as_slice()).unwrap();
     assert_eq!(gaussians_read.len(), 2);
     assert::ply_gaussian_pod(&gaussians.0[0], &gaussians_read.0[0]);
     assert::ply_gaussian_pod(&gaussians.0[1], &gaussians_read.0[1]);
 }
 
 #[test]
-fn test_ply_gaussians_read_ply_when_format_is_custom_and_le_should_match_original_gaussian() {
+fn test_ply_gaussians_read_from_when_format_is_custom_and_le_should_match_original_gaussian() {
     let gaussians = given::ply_gaussians();
     let buffer =
         given_custom_gaussians_ply_buffer(&gaussians.0, ply_rs::ply::Encoding::BinaryLittleEndian);
 
-    let gaussians_read = PlyGaussians::read_ply(&mut buffer.as_slice()).unwrap();
+    let gaussians_read = PlyGaussians::read_from(&mut buffer.as_slice()).unwrap();
     assert_eq!(gaussians_read.len(), 2);
     assert::ply_gaussian_pod(&gaussians.0[0], &gaussians_read.0[0]);
     assert::ply_gaussian_pod(&gaussians.0[1], &gaussians_read.0[1]);
 }
 
 #[test]
-fn test_ply_gaussians_read_ply_when_missing_vertex_should_return_error() {
+fn test_ply_gaussians_read_from_when_missing_vertex_should_return_error() {
     let gaussian = given::gaussian();
     let ply = gaussian.to_ply();
 
@@ -149,7 +151,7 @@ fn test_ply_gaussians_read_ply_when_missing_vertex_should_return_error() {
     )
     .unwrap();
 
-    let result = PlyGaussians::read_ply(&mut buffer.as_slice());
+    let result = PlyGaussians::read_from(&mut buffer.as_slice());
     assert_matches!(
         result,
         Err(e) if e.kind() == std::io::ErrorKind::InvalidData &&
@@ -158,7 +160,7 @@ fn test_ply_gaussians_read_ply_when_missing_vertex_should_return_error() {
 }
 
 #[test]
-fn test_ply_gaussians_read_ply_when_missing_value_should_return_error() {
+fn test_ply_gaussians_read_from_when_missing_value_should_return_error() {
     let gaussian = given::gaussian();
     let ply = gaussian.to_ply();
 
@@ -189,7 +191,7 @@ fn test_ply_gaussians_read_ply_when_missing_value_should_return_error() {
     )
     .unwrap();
 
-    let result = PlyGaussians::read_ply(&mut buffer.as_slice());
+    let result = PlyGaussians::read_from(&mut buffer.as_slice());
 
     assert_matches!(
         result,
@@ -199,12 +201,12 @@ fn test_ply_gaussians_read_ply_when_missing_value_should_return_error() {
 }
 
 #[test]
-fn test_ply_gaussians_write_ply_file_and_read_ply_file_should_be_equal() {
+fn test_ply_gaussians_write_to_file_and_read_from_file_should_be_equal() {
     let gaussians = given::ply_gaussians();
     let path = given::temp_file_path(".ply");
 
-    gaussians.write_ply_file(&path).unwrap();
-    let gaussians_read = PlyGaussians::read_ply_file(&path).unwrap();
+    gaussians.write_to_file(&path).unwrap();
+    let gaussians_read = PlyGaussians::read_from_file(&path).unwrap();
 
     assert_eq!(gaussians.len(), gaussians_read.len());
 
@@ -214,12 +216,12 @@ fn test_ply_gaussians_write_ply_file_and_read_ply_file_should_be_equal() {
 }
 
 #[test]
-fn test_ply_gaussians_write_ply_and_read_ply_should_be_equal() {
+fn test_ply_gaussians_write_to_and_read_from_should_be_equal() {
     let gaussians = given::ply_gaussians();
 
     let mut buffer = Vec::new();
-    gaussians.write_ply(&mut buffer).unwrap();
-    let gaussians_read = PlyGaussians::read_ply(&mut buffer.as_slice()).unwrap();
+    gaussians.write_to(&mut buffer).unwrap();
+    let gaussians_read = PlyGaussians::read_from(&mut buffer.as_slice()).unwrap();
 
     assert_eq!(gaussians.len(), gaussians_read.len());
 

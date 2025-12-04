@@ -1,3 +1,4 @@
+use assert_matches::assert_matches;
 use wgpu_3dgs_core::{Gaussian, Gaussians, GaussiansSource, IterGaussian, IteratorGaussianExt};
 
 use crate::common::{assert, given};
@@ -123,4 +124,105 @@ fn test_gaussians_from_iter_should_have_internal_source() {
     let gaussians: Gaussians = original.into_iter().collect();
 
     assert_eq!(gaussians.source(), GaussiansSource::Internal);
+}
+
+#[test]
+fn test_gaussians_write_to_file_and_read_from_file_when_source_is_ply_should_be_equal() {
+    let gaussians = Gaussians::from(given::ply_gaussians());
+    let path = given::temp_file_path(".ply");
+
+    gaussians.write_to_file(&path).unwrap();
+    let gaussians_read = Gaussians::read_from_file(&path, GaussiansSource::Ply).unwrap();
+
+    assert_eq!(gaussians.len(), gaussians_read.len());
+    assert_eq!(gaussians, gaussians_read);
+}
+
+#[test]
+fn test_gaussians_write_to_file_and_read_from_file_when_source_is_spz_should_be_equal() {
+    let gaussians = Gaussians::from(given::spz_gaussians());
+    let path = given::temp_file_path(".spz");
+
+    gaussians.write_to_file(&path).unwrap();
+    let gaussians_read = Gaussians::read_from_file(&path, GaussiansSource::Spz).unwrap();
+
+    assert_eq!(gaussians.len(), gaussians_read.len());
+    assert_eq!(gaussians, gaussians_read);
+}
+
+#[test]
+fn test_gaussians_write_to_file_when_source_is_internal_should_return_error() {
+    let gaussians = Gaussians::from(given::gaussians());
+    let path = given::temp_file_path(".bin");
+
+    let result = gaussians.write_to_file(&path);
+
+    assert_matches!(
+        result,
+        Err(e) if e.kind() == std::io::ErrorKind::InvalidInput &&
+            e.to_string() == "cannot write Internal Gaussians to file"
+    );
+}
+
+#[test]
+fn test_gaussians_read_from_file_when_source_is_internal_should_return_error() {
+    let path = given::temp_file_path(".bin");
+
+    let result = Gaussians::read_from_file(&path, GaussiansSource::Internal);
+
+    assert_matches!(
+        result,
+        Err(e) if e.kind() == std::io::ErrorKind::InvalidInput &&
+            e.to_string() == "cannot read Internal Gaussians from file"
+    );
+}
+
+#[test]
+fn test_gaussians_write_to_and_read_from_when_source_is_ply_should_be_equal() {
+    let gaussians = Gaussians::from(given::ply_gaussians());
+
+    let mut buffer = Vec::new();
+    gaussians.write_to(&mut buffer).unwrap();
+    let gaussians_read =
+        Gaussians::read_from(&mut buffer.as_slice(), GaussiansSource::Ply).unwrap();
+
+    assert_eq!(gaussians, gaussians_read);
+}
+
+#[test]
+fn test_gaussians_write_to_and_read_from_when_source_is_spz_should_be_equal() {
+    let gaussians = Gaussians::from(given::spz_gaussians());
+
+    let mut buffer = Vec::new();
+    gaussians.write_to(&mut buffer).unwrap();
+    let gaussians_read =
+        Gaussians::read_from(&mut buffer.as_slice(), GaussiansSource::Spz).unwrap();
+
+    assert_eq!(gaussians, gaussians_read);
+}
+
+#[test]
+fn test_gaussians_write_to_when_source_is_internal_should_return_error() {
+    let gaussians = Gaussians::from(given::gaussians());
+    let mut buffer = Vec::new();
+
+    let result = gaussians.write_to(&mut buffer);
+
+    assert_matches!(
+        result,
+        Err(e) if e.kind() == std::io::ErrorKind::InvalidInput &&
+            e.to_string() == "cannot write Internal Gaussians to buffer"
+    );
+}
+
+#[test]
+fn test_gaussians_read_from_when_source_is_internal_should_return_error() {
+    let buffer = Vec::new();
+    let result = Gaussians::read_from(&mut buffer.as_slice(), GaussiansSource::Internal);
+
+    assert_matches!(
+        result,
+        Err(e) if e.kind() == std::io::ErrorKind::InvalidInput &&
+            e.to_string() == "cannot read Internal Gaussians from buffer"
+    );
 }
