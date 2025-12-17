@@ -589,6 +589,14 @@ impl<
             GaussiansIter::Spz(iter) => iter.next(),
         }
     }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        match self {
+            GaussiansIter::Internal(iter) => iter.size_hint(),
+            GaussiansIter::Ply(iter) => iter.size_hint(),
+            GaussiansIter::Spz(iter) => iter.size_hint(),
+        }
+    }
 }
 
 impl<
@@ -597,11 +605,4 @@ impl<
     SpzIter: ExactSizeIterator<Item = Gaussian>,
 > ExactSizeIterator for GaussiansIter<InternalIter, PlyIter, SpzIter>
 {
-    fn len(&self) -> usize {
-        match self {
-            GaussiansIter::Internal(iter) => iter.len(),
-            GaussiansIter::Ply(iter) => iter.len(),
-            GaussiansIter::Spz(iter) => iter.len(),
-        }
-    }
 }
