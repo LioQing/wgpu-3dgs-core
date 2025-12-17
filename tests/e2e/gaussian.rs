@@ -13,8 +13,14 @@ fn test_gaussians_collect_gaussians_from_and_iter_gaussian_when_source_is_intern
         .collect_gaussians(GaussiansSource::Internal);
     let from = Gaussians::from(original.clone());
 
-    let iterated: Vec<Gaussian> = gaussians.iter_gaussian().collect();
-    let from_iterated: Vec<Gaussian> = from.iter_gaussian().collect();
+    let iter = gaussians.iter_gaussian();
+    let from_iter = from.iter_gaussian();
+
+    assert_eq!(iter.len(), original.len());
+    assert_eq!(from_iter.len(), original.len());
+
+    let iterated: Vec<Gaussian> = iter.collect();
+    let from_iterated: Vec<Gaussian> = from_iter.collect();
 
     assert_eq!(original.len(), iterated.len());
     assert_eq!(original.len(), from_iterated.len());
@@ -35,8 +41,14 @@ fn test_gaussians_collect_gaussians_from_and_iter_gaussian_when_source_is_ply_sh
         .collect_gaussians(GaussiansSource::Ply);
     let from = Gaussians::from(original_ply.clone());
 
-    let iterated: Vec<Gaussian> = gaussians.iter_gaussian().collect();
-    let from_iterated: Vec<Gaussian> = from.iter_gaussian().collect();
+    let iter = gaussians.iter_gaussian();
+    let from_iter = from.iter_gaussian();
+
+    assert_eq!(iter.len(), original.len());
+    assert_eq!(from_iter.len(), original.len());
+
+    let iterated: Vec<Gaussian> = iter.collect();
+    let from_iterated: Vec<Gaussian> = from_iter.collect();
 
     assert_eq!(original.len(), iterated.len());
     assert_eq!(original.len(), from_iterated.len());
@@ -65,8 +77,14 @@ fn test_gaussians_collect_gaussians_from_and_iter_gaussian_when_source_is_spz_sh
         .collect_gaussians(GaussiansSource::Spz);
     let from = Gaussians::from(original_spz.clone());
 
-    let iterated: Vec<Gaussian> = gaussians.iter_gaussian().collect();
-    let from_iterated: Vec<Gaussian> = from.iter_gaussian().collect();
+    let iter = gaussians.iter_gaussian();
+    let from_iter = from.iter_gaussian();
+
+    assert_eq!(iter.len(), original.len());
+    assert_eq!(from_iter.len(), original.len());
+
+    let iterated: Vec<Gaussian> = iter.collect();
+    let from_iterated: Vec<Gaussian> = from_iter.collect();
 
     assert_eq!(original.len(), iterated.len());
     assert_eq!(original.len(), from_iterated.len());
