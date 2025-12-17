@@ -11,11 +11,11 @@ use crate::{
 /// A trait of representing an iterable collection of [`Gaussian`].
 pub trait IterGaussian: FromIterator<Gaussian> {
     /// Iterate over [`Gaussian`].
-    fn iter_gaussian(&self) -> impl Iterator<Item = Gaussian> + '_;
+    fn iter_gaussian(&self) -> impl ExactSizeIterator<Item = Gaussian> + '_;
 }
 
 impl IterGaussian for Vec<Gaussian> {
-    fn iter_gaussian(&self) -> impl Iterator<Item = Gaussian> + '_ {
+    fn iter_gaussian(&self) -> impl ExactSizeIterator<Item = Gaussian> + '_ {
         self.iter().copied()
     }
 }
@@ -537,7 +537,7 @@ impl From<SpzGaussians> for Gaussians {
 }
 
 impl IterGaussian for Gaussians {
-    fn iter_gaussian(&self) -> impl Iterator<Item = Gaussian> + '_ {
+    fn iter_gaussian(&self) -> impl ExactSizeIterator<Item = Gaussian> + '_ {
         match self {
             Gaussians::Internal(gaussians) => GaussiansIter::Internal(gaussians.iter_gaussian()),
             Gaussians::Ply(ply_gaussians) => GaussiansIter::Ply(ply_gaussians.iter_gaussian()),
@@ -587,6 +587,21 @@ impl<
             GaussiansIter::Internal(iter) => iter.next(),
             GaussiansIter::Ply(iter) => iter.next(),
             GaussiansIter::Spz(iter) => iter.next(),
+        }
+    }
+}
+
+impl<
+    InternalIter: ExactSizeIterator<Item = Gaussian>,
+    PlyIter: ExactSizeIterator<Item = Gaussian>,
+    SpzIter: ExactSizeIterator<Item = Gaussian>,
+> ExactSizeIterator for GaussiansIter<InternalIter, PlyIter, SpzIter>
+{
+    fn len(&self) -> usize {
+        match self {
+            GaussiansIter::Internal(iter) => iter.len(),
+            GaussiansIter::Ply(iter) => iter.len(),
+            GaussiansIter::Spz(iter) => iter.len(),
         }
     }
 }

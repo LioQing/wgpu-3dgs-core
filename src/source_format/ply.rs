@@ -277,12 +277,12 @@ impl PlyGaussians {
     }
 
     /// Iterate over the Gaussians.
-    pub fn iter(&self) -> impl Iterator<Item = &PlyGaussianPod> {
+    pub fn iter(&self) -> impl ExactSizeIterator<Item = &PlyGaussianPod> {
         self.0.iter()
     }
 
     /// Iterate over the Gaussians mutably.
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut PlyGaussianPod> {
+    pub fn iter_mut(&mut self) -> impl ExactSizeIterator<Item = &mut PlyGaussianPod> {
         self.0.iter_mut()
     }
 
@@ -385,7 +385,7 @@ impl PlyGaussians {
 }
 
 impl IterGaussian for PlyGaussians {
-    fn iter_gaussian(&self) -> impl Iterator<Item = Gaussian> + '_ {
+    fn iter_gaussian(&self) -> impl ExactSizeIterator<Item = Gaussian> + '_ {
         self.iter().map(Gaussian::from_ply)
     }
 }

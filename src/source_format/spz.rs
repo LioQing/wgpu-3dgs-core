@@ -81,7 +81,26 @@ macro_rules! gaussian_field {
                         )+
                     }
                 }
+
+                fn size_hint(&self) -> (usize, Option<usize>) {
+                    match self {
+                        $(
+                            #[allow(clippy::redundant_pattern)]
+                            [< SpzGaussian $name Iter >]:: $variant $( (iter @ noop!($ty _)) )? => {
+                                #[allow(unused_variables)]
+                                let len = 0;
+                                $(
+                                    noop!($ty);
+                                    let len = iter.len();
+                                )?
+                                (len, Some(len))
+                            }
+                        )+
+                    }
+                }
             }
+
+            impl<'a> ExactSizeIterator for [< SpzGaussian $name Iter >]<'a> {}
 
             #[doc = "Representation of SPZ Gaussians "]
             #[doc = $docname]
@@ -895,7 +914,7 @@ impl SpzGaussians {
     }
 
     /// Get an iterator over Gaussian references.
-    pub fn iter<'a>(&'a self) -> impl Iterator<Item = SpzGaussianRef<'a>> + 'a {
+    pub fn iter<'a>(&'a self) -> impl ExactSizeIterator<Item = SpzGaussianRef<'a>> + 'a {
         itertools::izip!(
             self.positions.iter(),
             self.scales.iter(),
@@ -918,7 +937,7 @@ impl SpzGaussians {
 }
 
 impl IterGaussian for SpzGaussians {
-    fn iter_gaussian(&self) -> impl Iterator<Item = Gaussian> + '_ {
+    fn iter_gaussian(&self) -> impl ExactSizeIterator<Item = Gaussian> + '_ {
         self.iter().map(|spz| Gaussian::from_spz(spz, &self.header))
     }
 }
