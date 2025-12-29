@@ -62,9 +62,23 @@ pub trait BufferWrapper: Into<wgpu::Buffer> {
     /// Map the download buffer to read the buffer data.
     ///
     /// `download` should be created with [`wgpu::BufferUsages::MAP_READ`].
+    ///
+    /// This uses [`wgpu::PollType::wait_indefinitely()`] to wait for the mapping to complete,
+    /// you can specify a custom poll type with [`BufferWrapper::map_download_with_poll_type`].
     fn map_download<T: bytemuck::NoUninit + bytemuck::AnyBitPattern>(
         download: &wgpu::Buffer,
         device: &wgpu::Device,
+    ) -> impl Future<Output = Result<Vec<T>, DownloadBufferError>> + Send {
+        Self::map_download_with_poll_type(download, device, wgpu::PollType::wait_indefinitely())
+    }
+
+    /// Map the download buffer to read the buffer data with custom [`wgpu::PollType`].
+    ///
+    /// `download` should be created with [`wgpu::BufferUsages::MAP_READ`].
+    fn map_download_with_poll_type<T: bytemuck::NoUninit + bytemuck::AnyBitPattern>(
+        download: &wgpu::Buffer,
+        device: &wgpu::Device,
+        poll_type: wgpu::PollType,
     ) -> impl Future<Output = Result<Vec<T>, DownloadBufferError>> + Send {
         async {
             let (tx, rx) = oneshot::channel();
@@ -74,7 +88,7 @@ pub trait BufferWrapper: Into<wgpu::Buffer> {
                     log::error!("Error occurred while sending buffer download data: {e:?}");
                 }
             });
-            device.poll(wgpu::PollType::Wait)?;
+            device.poll(poll_type)?;
             rx.await??;
 
             let edits = bytemuck::allocation::pod_collect_to_vec(&buffer_slice.get_mapped_range());
