@@ -11,7 +11,7 @@ use crate::{
     inline_wesl_pkg,
 };
 
-const TEST_PACKAGE: wesl::Pkg = inline_wesl_pkg!(
+const TEST_PACKAGE: wesl::CodegenPkg = inline_wesl_pkg!(
     use [&wgpu_3dgs_core::shader::PACKAGE],
 
     "test_gaussian":
