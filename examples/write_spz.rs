@@ -14,7 +14,7 @@ fn main() {
         .nth(1)
         .unwrap_or_else(|| "target/output.spz".to_string());
 
-    let gaussians = vec![
+    let gaussians = [
         gs::Gaussian {
             rot: Quat::from_axis_angle((Vec3::X + Vec3::Y / 2.0 + Vec3::Z).normalize(), 0.5),
             pos: Vec3::ZERO,
