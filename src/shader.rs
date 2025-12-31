@@ -1,10 +1,10 @@
-//! Shader modules for the [`wesl::Pkg`] `wgpu-3dgs-core`.
+//! Shader modules for the [`wesl::CodegenPkg`] `wgpu-3dgs-core`.
 //!
 //! See the documentation of each module for details.
 
 use wesl::{CodegenModule, CodegenPkg};
 
-/// The `wgpu-3dgs-core` [`wesl::Pkg`].
+/// The `wgpu-3dgs-core` [`wesl::CodegenPkg`].
 pub const PACKAGE: CodegenPkg = CodegenPkg {
     crate_name: "wgpu-3dgs-core",
     root: &MODULE,
