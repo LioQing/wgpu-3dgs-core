@@ -49,13 +49,16 @@ all-features = true
 cargo-args = ["-Zunstable-options", "-Zrustdoc-scrape-examples"]
 
 [dependencies]
+async-trait = "0.1"
 bytemuck = { version = "1.24", features = [
     "derive",
     "extern_crate_alloc",
     "min_const_generics",
 ] }
+flate2 = "1.1"
 glam = { version = "0.30", features = ["bytemuck"] }
 half = { version = "2.7", features = ["bytemuck"] }
+itertools = "0.14"
 log = "0.4"
 oneshot = "0.1"
 paste = "1.0"
@@ -63,8 +66,6 @@ ply-rs = "0.1"
 thiserror = "2.0"
 wgpu = "28.0"
 wesl = "0.3"
-flate2 = "1.1"
-itertools = "0.14"
 
 [dev-dependencies]
 assert_matches = { version = "1.5" }
