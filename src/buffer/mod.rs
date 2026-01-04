@@ -7,8 +7,10 @@ pub use gaussian_transform::*;
 pub use model_transform::*;
 
 use crate::{DownloadBufferError, FixedSizeBufferWrapperError};
+use async_trait::async_trait;
 
 /// A trait to to enable any wrapper to act like a [`wgpu::Buffer`].
+#[async_trait]
 pub trait BufferWrapper: Into<wgpu::Buffer> {
     /// The default usages.
     const DEFAULT_USAGES: wgpu::BufferUsages = wgpu::BufferUsages::from_bits_retain(
@@ -19,23 +21,21 @@ pub trait BufferWrapper: Into<wgpu::Buffer> {
     fn buffer(&self) -> &wgpu::Buffer;
 
     /// Download the buffer data into a [`Vec`].
-    fn download<T: bytemuck::NoUninit + bytemuck::AnyBitPattern>(
+    async fn download<T: bytemuck::NoUninit + bytemuck::AnyBitPattern>(
         &self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-    ) -> impl Future<Output = Result<Vec<T>, DownloadBufferError>> + Send
+    ) -> Result<Vec<T>, DownloadBufferError>
     where
-        Self: Send + Sync,
+        Self: Send,
     {
-        async {
-            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("Buffer Wrapper Download Encoder"),
-            });
-            let download = self.prepare_download(device, &mut encoder);
-            queue.submit(Some(encoder.finish()));
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Buffer Wrapper Download Encoder"),
+        });
+        let download = self.prepare_download(device, &mut encoder);
+        queue.submit(Some(encoder.finish()));
 
-            Self::map_download(&download, device).await
-        }
+        Self::map_download(&download, device).await
     }
 
     /// Prepare for downloading the buffer data.
@@ -63,39 +63,38 @@ pub trait BufferWrapper: Into<wgpu::Buffer> {
     ///
     /// `download` should be created with [`wgpu::BufferUsages::MAP_READ`].
     ///
-    /// This uses [`wgpu::PollType::wait_indefinitely()`] to wait for the mapping to complete,
+    /// This uses [`wgpu::PollType::wait_indefinitely`] to wait for the mapping to complete,
     /// you can specify a custom poll type with [`BufferWrapper::map_download_with_poll_type`].
-    fn map_download<T: bytemuck::NoUninit + bytemuck::AnyBitPattern>(
+    async fn map_download<T: bytemuck::NoUninit + bytemuck::AnyBitPattern>(
         download: &wgpu::Buffer,
         device: &wgpu::Device,
-    ) -> impl Future<Output = Result<Vec<T>, DownloadBufferError>> + Send {
+    ) -> Result<Vec<T>, DownloadBufferError> {
         Self::map_download_with_poll_type(download, device, wgpu::PollType::wait_indefinitely())
+            .await
     }
 
     /// Map the download buffer to read the buffer data with custom [`wgpu::PollType`].
     ///
     /// `download` should be created with [`wgpu::BufferUsages::MAP_READ`].
-    fn map_download_with_poll_type<T: bytemuck::NoUninit + bytemuck::AnyBitPattern>(
+    async fn map_download_with_poll_type<T: bytemuck::NoUninit + bytemuck::AnyBitPattern>(
         download: &wgpu::Buffer,
         device: &wgpu::Device,
         poll_type: wgpu::PollType,
-    ) -> impl Future<Output = Result<Vec<T>, DownloadBufferError>> + Send {
-        async {
-            let (tx, rx) = oneshot::channel();
-            let buffer_slice = download.slice(..);
-            buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
-                if let Err(e) = tx.send(result) {
-                    log::error!("Error occurred while sending buffer download data: {e:?}");
-                }
-            });
-            device.poll(poll_type)?;
-            rx.await??;
+    ) -> Result<Vec<T>, DownloadBufferError> {
+        let (tx, rx) = oneshot::channel();
+        let buffer_slice = download.slice(..);
+        buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
+            if let Err(e) = tx.send(result) {
+                log::error!("Error occurred while sending buffer download data: {e:?}");
+            }
+        });
+        device.poll(poll_type)?;
+        rx.await??;
 
-            let edits = bytemuck::allocation::pod_collect_to_vec(&buffer_slice.get_mapped_range());
-            download.unmap();
+        let edits = bytemuck::allocation::pod_collect_to_vec(&buffer_slice.get_mapped_range());
+        download.unmap();
 
-            Ok(edits)
-        }
+        Ok(edits)
     }
 }
 
