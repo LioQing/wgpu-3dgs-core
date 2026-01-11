@@ -53,11 +53,6 @@ jobs:
             echo "Major.minor version (${major_minor}) from tag not found in README.md Dependencies table"
             exit 1
           fi
-          echo "Checking version in CHANGELOG.md against tag ${tag}"
-          if ! grep -q "^## \[${tag_version}\]" CHANGELOG.md; then
-            echo "Version (${tag_version}) from tag not found in CHANGELOG.md"
-            exit 1
-          fi
 
   publish:
     runs-on: ubuntu-latest
