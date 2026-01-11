@@ -46,6 +46,7 @@ jobs:
             echo "Version in Cargo.toml (${version_in_cargo_toml}) does not match tag (${tag})"
             exit 1
           fi
+          tag_version="${tag#v}"
           echo "Checking version in CHANGELOG.md against tag ${tag}"
           if ! grep -q "^## \[${tag_version}\]" CHANGELOG.md; then
             echo "Version (${tag_version}) from tag not found in CHANGELOG.md"
