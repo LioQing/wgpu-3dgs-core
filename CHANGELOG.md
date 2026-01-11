@@ -2,7 +2,7 @@
 
 Please also check out the [`wgpu-3dgs-viewer` changelog](https://github.com/LioQing/wgpu-3dgs-viewer/blob/master/CHANGELOG.md) and [`wgpu-3dgs-editor` changelog](https://github.com/LioQing/wgpu-3dgs-editor/blob/master/CHANGELOG.md).
 
-## [0.6.0](https://crates.io/crates/wgpu-3dgs-core/0.6.0) - Unreleased
+## [0.6.0](https://crates.io/crates/wgpu-3dgs-core/0.6.0) - 2026-01-11
 
 ### Added
 
