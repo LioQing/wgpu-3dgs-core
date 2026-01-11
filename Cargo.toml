@@ -17,7 +17,7 @@ include = [
 ]
 repository = "https://github.com/LioQing/wgpu-3dgs-core"
 homepage = "https://github.com/LioQing/wgpu-3dgs-core"
-keywords = ["gaussian-splatting", "point-cloud", "wgpu", "graphics", "ply"]
+keywords = ["gaussian-splatting", "wgpu", "graphics", "ply", "spz"]
 categories = ["graphics", "wasm"]
 
 [lib]
