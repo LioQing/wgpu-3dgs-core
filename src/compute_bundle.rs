@@ -295,7 +295,7 @@ impl ComputeBundle<()> {
         );
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some(label_for_components!(label, "Pipeline Layout").as_str()),
-            bind_group_layouts: &bind_group_layouts.iter().collect::<Vec<_>>(),
+            bind_group_layouts: &bind_group_layouts.iter().map(Some).collect::<Vec<_>>(),
             ..Default::default()
         });
 

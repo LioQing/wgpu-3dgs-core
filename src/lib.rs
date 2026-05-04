@@ -16,4 +16,5 @@ pub use gaussian_config::*;
 pub use source_format::*;
 
 pub use glam;
+pub use wesl;
 pub use wgpu;

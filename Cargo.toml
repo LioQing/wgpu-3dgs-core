@@ -50,21 +50,21 @@ cargo-args = ["-Zunstable-options", "-Zrustdoc-scrape-examples"]
 
 [dependencies]
 async-trait = "0.1"
-bytemuck = { version = "1.24", features = [
+bytemuck = { version = "1.25", features = [
     "derive",
     "extern_crate_alloc",
     "min_const_generics",
 ] }
 flate2 = "1.1"
-glam = { version = "0.30", features = ["bytemuck"] }
+glam = { version = "0.32", features = ["bytemuck"] }
 half = { version = "2.7", features = ["bytemuck"] }
 itertools = "0.14"
 log = "0.4"
-oneshot = "0.1"
+oneshot = { version = "0.2", features = ["async", "std"] }
 paste = "1.0"
 ply-rs = "0.1"
 thiserror = "2.0"
-wgpu = "28.0"
+wgpu = "29.0"
 wesl = "0.3"
 
 [dev-dependencies]
