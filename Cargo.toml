@@ -56,17 +56,17 @@ bytemuck = { version = "1.25", features = [
     "min_const_generics",
 ] }
 flate2 = "1.1"
-glam = { version = "0.32", features = ["bytemuck"] }
+glam = { version = "0.33", features = ["bytemuck"] }
 half = { version = "2.7", features = ["bytemuck"] }
-itertools = "0.14"
+itertools = "0.15"
 log = "0.4"
 oneshot = { version = "0.2", features = ["async", "std"] }
 paste = "1.0"
 ply-rs = "0.1"
 thiserror = "2.0"
-wgpu = "29.0"
-wesl = "0.3"
+wgpu = "30.0"
+wesl = "0.4"
 
 [dev-dependencies]
 assert_matches = { version = "1.5" }
-pollster = { version = "0.4", features = ["macro"] }
+pollster = { version = "1.0", features = ["macro"] }

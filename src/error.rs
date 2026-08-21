@@ -60,6 +60,8 @@ pub enum DownloadBufferError {
     Async(#[from] wgpu::BufferAsyncError),
     #[error("{0}")]
     Poll(#[from] wgpu::PollError),
+    #[error("{0}")]
+    MapRange(#[from] wgpu::MapRangeError),
 }
 
 /// The error type for [`GaussiansBuffer`](crate::GaussiansBuffer) update functions.
