@@ -53,7 +53,11 @@ fn given_custom_gaussians_ply_buffer(
             ply_rs::ply::Encoding::BinaryBigEndian => {
                 const SIZE: usize = std::mem::size_of::<PlyGaussianPod>();
                 let mut bytes: [u8; SIZE] = bytemuck::cast(ply);
-                bytes.chunks_exact_mut(4).for_each(|chunk| chunk.reverse());
+                bytes
+                    .as_chunks_mut::<4>()
+                    .0
+                    .iter_mut()
+                    .for_each(|chunk| chunk.reverse());
                 buffer.extend_from_slice(&bytes);
             }
         }

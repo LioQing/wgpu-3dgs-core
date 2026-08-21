@@ -65,7 +65,9 @@ impl GaussianShConfig for GaussianShHalfConfig {
 
     fn to_sh(field: &Self::Field) -> [Vec3; 15] {
         field
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .map(|chunk| {
                 Vec3::new(
                     f16::to_f32(chunk[0]),
@@ -101,7 +103,9 @@ impl GaussianShConfig for GaussianShNorm8Config {
 
     fn to_sh(field: &Self::Field) -> [Vec3; 15] {
         field
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .take(15)
             .map(|chunk| {
                 Vec3::new(
