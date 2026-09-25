@@ -2,8 +2,8 @@ use std::io::Write;
 
 use assert_matches::assert_matches;
 use wgpu_3dgs_core::{
-    IterGaussian, PlyGaussianPod, PlyGaussians, PlyHeader, ReadIterGaussian, WriteIterGaussian,
-    glam::*,
+    Gaussian, IterGaussian, PlyGaussianPod, PlyGaussians, PlyHeader, ReadIterGaussian,
+    WriteIterGaussian, glam::*,
 };
 
 use crate::common::{assert, given};
@@ -67,6 +67,26 @@ fn given_custom_gaussians_ply_buffer(
     }
 
     buffer
+}
+
+#[test]
+fn test_ply_color_round_trip_should_preserve_float_precision() {
+    for color in [
+        [0.1234567, -0.2345678, 0.3456789],
+        [-3.1234567, 2.2345678, 4.345679],
+    ] {
+        let ply = PlyGaussianPod {
+            color,
+            alpha: 0.1234567,
+            ..given::gaussian().to_ply()
+        };
+
+        let gaussian = Gaussian::from_ply(&ply);
+        let round_trip = gaussian.to_ply();
+
+        assert!(Vec3::from_array(round_trip.color).abs_diff_eq(Vec3::from_array(color), 1e-6));
+        assert!((round_trip.alpha - ply.alpha).abs() < 1e-6);
+    }
 }
 
 #[test]
@@ -268,7 +288,7 @@ fn test_ply_gaussians_read_from_when_missing_value_should_return_error() {
 }
 
 #[test]
-fn test_ply_gaussians_write_to_file_and_read_from_file_should_be_equal() {
+fn test_ply_gaussians_file_round_trip_should_be_equal() {
     let gaussians = given::ply_gaussians();
     let path = given::temp_file_path(".ply");
 
@@ -283,7 +303,7 @@ fn test_ply_gaussians_write_to_file_and_read_from_file_should_be_equal() {
 }
 
 #[test]
-fn test_ply_gaussians_write_to_and_read_from_should_be_equal() {
+fn test_ply_gaussians_buffer_round_trip_should_be_equal() {
     let gaussians = given::ply_gaussians();
 
     let mut buffer = Vec::new();

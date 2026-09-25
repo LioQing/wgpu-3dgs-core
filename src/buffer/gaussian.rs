@@ -320,7 +320,10 @@ macro_rules! gaussian_pod {
                     );
 
                     // Color
-                    let color = gaussian.color;
+                    let color = (gaussian.color * 255.0)
+                        .round()
+                        .clamp(Vec4::ZERO, Vec4::splat(255.0))
+                        .as_u8vec4();
 
                     // Spherical harmonics
                     let sh = [< GaussianSh $sh Config >]::from_sh(&gaussian.sh);
@@ -347,7 +350,7 @@ macro_rules! gaussian_pod {
                     let sh = [< GaussianSh $sh Config >]::to_sh(&pod.sh);
 
                     // Color
-                    let color = pod.color;
+                    let color = pod.color.as_vec4() / 255.0;
 
                     // Rotation
                     let (rot, scale) = <[< GaussianCov3d $cov3d Config >]>::to_rot_scale(&pod.cov3d);
@@ -396,7 +399,7 @@ mod tests {
                     let pod = $pod_type::from_gaussian(&Gaussian {
                         rot: Quat::from_xyzw(0.0, 0.0, 0.0, 1.0),
                         pos: Vec3::new(1.0, 2.0, 3.0),
-                        color: U8Vec4::new(255, 128, 64, 32),
+                        color: Vec4::new(255.0, 128.0, 64.0, 32.0) / 255.0,
                         sh: [Vec3::new(0.1, 0.2, 0.3); 15],
                         scale: Vec3::new(1.0, 2.0, 3.0),
                     });
@@ -412,7 +415,7 @@ mod tests {
                     let pod = $pod_type::from_gaussian(&Gaussian {
                         rot: Quat::from_xyzw(0.0, 0.0, 0.0, 1.0),
                         pos: Vec3::new(1.0, 2.0, 3.0),
-                        color: U8Vec4::new(255, 128, 64, 32),
+                        color: Vec4::new(255.0, 128.0, 64.0, 32.0) / 255.0,
                         sh: [Vec3::new(0.1, 0.2, 0.3); 15],
                         scale: Vec3::new(1.0, 2.0, 3.0),
                     });
@@ -420,7 +423,7 @@ mod tests {
                     let gaussian = pod.into_gaussian();
 
                     assert_eq!(pod.pos, gaussian.pos);
-                    assert_eq!(pod.color, gaussian.color);
+                    assert_eq!(pod.color.as_vec4() / 255.0, gaussian.color);
                     assert_eq!(
                         pod.sh,
                         <$pod_type as GaussianPod>::ShConfig::from_sh(&gaussian.sh),
@@ -445,7 +448,7 @@ mod tests {
                     let gaussian = Gaussian {
                         rot: Quat::from_xyzw(0.0, 0.0, 0.0, 1.0),
                         pos: Vec3::new(1.0, 2.0, 3.0),
-                        color: U8Vec4::new(255, 128, 64, 32),
+                        color: Vec4::new(255.0, 128.0, 64.0, 32.0) / 255.0,
                         sh: [Vec3::new(0.1, 0.2, 0.3); 15],
                         scale: Vec3::new(1.0, 2.0, 3.0),
                     };
@@ -453,7 +456,7 @@ mod tests {
                     let pod = $pod_type::from_gaussian(&gaussian);
 
                     assert_eq!(gaussian.pos, pod.pos);
-                    assert_eq!(gaussian.color, pod.color);
+                    assert_eq!(gaussian.color, pod.color.as_vec4() / 255.0);
                     assert_eq!(
                         <$pod_type as GaussianPod>::ShConfig::from_sh(&gaussian.sh),
                         pod.sh,
@@ -468,6 +471,21 @@ mod tests {
                 }
 
                 test_pod_from_gaussian!($name, $pod_type, $when_into_gaussian_should_panic);
+
+                #[test]
+                fn [<test_ $name _color_should_be_clamped_and_quantized>]() {
+                    let gaussian = Gaussian {
+                        rot: Quat::IDENTITY,
+                        pos: Vec3::ZERO,
+                        color: Vec4::new(-0.1, 1.1, 0.5, 0.1234567),
+                        sh: [Vec3::ZERO; 15],
+                        scale: Vec3::ONE,
+                    };
+
+                    let pod = $pod_type::from_gaussian(&gaussian);
+
+                    assert_eq!(pod.color, U8Vec4::new(0, 255, 128, 31));
+                }
 
                 #[test]
                 fn [<test_ $name _features_should_be_correct>]() {

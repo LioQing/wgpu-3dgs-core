@@ -46,7 +46,7 @@ fn test_model_transform_buffer_update_should_update_buffer_correctly() {
 }
 
 #[test]
-fn test_model_transform_buffer_try_from_and_into_wgpu_buffer_should_be_equal() {
+fn test_model_transform_buffer_wgpu_buffer_round_trip_should_be_equal() {
     let ctx = TestContext::new();
     let pod = ModelTransformPod::new(
         Vec3::new(1.0, 2.0, 3.0),

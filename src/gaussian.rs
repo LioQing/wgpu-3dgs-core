@@ -58,7 +58,7 @@ pub trait WriteIterGaussian: IterGaussian {
 pub struct Gaussian {
     pub rot: Quat,
     pub pos: Vec3,
-    pub color: U8Vec4,
+    pub color: Vec4,
     pub sh: [Vec3; 15],
     pub scale: Vec3,
 }
@@ -78,11 +78,8 @@ impl Gaussian {
 
         let scale = Vec3::from_array(ply.scale).exp();
 
-        let color = ((Vec3::from_array(ply.color) * Self::SH0_TO_LINEAR_FACTOR + Vec3::splat(0.5))
-            * 255.0)
-            .extend((1.0 / (1.0 + (-ply.alpha).exp())) * 255.0)
-            .clamp(Vec4::splat(0.0), Vec4::splat(255.0))
-            .as_u8vec4();
+        let color = (Vec3::from_array(ply.color) * Self::SH0_TO_LINEAR_FACTOR + Vec3::splat(0.5))
+            .extend(1.0 / (1.0 + (-ply.alpha).exp()));
 
         let sh = std::array::from_fn(|i| Vec3::new(ply.sh[i], ply.sh[i + 15], ply.sh[i + 30]));
 
@@ -103,7 +100,7 @@ impl Gaussian {
 
         let scale = self.scale.map(|x| x.ln()).to_array();
 
-        let rgba = self.color.as_vec4() / 255.0;
+        let rgba = self.color;
         let color = ((rgba.xyz() - Vec3::splat(0.5)) / Self::SH0_TO_LINEAR_FACTOR).to_array();
 
         let alpha = -(1.0 / rgba.w - 1.0).ln();
@@ -130,9 +127,7 @@ impl Gaussian {
 
     const SPZ_COLOR_TO_LINEAR_FRAC_A_B: f32 =
         Gaussian::SH0_TO_LINEAR_FACTOR / Gaussian::SPZ_SH0_TO_LINEAR_FACTOR;
-    const SPZ_COLOR_TO_LINEAR_FRAC_F2_F1: f32 = 0.5 * 255.0;
-    const SPZ_COLOR_TO_LINEAR_C: f32 =
-        (1.0 - Self::SPZ_COLOR_TO_LINEAR_FRAC_A_B) * Self::SPZ_COLOR_TO_LINEAR_FRAC_F2_F1;
+    const SPZ_COLOR_TO_LINEAR_C: f32 = (1.0 - Self::SPZ_COLOR_TO_LINEAR_FRAC_A_B) * 0.5;
 
     /// Convert from [`SpzGaussianRef`].
     pub fn from_spz(spz: SpzGaussianRef, header: &SpzGaussiansHeader) -> Self {
@@ -200,11 +195,10 @@ impl Gaussian {
             }
         };
 
-        let color = U8Vec3::from_array(spz.color.map(|c| {
-            (c as f32 * Self::SPZ_COLOR_TO_LINEAR_FRAC_A_B + Self::SPZ_COLOR_TO_LINEAR_C)
-                .clamp(0.0, 255.0) as u8
+        let color = Vec3::from_array(spz.color.map(|c| {
+            c as f32 / 255.0 * Self::SPZ_COLOR_TO_LINEAR_FRAC_A_B + Self::SPZ_COLOR_TO_LINEAR_C
         }))
-        .extend(*spz.alpha);
+        .extend(*spz.alpha as f32 / 255.0);
 
         let mut sh = [Vec3::ZERO; 15];
         for (src, dst) in spz.sh.iter().zip(sh.iter_mut()) {
@@ -299,16 +293,13 @@ impl Gaussian {
             SpzGaussianRotation::QuatFirstThree(packed)
         };
 
-        let alpha = self.color.w;
+        let alpha = (self.color.w * 255.0).round().clamp(0.0, 255.0) as u8;
 
-        let color = self
-            .color
-            .map(|c| {
-                ((c as f32 - Self::SPZ_COLOR_TO_LINEAR_C) / Self::SPZ_COLOR_TO_LINEAR_FRAC_A_B)
-                    .clamp(0.0, 255.0) as u8
-            })
-            .xyz()
-            .to_array();
+        let color = self.color.xyz().to_array().map(|c| {
+            ((c - Self::SPZ_COLOR_TO_LINEAR_C) / Self::SPZ_COLOR_TO_LINEAR_FRAC_A_B * 255.0)
+                .round()
+                .clamp(0.0, 255.0) as u8
+        });
 
         let sh = match header.sh_degree().get() {
             0 => SpzGaussianSh::Zero,

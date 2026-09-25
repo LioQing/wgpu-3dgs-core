@@ -11,6 +11,7 @@ Please also check out the [`wgpu-3dgs-viewer` changelog](https://github.com/LioQ
 
 ### Breaking Changes
 
+- `Gaussian::color` now uses `Vec4` with floating-point linear RGB and opacity instead of `U8Vec4`. [#35](https://github.com/LioQing/wgpu-3dgs-core/pull/35)
 - `SpzGaussians::read_from` now validates the gzip trailer and rejects extra decompressed SPZ data, `SpzGaussians::write_to` now rejects field lengths or variants that disagree with the header instead of writing an invalid file. [#34](https://github.com/LioQing/wgpu-3dgs-core/pull/34)
 - `PlyGaussians::read_header` now classifies a native-endian PLY with extra vertex properties as `PlyHeader::Custom` rather than `PlyHeader::Inria`, so callers matching on the header variant may need to handle it differently. [#34](https://github.com/LioQing/wgpu-3dgs-core/pull/34)
 

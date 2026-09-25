@@ -173,7 +173,7 @@ fn test_gaussian_unpack_color_should_return_correct_value() {
 
     let output = dispatch_test(&ctx, &buffer);
 
-    let expected_color = gaussian.color.as_vec4().map(|v| v / 255.0);
+    let expected_color = gaussian.color;
 
     assert!(
         output.color().abs_diff_eq(expected_color, 1e-4),
