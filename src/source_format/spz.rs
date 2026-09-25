@@ -1,14 +1,16 @@
 use std::{
     io::{Read, Write},
+    num::NonZeroUsize,
     ops::RangeInclusive,
 };
 
+use bytemuck::Zeroable;
 use flate2::{read::GzDecoder, write::GzEncoder};
 use itertools::Itertools;
 
 use crate::{
-    Gaussian, GaussianToSpzOptions, IterGaussian, ReadIterGaussian, SpzGaussiansFromIterError,
-    WriteIterGaussian,
+    BatchProgress, BatchRead, BatchWrite, Gaussian, GaussianToSpzOptions, IterGaussian,
+    ReadIterGaussian, SpzGaussiansFromIterError, SpzPhaseFromStrError, WriteIterGaussian,
 };
 
 macro_rules! gaussian_field {
@@ -944,17 +946,368 @@ impl IterGaussian for SpzGaussians {
 
 impl ReadIterGaussian for SpzGaussians {
     fn read_from(reader: &mut impl std::io::BufRead) -> std::io::Result<Self> {
-        let mut decoder = GzDecoder::new(reader);
-        Self::read_decompressed(&mut decoder)
+        let mut reader = SpzBatchReader::new(reader)?;
+        while !BatchRead::progress(&reader).done {
+            reader.step(NonZeroUsize::new(4096).unwrap())?;
+        }
+        reader.finish()
     }
 }
 
 impl WriteIterGaussian for SpzGaussians {
     fn write_to(&self, writer: &mut impl std::io::Write) -> std::io::Result<()> {
-        let mut encoder = GzEncoder::new(writer, flate2::Compression::default());
-        self.write_decompressed(&mut encoder)?;
-        encoder.finish()?;
+        let mut writer = SpzBatchWriter::new(writer, self)?;
+        while !BatchWrite::progress(&writer).done {
+            writer.step(NonZeroUsize::new(4096).unwrap())?;
+        }
+        writer.finish()?;
         Ok(())
+    }
+}
+
+/// Fields appear consecutively in the decompressed SPZ stream.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpzPhase {
+    Positions,
+    Alphas,
+    Colors,
+    Scales,
+    Rotations,
+    Shs,
+    Done,
+}
+
+impl SpzPhase {
+    /// Get the next phase after the current one.
+    pub fn next(self) -> Self {
+        match self {
+            Self::Positions => Self::Alphas,
+            Self::Alphas => Self::Colors,
+            Self::Colors => Self::Scales,
+            Self::Scales => Self::Rotations,
+            Self::Rotations => Self::Shs,
+            Self::Shs | Self::Done => Self::Done,
+        }
+    }
+
+    /// Get the phase name used in progress reports.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Positions => "positions",
+            Self::Alphas => "alphas",
+            Self::Colors => "colors",
+            Self::Scales => "scales",
+            Self::Rotations => "rotations",
+            Self::Shs => "shs",
+            Self::Done => "done",
+        }
+    }
+
+    fn ordinal(self) -> usize {
+        match self {
+            Self::Positions => 0,
+            Self::Alphas => 1,
+            Self::Colors => 2,
+            Self::Scales => 3,
+            Self::Rotations => 4,
+            Self::Shs => 5,
+            Self::Done => 6,
+        }
+    }
+}
+
+impl std::str::FromStr for SpzPhase {
+    type Err = SpzPhaseFromStrError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "positions" => Ok(Self::Positions),
+            "alphas" => Ok(Self::Alphas),
+            "colors" => Ok(Self::Colors),
+            "scales" => Ok(Self::Scales),
+            "rotations" => Ok(Self::Rotations),
+            "shs" => Ok(Self::Shs),
+            "done" => Ok(Self::Done),
+            _ => Err(SpzPhaseFromStrError::InvalidSpzPhase(s.to_string())),
+        }
+    }
+}
+
+fn spz_progress(header: &SpzGaussiansHeader, phase: SpzPhase, completed: usize) -> BatchProgress {
+    let count = header.num_points();
+    let has_sh = header.sh_num_coefficients() != 0;
+    let total_units = count.saturating_mul(5 + usize::from(has_sh));
+    let prior = count.saturating_mul(phase.ordinal().min(5));
+    let completed_units = if phase == SpzPhase::Done {
+        total_units
+    } else {
+        prior.saturating_add(completed)
+    };
+    BatchProgress {
+        phase: phase.name(),
+        completed_in_phase: completed,
+        total_in_phase: if phase == SpzPhase::Done { 0 } else { count },
+        completed_units,
+        total_units,
+        done: phase == SpzPhase::Done,
+    }
+}
+
+fn advance_spz_phase(phase: &mut SpzPhase, completed: &mut usize, header: &SpzGaussiansHeader) {
+    if *completed == header.num_points() {
+        *phase = phase.next();
+        *completed = 0;
+    }
+    if *phase == SpzPhase::Shs && header.sh_num_coefficients() == 0 {
+        *phase = SpzPhase::Done;
+    }
+    if header.num_points() == 0 {
+        *phase = SpzPhase::Done;
+    }
+}
+
+fn read_extend<T: bytemuck::Pod + Zeroable>(
+    reader: &mut impl Read,
+    values: &mut Vec<T>,
+    count: usize,
+) -> std::io::Result<()> {
+    let start = values.len();
+    values.resize(start + count, T::zeroed());
+    reader.read_exact(bytemuck::cast_slice_mut(&mut values[start..]))
+}
+
+/// Bounded-work reader for a gzip-compressed SPZ model.
+///
+/// SPZ stores field arrays rather than consecutive Gaussians, so individual Gaussians cannot
+/// be delivered early. After an I/O error, discard the reader.
+pub struct SpzBatchReader<R: Read> {
+    decoder: GzDecoder<R>,
+    gaussians: SpzGaussians,
+    phase: SpzPhase,
+    completed: usize,
+}
+
+impl<R: Read> SpzBatchReader<R> {
+    pub fn new(reader: R) -> std::io::Result<Self> {
+        let mut decoder = GzDecoder::new(reader);
+        let header = SpzGaussians::read_header(&mut decoder)?;
+        let mut phase = SpzPhase::Positions;
+        let mut completed = 0;
+
+        advance_spz_phase(&mut phase, &mut completed, &header);
+
+        Ok(Self {
+            decoder,
+            gaussians: SpzGaussians {
+                header,
+                positions: if header.uses_float16() {
+                    SpzGaussiansPositions::Float16(Vec::new())
+                } else {
+                    SpzGaussiansPositions::FixedPoint24(Vec::new())
+                },
+                alphas: Vec::new(),
+                colors: Vec::new(),
+                scales: Vec::new(),
+                rotations: if header.uses_quat_smallest_three() {
+                    SpzGaussiansRotations::QuatSmallestThree(Vec::new())
+                } else {
+                    SpzGaussiansRotations::QuatFirstThree(Vec::new())
+                },
+                shs: match header.sh_degree().get() {
+                    0 => SpzGaussiansShs::Zero,
+                    1 => SpzGaussiansShs::One(Vec::new()),
+                    2 => SpzGaussiansShs::Two(Vec::new()),
+                    3 => SpzGaussiansShs::Three(Vec::new()),
+                    _ => unreachable!(),
+                },
+            },
+            phase,
+            completed,
+        })
+    }
+
+    pub fn header(&self) -> &SpzGaussiansHeader {
+        &self.gaussians.header
+    }
+    pub fn phase(&self) -> SpzPhase {
+        self.phase
+    }
+}
+
+impl<R: Read> BatchRead for SpzBatchReader<R> {
+    type Model = SpzGaussians;
+
+    fn progress(&self) -> BatchProgress {
+        spz_progress(&self.gaussians.header, self.phase, self.completed)
+    }
+
+    fn step(&mut self, max_items: NonZeroUsize) -> std::io::Result<BatchProgress> {
+        if self.phase == SpzPhase::Done {
+            return Ok(self.progress());
+        }
+
+        let count = max_items.get().min(self.gaussians.len() - self.completed);
+        let decoder = &mut self.decoder;
+
+        match self.phase {
+            SpzPhase::Positions => match &mut self.gaussians.positions {
+                SpzGaussiansPositions::Float16(v) => read_extend(decoder, v, count)?,
+                SpzGaussiansPositions::FixedPoint24(v) => read_extend(decoder, v, count)?,
+            },
+            SpzPhase::Alphas => read_extend(decoder, &mut self.gaussians.alphas, count)?,
+            SpzPhase::Colors => read_extend(decoder, &mut self.gaussians.colors, count)?,
+            SpzPhase::Scales => read_extend(decoder, &mut self.gaussians.scales, count)?,
+            SpzPhase::Rotations => match &mut self.gaussians.rotations {
+                SpzGaussiansRotations::QuatFirstThree(v) => read_extend(decoder, v, count)?,
+                SpzGaussiansRotations::QuatSmallestThree(v) => read_extend(decoder, v, count)?,
+            },
+            SpzPhase::Shs => match &mut self.gaussians.shs {
+                SpzGaussiansShs::Zero => unreachable!(),
+                SpzGaussiansShs::One(v) => read_extend(decoder, v, count)?,
+                SpzGaussiansShs::Two(v) => read_extend(decoder, v, count)?,
+                SpzGaussiansShs::Three(v) => read_extend(decoder, v, count)?,
+            },
+            SpzPhase::Done => unreachable!(),
+        }
+
+        self.completed += count;
+        advance_spz_phase(&mut self.phase, &mut self.completed, &self.gaussians.header);
+        Ok(self.progress())
+    }
+
+    fn finish(mut self) -> std::io::Result<Self::Model> {
+        if !self.progress().done {
+            return Err(crate::source_format::batch::incomplete());
+        }
+        // Force the decoder to consume the gzip trailer (and validate its checksum).
+        let mut extra = [0u8; 1];
+        if self.decoder.read(&mut extra)? != 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "extra SPZ data",
+            ));
+        }
+        Ok(self.gaussians)
+    }
+}
+
+/// Bounded-work writer for an existing SPZ model. After an I/O error, discard the writer.
+pub struct SpzBatchWriter<'a, W: Write> {
+    encoder: GzEncoder<W>,
+    gaussians: &'a SpzGaussians,
+    phase: SpzPhase,
+    completed: usize,
+}
+
+impl<'a, W: Write> SpzBatchWriter<'a, W> {
+    pub fn new(writer: W, gaussians: &'a SpzGaussians) -> std::io::Result<Self> {
+        let count = gaussians.len();
+        if gaussians.positions.len() != count
+            || gaussians.rotations.len() != count
+            || gaussians.alphas.len() != count
+            || gaussians.colors.len() != count
+            || gaussians.scales.len() != count
+            || (gaussians.header.sh_num_coefficients() != 0 && gaussians.shs.len() != count)
+            || matches!(&gaussians.positions, SpzGaussiansPositions::Float16(_))
+                != gaussians.header.uses_float16()
+            || matches!(
+                &gaussians.rotations,
+                SpzGaussiansRotations::QuatSmallestThree(_)
+            ) != gaussians.header.uses_quat_smallest_three()
+            || gaussians.shs.degree() != gaussians.header.sh_degree()
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "SPZ field lengths or variants do not match header",
+            ));
+        }
+
+        let mut encoder = GzEncoder::new(writer, flate2::Compression::default());
+        encoder.write_all(bytemuck::bytes_of(gaussians.header.as_pod()))?;
+
+        let mut phase = SpzPhase::Positions;
+        let mut completed = 0;
+
+        advance_spz_phase(&mut phase, &mut completed, &gaussians.header);
+
+        Ok(Self {
+            encoder,
+            gaussians,
+            phase,
+            completed,
+        })
+    }
+
+    pub fn phase(&self) -> SpzPhase {
+        self.phase
+    }
+}
+
+impl<W: Write> BatchWrite for SpzBatchWriter<'_, W> {
+    type Writer = W;
+
+    fn progress(&self) -> BatchProgress {
+        spz_progress(&self.gaussians.header, self.phase, self.completed)
+    }
+
+    fn step(&mut self, max_items: NonZeroUsize) -> std::io::Result<BatchProgress> {
+        if self.phase == SpzPhase::Done {
+            return Ok(self.progress());
+        }
+
+        let end = self.completed + max_items.get().min(self.gaussians.len() - self.completed);
+        let start = self.completed;
+        let encoder = &mut self.encoder;
+
+        match self.phase {
+            SpzPhase::Positions => match &self.gaussians.positions {
+                SpzGaussiansPositions::Float16(v) => {
+                    encoder.write_all(bytemuck::cast_slice(&v[start..end]))?
+                }
+                SpzGaussiansPositions::FixedPoint24(v) => {
+                    encoder.write_all(bytemuck::cast_slice(&v[start..end]))?
+                }
+            },
+            SpzPhase::Alphas => encoder.write_all(&self.gaussians.alphas[start..end])?,
+            SpzPhase::Colors => {
+                encoder.write_all(bytemuck::cast_slice(&self.gaussians.colors[start..end]))?
+            }
+            SpzPhase::Scales => {
+                encoder.write_all(bytemuck::cast_slice(&self.gaussians.scales[start..end]))?
+            }
+            SpzPhase::Rotations => match &self.gaussians.rotations {
+                SpzGaussiansRotations::QuatFirstThree(v) => {
+                    encoder.write_all(bytemuck::cast_slice(&v[start..end]))?
+                }
+                SpzGaussiansRotations::QuatSmallestThree(v) => {
+                    encoder.write_all(bytemuck::cast_slice(&v[start..end]))?
+                }
+            },
+            SpzPhase::Shs => match &self.gaussians.shs {
+                SpzGaussiansShs::Zero => unreachable!(),
+                SpzGaussiansShs::One(v) => {
+                    encoder.write_all(bytemuck::cast_slice(&v[start..end]))?
+                }
+                SpzGaussiansShs::Two(v) => {
+                    encoder.write_all(bytemuck::cast_slice(&v[start..end]))?
+                }
+                SpzGaussiansShs::Three(v) => {
+                    encoder.write_all(bytemuck::cast_slice(&v[start..end]))?
+                }
+            },
+            SpzPhase::Done => unreachable!(),
+        }
+
+        self.completed = end;
+        advance_spz_phase(&mut self.phase, &mut self.completed, &self.gaussians.header);
+        Ok(self.progress())
+    }
+
+    fn finish(self) -> std::io::Result<W> {
+        if !self.progress().done {
+            return Err(crate::source_format::batch::incomplete());
+        }
+        self.encoder.finish()
     }
 }
 

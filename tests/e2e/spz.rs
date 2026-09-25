@@ -1,11 +1,12 @@
 use assert_matches::assert_matches;
 use glam::*;
+use std::io::ErrorKind;
 use wgpu_3dgs_core::{
     Gaussian, IterGaussian, ReadIterGaussian, SpzGaussian, SpzGaussianPosition, SpzGaussianRef,
     SpzGaussianRotation, SpzGaussianSh, SpzGaussianShDegree, SpzGaussianShRef, SpzGaussians,
     SpzGaussiansCollectError, SpzGaussiansFromGaussianSliceOptions, SpzGaussiansFromIterError,
     SpzGaussiansHeader, SpzGaussiansHeaderPod, SpzGaussiansPositions, SpzGaussiansRotations,
-    SpzGaussiansShs, WriteIterGaussian,
+    SpzGaussiansShs, SpzPhase, WriteIterGaussian,
 };
 
 use crate::common::{assert, given};
@@ -18,6 +19,21 @@ const ASSERT_GAUSSIAN_OPTIONS: assert::GaussianOptions = assert::GaussianOptions
     sh_epsilon: 1e-1,
     scale_epsilon: 1.0,
 };
+
+#[test]
+fn test_spz_phase_name_should_round_trip_through_from_str() {
+    for phase in [
+        SpzPhase::Positions,
+        SpzPhase::Alphas,
+        SpzPhase::Colors,
+        SpzPhase::Scales,
+        SpzPhase::Rotations,
+        SpzPhase::Shs,
+        SpzPhase::Done,
+    ] {
+        assert_eq!(phase.name().parse::<SpzPhase>().unwrap(), phase);
+    }
+}
 
 fn given_spz_gaussian_and_header(
     num_point: u32,
@@ -91,6 +107,120 @@ fn test_spz_gaussians_write_to_and_read_from_should_be_equal() {
     for (a, b) in spz_gaussians.iter().zip(spz_gaussians_read.iter()) {
         assert_eq!(a, b);
     }
+}
+
+#[test]
+fn test_spz_decompressed_write_and_reads_should_preserve_field_layout() {
+    for version in SpzGaussiansHeader::SUPPORTED_VERSIONS {
+        for degree in SpzGaussiansHeader::SUPPORTED_SH_DEGREES {
+            let original = SpzGaussians::from_gaussians_with_options(
+                given::gaussians(),
+                &SpzGaussiansFromGaussianSliceOptions {
+                    version,
+                    sh_degree: SpzGaussianShDegree::new(degree).unwrap(),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+            let mut expected = bytemuck::bytes_of(original.header.as_pod()).to_vec();
+            match &original.positions {
+                SpzGaussiansPositions::Float16(values) => {
+                    expected.extend_from_slice(bytemuck::cast_slice(values));
+                }
+                SpzGaussiansPositions::FixedPoint24(values) => {
+                    expected.extend_from_slice(bytemuck::cast_slice(values));
+                }
+            }
+            expected.extend_from_slice(&original.alphas);
+            expected.extend_from_slice(bytemuck::cast_slice(&original.colors));
+            expected.extend_from_slice(bytemuck::cast_slice(&original.scales));
+            match &original.rotations {
+                SpzGaussiansRotations::QuatFirstThree(values) => {
+                    expected.extend_from_slice(bytemuck::cast_slice(values));
+                }
+                SpzGaussiansRotations::QuatSmallestThree(values) => {
+                    expected.extend_from_slice(bytemuck::cast_slice(values));
+                }
+            }
+            match &original.shs {
+                SpzGaussiansShs::Zero => {}
+                SpzGaussiansShs::One(values) => {
+                    expected.extend_from_slice(bytemuck::cast_slice(values));
+                }
+                SpzGaussiansShs::Two(values) => {
+                    expected.extend_from_slice(bytemuck::cast_slice(values));
+                }
+                SpzGaussiansShs::Three(values) => {
+                    expected.extend_from_slice(bytemuck::cast_slice(values));
+                }
+            }
+
+            let mut bytes = Vec::new();
+            original.write_decompressed(&mut bytes).unwrap();
+            assert_eq!(bytes, expected, "version {version}, SH degree {degree}");
+
+            let mut input = bytes.as_slice();
+            let header = SpzGaussians::read_header(&mut input).unwrap();
+            assert_eq!(header, original.header);
+            assert_eq!(
+                SpzGaussians::read_gaussians(&mut input, header).unwrap(),
+                original
+            );
+            assert!(input.is_empty());
+
+            let mut input = bytes.as_slice();
+            assert_eq!(
+                SpzGaussians::read_decompressed(&mut input).unwrap(),
+                original
+            );
+            assert!(input.is_empty());
+        }
+    }
+}
+
+#[test]
+fn test_spz_decompressed_reads_when_header_or_fields_are_truncated_should_return_error() {
+    let original = given::spz_gaussians();
+    let mut bytes = Vec::new();
+    original.write_decompressed(&mut bytes).unwrap();
+
+    let header_size = std::mem::size_of::<SpzGaussiansHeaderPod>();
+    assert_eq!(
+        SpzGaussians::read_decompressed(&mut &bytes[..header_size - 1])
+            .unwrap_err()
+            .kind(),
+        ErrorKind::UnexpectedEof
+    );
+
+    let field_lengths = [
+        original.len() * 9, // version 3: fixed-point positions
+        original.alphas.len(),
+        original.colors.len() * 3,
+        original.scales.len() * 3,
+        original.len() * 4,      // version 3: smallest-three rotations
+        original.len() * 15 * 3, // default SH degree 3
+    ];
+    let mut end = header_size;
+    for length in field_lengths {
+        end += length;
+        let truncated = &bytes[..end - 1];
+        let mut input = &truncated[header_size..];
+        assert_eq!(
+            SpzGaussians::read_gaussians(&mut input, original.header)
+                .unwrap_err()
+                .kind(),
+            ErrorKind::UnexpectedEof
+        );
+        let mut input = truncated;
+        assert_eq!(
+            SpzGaussians::read_decompressed(&mut input)
+                .unwrap_err()
+                .kind(),
+            ErrorKind::UnexpectedEof
+        );
+    }
+    assert_eq!(end, bytes.len());
 }
 
 fn test_spz_gaussians_write_to_with_options_and_read_from_should_be_equal(

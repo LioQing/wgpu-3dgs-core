@@ -2,6 +2,18 @@
 
 Please also check out the [`wgpu-3dgs-viewer` changelog](https://github.com/LioQing/wgpu-3dgs-viewer/blob/master/CHANGELOG.md) and [`wgpu-3dgs-editor` changelog](https://github.com/LioQing/wgpu-3dgs-editor/blob/master/CHANGELOG.md).
 
+## [Unreleased]
+
+### Added
+
+- 🔄 Add `BatchRead`, `BatchWrite`, and `BatchProgress` for bounded-step PLY and SPZ reads and writes, including `GaussiansBatchReader` and `GaussiansBatchWriter` for unified models. [#34](https://github.com/LioQing/wgpu-3dgs-core/pull/34)
+- 📥 Add `ProgressiveGaussianRead`, `PlyGaussianProgressiveReader`, and `GaussiansProgressiveReader` to consume PLY Gaussians before the whole file is loaded; SPZ does not support progressive Gaussian delivery. [#34](https://github.com/LioQing/wgpu-3dgs-core/pull/34)
+
+### Breaking Changes
+
+- `SpzGaussians::read_from` now validates the gzip trailer and rejects extra decompressed SPZ data, `SpzGaussians::write_to` now rejects field lengths or variants that disagree with the header instead of writing an invalid file. [#34](https://github.com/LioQing/wgpu-3dgs-core/pull/34)
+- `PlyGaussians::read_header` now classifies a native-endian PLY with extra vertex properties as `PlyHeader::Custom` rather than `PlyHeader::Inria`, so callers matching on the header variant may need to handle it differently. [#34](https://github.com/LioQing/wgpu-3dgs-core/pull/34)
+
 ## [0.8.0](https://crates.io/crates/wgpu-3dgs-core/0.8.0) - 2026-08-23
 
 ### Changed

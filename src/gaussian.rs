@@ -1,11 +1,15 @@
-use std::io::BufRead;
+use std::{
+    io::{self, BufRead, Write},
+    num::NonZeroUsize,
+};
 
 use glam::*;
 
 use crate::{
-    PlyGaussianPod, PlyGaussians, SpzGaussian, SpzGaussianPosition, SpzGaussianPositionRef,
-    SpzGaussianRef, SpzGaussianRotation, SpzGaussianRotationRef, SpzGaussianSh, SpzGaussians,
-    SpzGaussiansHeader,
+    BatchProgress, BatchRead, BatchWrite, PlyBatchReader, PlyBatchWriter, PlyGaussianPod,
+    PlyGaussianProgressiveReader, PlyGaussians, ProgressiveGaussianRead, SpzBatchReader,
+    SpzBatchWriter, SpzGaussian, SpzGaussianPosition, SpzGaussianPositionRef, SpzGaussianRef,
+    SpzGaussianRotation, SpzGaussianRotationRef, SpzGaussianSh, SpzGaussians, SpzGaussiansHeader,
 };
 
 /// A trait of representing an iterable collection of [`Gaussian`].
@@ -515,6 +519,141 @@ impl Gaussians {
             Gaussians::Ply(ply_gaussians) => ply_gaussians.write_to(writer),
             Gaussians::Spz(spz_gaussians) => spz_gaussians.write_to(writer),
         }
+    }
+}
+
+/// Whole-model batch reader for the unified Gaussian representation.
+pub enum GaussiansBatchReader<R: BufRead> {
+    Ply(Box<PlyBatchReader<R>>),
+    Spz(Box<SpzBatchReader<R>>),
+}
+
+impl<R: BufRead> GaussiansBatchReader<R> {
+    /// Read the source header and prepare to read batches.
+    pub fn new(reader: R, source: GaussiansSource) -> io::Result<Self> {
+        match source {
+            GaussiansSource::Internal => Err(std::io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "cannot batch read Internal Gaussians".to_string(),
+            )),
+            GaussiansSource::Ply => Ok(Self::Ply(Box::new(PlyBatchReader::new(reader)?))),
+            GaussiansSource::Spz => Ok(Self::Spz(Box::new(SpzBatchReader::new(reader)?))),
+        }
+    }
+}
+
+impl<R: BufRead> BatchRead for GaussiansBatchReader<R> {
+    type Model = Gaussians;
+
+    fn progress(&self) -> BatchProgress {
+        match self {
+            Self::Ply(reader) => reader.progress(),
+            Self::Spz(reader) => reader.progress(),
+        }
+    }
+
+    fn step(&mut self, max_items: NonZeroUsize) -> io::Result<BatchProgress> {
+        match self {
+            Self::Ply(reader) => reader.step(max_items),
+            Self::Spz(reader) => reader.step(max_items),
+        }
+    }
+
+    fn finish(self) -> io::Result<Self::Model> {
+        match self {
+            Self::Ply(reader) => reader.finish().map(Gaussians::Ply),
+            Self::Spz(reader) => reader.finish().map(Gaussians::Spz),
+        }
+    }
+}
+
+/// Whole-model batch writer for the unified Gaussian representation.
+pub enum GaussiansBatchWriter<'a, W: Write> {
+    Ply(PlyBatchWriter<'a, W>),
+    Spz(SpzBatchWriter<'a, W>),
+}
+
+impl<'a, W: Write> GaussiansBatchWriter<'a, W> {
+    /// Write the source header and prepare to write batches.
+    pub fn new(writer: W, gaussians: &'a Gaussians) -> io::Result<Self> {
+        match gaussians {
+            Gaussians::Internal(_) => Err(std::io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "cannot batch write Internal Gaussians".to_string(),
+            )),
+            Gaussians::Ply(gaussians) => Ok(Self::Ply(PlyBatchWriter::new(writer, gaussians)?)),
+            Gaussians::Spz(gaussians) => Ok(Self::Spz(SpzBatchWriter::new(writer, gaussians)?)),
+        }
+    }
+}
+
+impl<W: Write> BatchWrite for GaussiansBatchWriter<'_, W> {
+    type Writer = W;
+
+    fn progress(&self) -> BatchProgress {
+        match self {
+            Self::Ply(writer) => writer.progress(),
+            Self::Spz(writer) => writer.progress(),
+        }
+    }
+
+    fn step(&mut self, max_items: NonZeroUsize) -> io::Result<BatchProgress> {
+        match self {
+            Self::Ply(writer) => writer.step(max_items),
+            Self::Spz(writer) => writer.step(max_items),
+        }
+    }
+
+    fn finish(self) -> io::Result<Self::Writer> {
+        match self {
+            Self::Ply(writer) => writer.finish(),
+            Self::Spz(writer) => writer.finish(),
+        }
+    }
+}
+
+/// Progressive reader that delivers unified [`Gaussian`] values from a PLY source.
+///
+/// SPZ stores separate field arrays and cannot deliver individual Gaussians early.
+pub struct GaussiansProgressiveReader<R: BufRead> {
+    reader: PlyGaussianProgressiveReader<R>,
+}
+
+impl<R: BufRead> GaussiansProgressiveReader<R> {
+    /// Open a PLY source for progressive reading. Other sources return `InvalidInput`.
+    pub fn new(reader: R, source: GaussiansSource) -> io::Result<Self> {
+        match source {
+            GaussiansSource::Ply => Ok(Self {
+                reader: PlyGaussianProgressiveReader::new(reader)?,
+            }),
+            _ => Err(std::io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("cannot progressive read {source:?} Gaussians"),
+            )),
+        }
+    }
+}
+
+impl<R: BufRead> ProgressiveGaussianRead for GaussiansProgressiveReader<R> {
+    type Item = Gaussian;
+
+    fn total_gaussians(&self) -> usize {
+        self.reader.total_gaussians()
+    }
+
+    fn progress(&self) -> BatchProgress {
+        self.reader.progress()
+    }
+
+    fn read_gaussians(
+        &mut self,
+        max_gaussians: NonZeroUsize,
+        out: &mut Vec<Self::Item>,
+    ) -> io::Result<usize> {
+        let mut batch = Vec::new();
+        let result = self.reader.read_gaussians(max_gaussians, &mut batch);
+        out.extend(batch.iter().map(Gaussian::from_ply));
+        result
     }
 }
 
