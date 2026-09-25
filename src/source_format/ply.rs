@@ -6,8 +6,8 @@ use std::{
 use bytemuck::Zeroable;
 
 use crate::{
-    BatchProgress, BatchRead, BatchWrite, Gaussian, IterGaussian, ProgressiveGaussianRead,
-    ReadIterGaussian, WriteIterGaussian,
+    BatchProgress, BatchRead, BatchWrite, Gaussian, GaussianStream, IterGaussian, ReadIterGaussian,
+    WriteIterGaussian, source_format,
 };
 
 /// The POD representation of Gaussian in PLY format.
@@ -246,21 +246,6 @@ fn read_custom(
     })
 }
 
-fn write_header(writer: &mut impl Write, count: usize) -> io::Result<()> {
-    const SYSTEM_ENDIANNESS: ply_rs::ply::Encoding = match cfg!(target_endian = "little") {
-        true => ply_rs::ply::Encoding::BinaryLittleEndian,
-        false => ply_rs::ply::Encoding::BinaryBigEndian,
-    };
-
-    writeln!(writer, "ply")?;
-    writeln!(writer, "format {SYSTEM_ENDIANNESS} 1.0")?;
-    writeln!(writer, "element vertex {count}")?;
-    for property in PlyGaussians::PLY_PROPERTIES {
-        writeln!(writer, "property float {property}")?;
-    }
-    writeln!(writer, "end_header")
-}
-
 /// A collection of Gaussians in PLY format.
 ///
 /// The PLY file is expected to be the same format as the one used in the original Inria
@@ -438,15 +423,15 @@ impl WriteIterGaussian for PlyGaussians {
     }
 }
 
-/// PLY reader that delivers records before the whole file has been read.
-pub struct PlyGaussianProgressiveReader<R: BufRead> {
+/// PLY stream that delivers records before the whole file has been read.
+pub struct PlyGaussianStream<R: BufRead> {
     reader: R,
     header: PlyHeader,
     read: usize,
     total: usize,
 }
 
-impl<R: BufRead> PlyGaussianProgressiveReader<R> {
+impl<R: BufRead> PlyGaussianStream<R> {
     pub fn new(mut reader: R) -> io::Result<Self> {
         let header = PlyGaussians::read_header(&mut reader)?;
         let total = header.count().ok_or_else(vertex_element_not_found_error)?;
@@ -460,7 +445,7 @@ impl<R: BufRead> PlyGaussianProgressiveReader<R> {
     }
 }
 
-impl<R: BufRead> ProgressiveGaussianRead for PlyGaussianProgressiveReader<R> {
+impl<R: BufRead> GaussianStream for PlyGaussianStream<R> {
     type Item = PlyGaussianPod;
 
     fn total_gaussians(&self) -> usize {
@@ -496,16 +481,16 @@ impl<R: BufRead> ProgressiveGaussianRead for PlyGaussianProgressiveReader<R> {
     }
 }
 
-/// Whole-model PLY reader built on the [`PlyGaussianProgressiveReader`].
+/// Whole-model PLY reader built on the [`PlyGaussianStream`].
 pub struct PlyBatchReader<R: BufRead> {
-    stream: PlyGaussianProgressiveReader<R>,
+    stream: PlyGaussianStream<R>,
     gaussians: Vec<PlyGaussianPod>,
 }
 
 impl<R: BufRead> PlyBatchReader<R> {
     pub fn new(reader: R) -> io::Result<Self> {
         Ok(Self {
-            stream: PlyGaussianProgressiveReader::new(reader)?,
+            stream: PlyGaussianStream::new(reader)?,
             gaussians: Vec::new(),
         })
     }
@@ -525,7 +510,7 @@ impl<R: BufRead> BatchRead for PlyBatchReader<R> {
 
     fn finish(self) -> io::Result<Self::Model> {
         if !self.stream.progress().done {
-            return Err(crate::source_format::batch::incomplete());
+            return Err(source_format::batch::incomplete());
         }
         Ok(PlyGaussians(self.gaussians))
     }
@@ -540,12 +525,28 @@ pub struct PlyBatchWriter<'a, W: Write> {
 
 impl<'a, W: Write> PlyBatchWriter<'a, W> {
     pub fn new(mut writer: W, gaussians: &'a PlyGaussians) -> io::Result<Self> {
-        write_header(&mut writer, gaussians.len())?;
+        Self::write_header(&mut writer, gaussians.len())?;
+
         Ok(Self {
             writer,
             gaussians,
             written: 0,
         })
+    }
+
+    fn write_header(writer: &mut impl Write, count: usize) -> io::Result<()> {
+        const SYSTEM_ENDIANNESS: ply_rs::ply::Encoding = match cfg!(target_endian = "little") {
+            true => ply_rs::ply::Encoding::BinaryLittleEndian,
+            false => ply_rs::ply::Encoding::BinaryBigEndian,
+        };
+
+        writeln!(writer, "ply")?;
+        writeln!(writer, "format {SYSTEM_ENDIANNESS} 1.0")?;
+        writeln!(writer, "element vertex {count}")?;
+        for property in PlyGaussians::PLY_PROPERTIES {
+            writeln!(writer, "property float {property}")?;
+        }
+        writeln!(writer, "end_header")
     }
 }
 
@@ -575,7 +576,7 @@ impl<W: Write> BatchWrite for PlyBatchWriter<'_, W> {
 
     fn finish(self) -> io::Result<W> {
         if !self.progress().done {
-            return Err(crate::source_format::batch::incomplete());
+            return Err(source_format::batch::incomplete());
         }
         Ok(self.writer)
     }

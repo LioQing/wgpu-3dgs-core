@@ -65,7 +65,7 @@ pub trait BatchWrite {
 ///
 /// Unlike [`BatchRead`], the caller owns the decoded data and may discard each batch after
 /// reading it. Only formats supporting early delivery implement this trait.
-pub trait ProgressiveGaussianRead {
+pub trait GaussianStream {
     /// A single Gaussian in the original source format.
     type Item;
 

@@ -50,8 +50,8 @@ fn main() {
     println!("Running 'read-ply' example");
     cargo!("llvm-cov run --example read-ply -- {model_ply_path_str}");
 
-    println!("Running 'progressive-read-ply' example");
-    cargo!("llvm-cov run --example progressive-read-ply -- {model_ply_path_str} 2");
+    println!("Running 'stream-read-ply' example");
+    cargo!("llvm-cov run --example stream-read-ply -- {model_ply_path_str} 2");
 
     println!("Running 'write-spz' example");
     cargo!("llvm-cov run --example write-spz -- {output_spz_path_str}");

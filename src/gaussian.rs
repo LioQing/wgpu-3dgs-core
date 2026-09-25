@@ -6,10 +6,10 @@ use std::{
 use glam::*;
 
 use crate::{
-    BatchProgress, BatchRead, BatchWrite, PlyBatchReader, PlyBatchWriter, PlyGaussianPod,
-    PlyGaussianProgressiveReader, PlyGaussians, ProgressiveGaussianRead, SpzBatchReader,
-    SpzBatchWriter, SpzGaussian, SpzGaussianPosition, SpzGaussianPositionRef, SpzGaussianRef,
-    SpzGaussianRotation, SpzGaussianRotationRef, SpzGaussianSh, SpzGaussians, SpzGaussiansHeader,
+    BatchProgress, BatchRead, BatchWrite, GaussianStream, PlyBatchReader, PlyBatchWriter,
+    PlyGaussianPod, PlyGaussianStream, PlyGaussians, SpzBatchReader, SpzBatchWriter, SpzGaussian,
+    SpzGaussianPosition, SpzGaussianPositionRef, SpzGaussianRef, SpzGaussianRotation,
+    SpzGaussianRotationRef, SpzGaussianSh, SpzGaussians, SpzGaussiansHeader,
 };
 
 /// A trait of representing an iterable collection of [`Gaussian`].
@@ -603,37 +603,37 @@ impl<W: Write> BatchWrite for GaussiansBatchWriter<'_, W> {
     }
 }
 
-/// Progressive reader that delivers unified [`Gaussian`] values from a PLY source.
+/// Stream that delivers unified [`Gaussian`] values from a PLY source.
 ///
 /// SPZ stores separate field arrays and cannot deliver individual Gaussians early.
-pub struct GaussiansProgressiveReader<R: BufRead> {
-    reader: PlyGaussianProgressiveReader<R>,
+pub struct GaussiansStream<R: BufRead> {
+    stream: PlyGaussianStream<R>,
 }
 
-impl<R: BufRead> GaussiansProgressiveReader<R> {
-    /// Open a PLY source for progressive reading. Other sources return `InvalidInput`.
+impl<R: BufRead> GaussiansStream<R> {
+    /// Open a PLY source for streaming. Other sources return `InvalidInput`.
     pub fn new(reader: R, source: GaussiansSource) -> io::Result<Self> {
         match source {
             GaussiansSource::Ply => Ok(Self {
-                reader: PlyGaussianProgressiveReader::new(reader)?,
+                stream: PlyGaussianStream::new(reader)?,
             }),
             _ => Err(std::io::Error::new(
                 io::ErrorKind::InvalidInput,
-                format!("cannot progressive read {source:?} Gaussians"),
+                format!("cannot stream {source:?} Gaussians"),
             )),
         }
     }
 }
 
-impl<R: BufRead> ProgressiveGaussianRead for GaussiansProgressiveReader<R> {
+impl<R: BufRead> GaussianStream for GaussiansStream<R> {
     type Item = Gaussian;
 
     fn total_gaussians(&self) -> usize {
-        self.reader.total_gaussians()
+        self.stream.total_gaussians()
     }
 
     fn progress(&self) -> BatchProgress {
-        self.reader.progress()
+        self.stream.progress()
     }
 
     fn read_gaussians(
@@ -642,7 +642,7 @@ impl<R: BufRead> ProgressiveGaussianRead for GaussiansProgressiveReader<R> {
         out: &mut Vec<Self::Item>,
     ) -> io::Result<usize> {
         let mut batch = Vec::new();
-        let result = self.reader.read_gaussians(max_gaussians, &mut batch);
+        let result = self.stream.read_gaussians(max_gaussians, &mut batch);
         out.extend(batch.iter().map(Gaussian::from_ply));
         result
     }

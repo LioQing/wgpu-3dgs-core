@@ -11,6 +11,7 @@ use itertools::Itertools;
 use crate::{
     BatchProgress, BatchRead, BatchWrite, Gaussian, GaussianToSpzOptions, IterGaussian,
     ReadIterGaussian, SpzGaussiansFromIterError, SpzPhaseFromStrError, WriteIterGaussian,
+    source_format,
 };
 
 macro_rules! gaussian_field {
@@ -1014,6 +1015,19 @@ impl SpzPhase {
             Self::Done => 6,
         }
     }
+
+    fn advance_spz_phase(&mut self, completed: &mut usize, header: &SpzGaussiansHeader) {
+        if *completed == header.num_points() {
+            *self = self.next();
+            *completed = 0;
+        }
+        if *self == SpzPhase::Shs && header.sh_num_coefficients() == 0 {
+            *self = SpzPhase::Done;
+        }
+        if header.num_points() == 0 {
+            *self = SpzPhase::Done;
+        }
+    }
 }
 
 impl std::str::FromStr for SpzPhase {
@@ -1043,6 +1057,7 @@ fn spz_progress(header: &SpzGaussiansHeader, phase: SpzPhase, completed: usize) 
     } else {
         prior.saturating_add(completed)
     };
+
     BatchProgress {
         phase: phase.name(),
         completed_in_phase: completed,
@@ -1051,29 +1066,6 @@ fn spz_progress(header: &SpzGaussiansHeader, phase: SpzPhase, completed: usize) 
         total_units,
         done: phase == SpzPhase::Done,
     }
-}
-
-fn advance_spz_phase(phase: &mut SpzPhase, completed: &mut usize, header: &SpzGaussiansHeader) {
-    if *completed == header.num_points() {
-        *phase = phase.next();
-        *completed = 0;
-    }
-    if *phase == SpzPhase::Shs && header.sh_num_coefficients() == 0 {
-        *phase = SpzPhase::Done;
-    }
-    if header.num_points() == 0 {
-        *phase = SpzPhase::Done;
-    }
-}
-
-fn read_extend<T: bytemuck::Pod + Zeroable>(
-    reader: &mut impl Read,
-    values: &mut Vec<T>,
-    count: usize,
-) -> std::io::Result<()> {
-    let start = values.len();
-    values.resize(start + count, T::zeroed());
-    reader.read_exact(bytemuck::cast_slice_mut(&mut values[start..]))
 }
 
 /// Bounded-work reader for a gzip-compressed SPZ model.
@@ -1094,7 +1086,7 @@ impl<R: Read> SpzBatchReader<R> {
         let mut phase = SpzPhase::Positions;
         let mut completed = 0;
 
-        advance_spz_phase(&mut phase, &mut completed, &header);
+        phase.advance_spz_phase(&mut completed, &header);
 
         Ok(Self {
             decoder,
@@ -1149,6 +1141,16 @@ impl<R: Read> BatchRead for SpzBatchReader<R> {
         let count = max_items.get().min(self.gaussians.len() - self.completed);
         let decoder = &mut self.decoder;
 
+        fn read_extend<T: bytemuck::Pod + Zeroable>(
+            reader: &mut impl Read,
+            values: &mut Vec<T>,
+            count: usize,
+        ) -> std::io::Result<()> {
+            let start = values.len();
+            values.resize(start + count, T::zeroed());
+            reader.read_exact(bytemuck::cast_slice_mut(&mut values[start..]))
+        }
+
         match self.phase {
             SpzPhase::Positions => match &mut self.gaussians.positions {
                 SpzGaussiansPositions::Float16(v) => read_extend(decoder, v, count)?,
@@ -1171,14 +1173,16 @@ impl<R: Read> BatchRead for SpzBatchReader<R> {
         }
 
         self.completed += count;
-        advance_spz_phase(&mut self.phase, &mut self.completed, &self.gaussians.header);
+        self.phase
+            .advance_spz_phase(&mut self.completed, &self.gaussians.header);
         Ok(self.progress())
     }
 
     fn finish(mut self) -> std::io::Result<Self::Model> {
         if !self.progress().done {
-            return Err(crate::source_format::batch::incomplete());
+            return Err(source_format::batch::incomplete());
         }
+
         // Force the decoder to consume the gzip trailer (and validate its checksum).
         let mut extra = [0u8; 1];
         if self.decoder.read(&mut extra)? != 0 {
@@ -1187,6 +1191,7 @@ impl<R: Read> BatchRead for SpzBatchReader<R> {
                 "extra SPZ data",
             ));
         }
+
         Ok(self.gaussians)
     }
 }
@@ -1228,7 +1233,7 @@ impl<'a, W: Write> SpzBatchWriter<'a, W> {
         let mut phase = SpzPhase::Positions;
         let mut completed = 0;
 
-        advance_spz_phase(&mut phase, &mut completed, &gaussians.header);
+        phase.advance_spz_phase(&mut completed, &gaussians.header);
 
         Ok(Self {
             encoder,
@@ -1299,13 +1304,14 @@ impl<W: Write> BatchWrite for SpzBatchWriter<'_, W> {
         }
 
         self.completed = end;
-        advance_spz_phase(&mut self.phase, &mut self.completed, &self.gaussians.header);
+        self.phase
+            .advance_spz_phase(&mut self.completed, &self.gaussians.header);
         Ok(self.progress())
     }
 
     fn finish(self) -> std::io::Result<W> {
         if !self.progress().done {
-            return Err(crate::source_format::batch::incomplete());
+            return Err(source_format::batch::incomplete());
         }
         self.encoder.finish()
     }

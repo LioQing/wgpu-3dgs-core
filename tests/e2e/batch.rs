@@ -1,12 +1,11 @@
 use std::{io::ErrorKind, num::NonZeroUsize};
 
 use wgpu_3dgs_core::{
-    BatchRead, BatchWrite, Gaussians, GaussiansBatchReader, GaussiansBatchWriter,
-    GaussiansProgressiveReader, GaussiansSource, IterGaussian, PlyBatchReader, PlyBatchWriter,
-    PlyGaussianProgressiveReader, PlyGaussians, ProgressiveGaussianRead, ReadIterGaussian,
-    SpzBatchReader, SpzBatchWriter, SpzGaussianShDegree, SpzGaussians,
-    SpzGaussiansFromGaussianSliceOptions, SpzGaussiansHeader, SpzGaussiansPositions,
-    SpzGaussiansRotations, SpzGaussiansShs, SpzPhase, WriteIterGaussian,
+    BatchRead, BatchWrite, GaussianStream, Gaussians, GaussiansBatchReader, GaussiansBatchWriter,
+    GaussiansSource, GaussiansStream, IterGaussian, PlyBatchReader, PlyBatchWriter,
+    PlyGaussianStream, PlyGaussians, ReadIterGaussian, SpzBatchReader, SpzBatchWriter,
+    SpzGaussianShDegree, SpzGaussians, SpzGaussiansFromGaussianSliceOptions, SpzGaussiansHeader,
+    SpzGaussiansPositions, SpzGaussiansRotations, SpzGaussiansShs, SpzPhase, WriteIterGaussian,
 };
 
 use crate::common::given;
@@ -21,16 +20,16 @@ fn test_ply_stream_should_deliver_each_gaussian_before_completion() {
     let mut bytes = Vec::new();
     original.write_to(&mut bytes).unwrap();
 
-    let mut stream = PlyGaussianProgressiveReader::new(bytes.as_slice()).unwrap();
+    let mut stream = PlyGaussianStream::new(bytes.as_slice()).unwrap();
     assert_eq!(stream.total_gaussians(), original.len());
 
     let mut out = Vec::new();
     assert_eq!(stream.read_gaussians(one(), &mut out).unwrap(), 1);
     assert_eq!(out, original.0[..1]);
-    assert!(!ProgressiveGaussianRead::progress(&stream).done);
+    assert!(!GaussianStream::progress(&stream).done);
     assert_eq!(stream.read_gaussians(one(), &mut out).unwrap(), 1);
     assert_eq!(out, original.0);
-    assert!(ProgressiveGaussianRead::progress(&stream).done);
+    assert!(GaussianStream::progress(&stream).done);
     assert_eq!(stream.read_gaussians(one(), &mut out).unwrap(), 0);
 }
 
@@ -171,7 +170,7 @@ fn test_ply_stream_when_record_is_truncated_should_return_error() {
     let mut bytes = Vec::new();
     original.write_to(&mut bytes).unwrap();
     bytes.truncate(bytes.len() - 1);
-    let mut stream = PlyGaussianProgressiveReader::new(bytes.as_slice()).unwrap();
+    let mut stream = PlyGaussianStream::new(bytes.as_slice()).unwrap();
 
     let mut out = Vec::new();
     assert_eq!(stream.read_gaussians(one(), &mut out).unwrap(), 1);
@@ -246,47 +245,43 @@ fn test_gaussians_batch_when_source_is_internal_should_return_error() {
 }
 
 #[test]
-fn test_gaussians_progressive_when_source_is_ply_should_deliver_unified_gaussians_in_batches() {
+fn test_gaussians_stream_when_source_is_ply_should_deliver_unified_gaussians_in_batches() {
     let original = given::ply_gaussians();
     let mut bytes = Vec::new();
     original.write_to(&mut bytes).unwrap();
 
-    let mut reader =
-        GaussiansProgressiveReader::new(bytes.as_slice(), GaussiansSource::Ply).unwrap();
-    assert_eq!(reader.total_gaussians(), original.len());
+    let mut stream = GaussiansStream::new(bytes.as_slice(), GaussiansSource::Ply).unwrap();
+    assert_eq!(stream.total_gaussians(), original.len());
     let mut out = vec![given::gaussians()[0]];
     for (index, expected) in original.iter_gaussian().enumerate() {
-        assert_eq!(reader.read_gaussians(one(), &mut out).unwrap(), 1);
+        assert_eq!(stream.read_gaussians(one(), &mut out).unwrap(), 1);
         assert_eq!(out[index + 1], expected);
-        assert_eq!(reader.progress().completed_units, index + 1);
+        assert_eq!(stream.progress().completed_units, index + 1);
     }
-    assert!(reader.progress().done);
-    assert_eq!(reader.read_gaussians(one(), &mut out).unwrap(), 0);
+    assert!(stream.progress().done);
+    assert_eq!(stream.read_gaussians(one(), &mut out).unwrap(), 0);
     assert_eq!(out.len(), original.len() + 1);
 }
 
 #[test]
-fn test_gaussians_progressive_when_source_is_spz_or_internal_should_return_error() {
+fn test_gaussians_stream_when_source_is_spz_or_internal_should_return_error() {
     for source in [GaussiansSource::Spz, GaussiansSource::Internal] {
-        let error = GaussiansProgressiveReader::new(&b""[..], source)
-            .err()
-            .unwrap();
+        let error = GaussiansStream::new(&b""[..], source).err().unwrap();
         assert_eq!(error.kind(), ErrorKind::InvalidInput);
     }
 }
 
 #[test]
-fn test_gaussians_progressive_when_ply_record_is_truncated_should_keep_previous_gaussians() {
+fn test_gaussians_stream_when_ply_record_is_truncated_should_keep_previous_gaussians() {
     let original = given::ply_gaussians();
     let mut bytes = Vec::new();
     original.write_to(&mut bytes).unwrap();
     bytes.truncate(bytes.len() - 1);
-    let mut reader =
-        GaussiansProgressiveReader::new(bytes.as_slice(), GaussiansSource::Ply).unwrap();
+    let mut stream = GaussiansStream::new(bytes.as_slice(), GaussiansSource::Ply).unwrap();
     let mut out = Vec::new();
 
     assert_eq!(
-        reader
+        stream
             .read_gaussians(NonZeroUsize::new(original.len()).unwrap(), &mut out)
             .unwrap_err()
             .kind(),
@@ -314,20 +309,19 @@ fn test_gaussians_batch_when_model_is_empty_should_be_already_done() {
 }
 
 #[test]
-fn test_gaussians_progressive_when_batch_exceeds_remaining_should_append_only_remaining() {
+fn test_gaussians_stream_when_batch_exceeds_remaining_should_append_only_remaining() {
     let original = given::ply_gaussians();
     let mut bytes = Vec::new();
     original.write_to(&mut bytes).unwrap();
-    let mut reader =
-        GaussiansProgressiveReader::new(bytes.as_slice(), GaussiansSource::Ply).unwrap();
+    let mut stream = GaussiansStream::new(bytes.as_slice(), GaussiansSource::Ply).unwrap();
     let mut out = Vec::new();
 
     assert_eq!(
-        reader
+        stream
             .read_gaussians(NonZeroUsize::new(original.len() + 1).unwrap(), &mut out)
             .unwrap(),
         original.len()
     );
     assert_eq!(out, original.iter_gaussian().collect::<Vec<_>>());
-    assert!(reader.progress().done);
+    assert!(stream.progress().done);
 }
