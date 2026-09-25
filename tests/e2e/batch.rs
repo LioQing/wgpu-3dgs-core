@@ -1,10 +1,10 @@
 use std::{io::ErrorKind, num::NonZeroUsize};
 
 use wgpu_3dgs_core::{
-    BatchRead, BatchWrite, PlyBatchReader, PlyBatchWriter, PlyGaussianStream, PlyGaussians,
-    ProgressiveGaussianRead, ReadIterGaussian, SpzBatchReader, SpzBatchWriter, SpzGaussianShDegree,
-    SpzGaussians, SpzGaussiansFromGaussianSliceOptions, SpzGaussiansHeader, SpzGaussiansPositions,
-    SpzGaussiansRotations, SpzGaussiansShs, SpzPhase, WriteIterGaussian,
+    BatchRead, BatchWrite, PlyBatchReader, PlyBatchWriter, PlyGaussianProgressiveReader,
+    PlyGaussians, ProgressiveGaussianRead, ReadIterGaussian, SpzBatchReader, SpzBatchWriter,
+    SpzGaussianShDegree, SpzGaussians, SpzGaussiansFromGaussianSliceOptions, SpzGaussiansHeader,
+    SpzGaussiansPositions, SpzGaussiansRotations, SpzGaussiansShs, SpzPhase, WriteIterGaussian,
 };
 
 use crate::common::given;
@@ -19,7 +19,7 @@ fn ply_stream_should_deliver_each_gaussian_before_completion() {
     let mut bytes = Vec::new();
     original.write_to(&mut bytes).unwrap();
 
-    let mut stream = PlyGaussianStream::new(bytes.as_slice()).unwrap();
+    let mut stream = PlyGaussianProgressiveReader::new(bytes.as_slice()).unwrap();
     assert_eq!(stream.total_gaussians(), original.len());
 
     let mut out = Vec::new();
@@ -169,7 +169,7 @@ fn ply_stream_when_record_is_truncated_should_return_error() {
     let mut bytes = Vec::new();
     original.write_to(&mut bytes).unwrap();
     bytes.truncate(bytes.len() - 1);
-    let mut stream = PlyGaussianStream::new(bytes.as_slice()).unwrap();
+    let mut stream = PlyGaussianProgressiveReader::new(bytes.as_slice()).unwrap();
 
     let mut out = Vec::new();
     assert_eq!(stream.read_gaussians(one(), &mut out).unwrap(), 1);

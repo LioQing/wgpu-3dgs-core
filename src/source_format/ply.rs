@@ -439,14 +439,14 @@ impl WriteIterGaussian for PlyGaussians {
 }
 
 /// PLY reader that delivers records before the whole file has been read.
-pub struct PlyGaussianStream<R: BufRead> {
+pub struct PlyGaussianProgressiveReader<R: BufRead> {
     reader: R,
     header: PlyHeader,
     read: usize,
     total: usize,
 }
 
-impl<R: BufRead> PlyGaussianStream<R> {
+impl<R: BufRead> PlyGaussianProgressiveReader<R> {
     pub fn new(mut reader: R) -> io::Result<Self> {
         let header = PlyGaussians::read_header(&mut reader)?;
         let total = header.count().ok_or_else(vertex_element_not_found_error)?;
@@ -460,7 +460,7 @@ impl<R: BufRead> PlyGaussianStream<R> {
     }
 }
 
-impl<R: BufRead> ProgressiveGaussianRead for PlyGaussianStream<R> {
+impl<R: BufRead> ProgressiveGaussianRead for PlyGaussianProgressiveReader<R> {
     type Item = PlyGaussianPod;
 
     fn total_gaussians(&self) -> usize {
@@ -496,16 +496,16 @@ impl<R: BufRead> ProgressiveGaussianRead for PlyGaussianStream<R> {
     }
 }
 
-/// Whole-model PLY reader built on the [`PlyGaussianStream`].
+/// Whole-model PLY reader built on the [`PlyGaussianProgressiveReader`].
 pub struct PlyBatchReader<R: BufRead> {
-    stream: PlyGaussianStream<R>,
+    stream: PlyGaussianProgressiveReader<R>,
     gaussians: Vec<PlyGaussianPod>,
 }
 
 impl<R: BufRead> PlyBatchReader<R> {
     pub fn new(reader: R) -> io::Result<Self> {
         Ok(Self {
-            stream: PlyGaussianStream::new(reader)?,
+            stream: PlyGaussianProgressiveReader::new(reader)?,
             gaussians: Vec::new(),
         })
     }

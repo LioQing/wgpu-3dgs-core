@@ -31,7 +31,7 @@ async fn main() {
 
     println!("Reading gaussians from {}", model_path);
     let file = std::fs::File::open(&model_path).expect("open PLY file");
-    let mut reader = gs::PlyGaussianStream::new(BufReader::new(file)).expect("PLY stream");
+    let mut reader = gs::PlyGaussianProgressiveReader::new(BufReader::new(file)).expect("PLY stream");
 
     let instance =
         wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
