@@ -1,8 +1,14 @@
-use std::io::BufRead;
+use std::{
+    io::{self, BufRead, Write},
+    num::NonZeroUsize,
+};
 
 use bytemuck::Zeroable;
 
-use crate::{Gaussian, IterGaussian, ReadIterGaussian, WriteIterGaussian};
+use crate::{
+    BatchProgress, BatchRead, BatchWrite, Gaussian, IterGaussian, ProgressiveGaussianRead,
+    ReadIterGaussian, WriteIterGaussian,
+};
 
 /// The POD representation of Gaussian in PLY format.
 ///
@@ -190,6 +196,71 @@ fn vertex_element_not_found_error() -> std::io::Error {
     )
 }
 
+fn read_inria(reader: &mut impl BufRead) -> io::Result<PlyGaussianPod> {
+    let mut gaussian = PlyGaussianPod::zeroed();
+    reader.read_exact(bytemuck::bytes_of_mut(&mut gaussian))?;
+    Ok(gaussian)
+}
+
+fn read_custom(
+    reader: &mut impl BufRead,
+    header: &ply_rs::ply::Header,
+) -> io::Result<PlyGaussianPod> {
+    let vertex = header
+        .elements
+        .get("vertex")
+        .ok_or_else(vertex_element_not_found_error)?;
+
+    Ok(match header.encoding {
+        ply_rs::ply::Encoding::Ascii => {
+            let mut line = String::new();
+            reader.read_line(&mut line)?;
+
+            let mut gaussian = PlyGaussianPod::zeroed();
+            vertex
+                .properties
+                .keys()
+                .zip(
+                    line.split_whitespace()
+                        .map(|s| Some(s.parse::<f32>()))
+                        .chain(std::iter::repeat(None)),
+                )
+                .try_for_each(|(name, value)| match value {
+                    Some(Ok(value)) => {
+                        gaussian.set_value(name, value);
+                        Ok(())
+                    }
+                    Some(Err(_)) | None => Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "Gaussian element property invalid or missing in PLY",
+                    )),
+                })?;
+            gaussian
+        }
+        ply_rs::ply::Encoding::BinaryLittleEndian => {
+            ply_rs::parser::Parser::<PlyGaussianPod>::new()
+                .read_little_endian_element(reader, vertex)?
+        }
+        ply_rs::ply::Encoding::BinaryBigEndian => ply_rs::parser::Parser::<PlyGaussianPod>::new()
+            .read_big_endian_element(reader, vertex)?,
+    })
+}
+
+fn write_header(writer: &mut impl Write, count: usize) -> io::Result<()> {
+    const SYSTEM_ENDIANNESS: ply_rs::ply::Encoding = match cfg!(target_endian = "little") {
+        true => ply_rs::ply::Encoding::BinaryLittleEndian,
+        false => ply_rs::ply::Encoding::BinaryBigEndian,
+    };
+
+    writeln!(writer, "ply")?;
+    writeln!(writer, "format {SYSTEM_ENDIANNESS} 1.0")?;
+    writeln!(writer, "element vertex {count}")?;
+    for property in PlyGaussians::PLY_PROPERTIES {
+        writeln!(writer, "property float {property}")?;
+    }
+    writeln!(writer, "end_header")
+}
+
 /// A collection of Gaussians in PLY format.
 ///
 /// The PLY file is expected to be the same format as the one used in the original Inria
@@ -311,6 +382,7 @@ impl PlyGaussians {
                     && property.data_type
                         == ply_rs::ply::PropertyType::Scalar(ply_rs::ply::ScalarType::Float)
             })
+            && vertex.properties.len() == Self::PLY_PROPERTIES.len()
             && header.encoding == SYSTEM_ENDIANNESS
         {
             true => PlyHeader::Inria(vertex.count),
@@ -331,54 +403,9 @@ impl PlyGaussians {
         log::info!("Reading PLY format with {count} Gaussians");
 
         Ok(match header {
-            PlyHeader::Inria(..) => PlyGaussianIter::Inria((0..count).map(|_| {
-                let mut gaussian = PlyGaussianPod::zeroed();
-                reader.read_exact(bytemuck::bytes_of_mut(&mut gaussian))?;
-                Ok(gaussian)
-            })),
+            PlyHeader::Inria(..) => PlyGaussianIter::Inria((0..count).map(|_| read_inria(reader))),
             PlyHeader::Custom(header) => {
-                let parser = ply_rs::parser::Parser::<PlyGaussianPod>::new();
-
-                PlyGaussianIter::Custom((0..count).map(move |_| {
-                    let vertex = header.elements.get("vertex").ok_or(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        "Gaussian vertex element not found in PLY",
-                    ))?;
-                    Ok(match header.encoding {
-                        ply_rs::ply::Encoding::Ascii => {
-                            let mut line = String::new();
-                            reader.read_line(&mut line)?;
-
-                            let mut gaussian = PlyGaussianPod::zeroed();
-                            vertex
-                                .properties
-                                .keys()
-                                .zip(
-                                    line.split(' ')
-                                        .map(|s| Some(s.trim().parse::<f32>()))
-                                        .chain(std::iter::repeat(None)),
-                                )
-                                .try_for_each(|(name, value)| match value {
-                                    Some(Ok(value)) => {
-                                        gaussian.set_value(name, value);
-                                        Ok(())
-                                    }
-                                    Some(Err(_)) | None => Err(std::io::Error::new(
-                                        std::io::ErrorKind::InvalidData,
-                                        "Gaussian element property invalid or missing in PLY",
-                                    )),
-                                })?;
-
-                            gaussian
-                        }
-                        ply_rs::ply::Encoding::BinaryLittleEndian => {
-                            parser.read_little_endian_element(reader, vertex)?
-                        }
-                        ply_rs::ply::Encoding::BinaryBigEndian => {
-                            parser.read_big_endian_element(reader, vertex)?
-                        }
-                    })
-                }))
+                PlyGaussianIter::Custom((0..count).map(move |_| read_custom(reader, &header)))
             }
         })
     }
@@ -392,41 +419,165 @@ impl IterGaussian for PlyGaussians {
 
 impl ReadIterGaussian for PlyGaussians {
     fn read_from(reader: &mut impl BufRead) -> std::io::Result<Self> {
-        let ply_header = Self::read_header(reader)?;
-
-        let count = ply_header
-            .count()
-            .ok_or_else(vertex_element_not_found_error)?;
-        let mut gaussians = Vec::with_capacity(count);
-
-        for gaussian in Self::read_gaussians(reader, ply_header)? {
-            gaussians.push(gaussian?);
+        let mut reader = PlyBatchReader::new(reader)?;
+        while !BatchRead::progress(&reader).done {
+            reader.step(NonZeroUsize::new(4096).unwrap())?;
         }
-
-        Ok(Self(gaussians))
+        reader.finish()
     }
 }
 
 impl WriteIterGaussian for PlyGaussians {
     fn write_to(&self, writer: &mut impl std::io::Write) -> std::io::Result<()> {
-        const SYSTEM_ENDIANNESS: ply_rs::ply::Encoding = match cfg!(target_endian = "little") {
-            true => ply_rs::ply::Encoding::BinaryLittleEndian,
-            false => ply_rs::ply::Encoding::BinaryBigEndian,
-        };
-
-        writeln!(writer, "ply")?;
-        writeln!(writer, "format {SYSTEM_ENDIANNESS} 1.0")?;
-        writeln!(writer, "element vertex {}", self.0.len())?;
-        for property in Self::PLY_PROPERTIES {
-            writeln!(writer, "property float {property}")?;
+        let mut writer = PlyBatchWriter::new(writer, self)?;
+        while !BatchWrite::progress(&writer).done {
+            writer.step(NonZeroUsize::new(4096).unwrap())?;
         }
-        writeln!(writer, "end_header")?;
-
-        self.0
-            .iter()
-            .try_for_each(|gaussian| writer.write_all(bytemuck::bytes_of(gaussian)))?;
-
+        writer.finish()?;
         Ok(())
+    }
+}
+
+/// PLY reader that delivers records before the whole file has been read.
+pub struct PlyGaussianStream<R: BufRead> {
+    reader: R,
+    header: PlyHeader,
+    read: usize,
+    total: usize,
+}
+
+impl<R: BufRead> PlyGaussianStream<R> {
+    pub fn new(mut reader: R) -> io::Result<Self> {
+        let header = PlyGaussians::read_header(&mut reader)?;
+        let total = header.count().ok_or_else(vertex_element_not_found_error)?;
+
+        Ok(Self {
+            reader,
+            header,
+            read: 0,
+            total,
+        })
+    }
+}
+
+impl<R: BufRead> ProgressiveGaussianRead for PlyGaussianStream<R> {
+    type Item = PlyGaussianPod;
+
+    fn total_gaussians(&self) -> usize {
+        self.total
+    }
+
+    fn progress(&self) -> BatchProgress {
+        BatchProgress {
+            phase: "vertices",
+            completed_in_phase: self.read,
+            total_in_phase: self.total,
+            completed_units: self.read,
+            total_units: self.total,
+            done: self.read == self.total,
+        }
+    }
+
+    fn read_gaussians(
+        &mut self,
+        max_gaussians: NonZeroUsize,
+        out: &mut Vec<Self::Item>,
+    ) -> io::Result<usize> {
+        let count = max_gaussians.get().min(self.total - self.read);
+        for _ in 0..count {
+            let gaussian = match &self.header {
+                PlyHeader::Inria(..) => read_inria(&mut self.reader)?,
+                PlyHeader::Custom(header) => read_custom(&mut self.reader, header)?,
+            };
+            out.push(gaussian);
+            self.read += 1;
+        }
+        Ok(count)
+    }
+}
+
+/// Whole-model PLY reader built on the [`PlyGaussianStream`].
+pub struct PlyBatchReader<R: BufRead> {
+    stream: PlyGaussianStream<R>,
+    gaussians: Vec<PlyGaussianPod>,
+}
+
+impl<R: BufRead> PlyBatchReader<R> {
+    pub fn new(reader: R) -> io::Result<Self> {
+        Ok(Self {
+            stream: PlyGaussianStream::new(reader)?,
+            gaussians: Vec::new(),
+        })
+    }
+}
+
+impl<R: BufRead> BatchRead for PlyBatchReader<R> {
+    type Model = PlyGaussians;
+
+    fn progress(&self) -> BatchProgress {
+        self.stream.progress()
+    }
+
+    fn step(&mut self, max_items: NonZeroUsize) -> io::Result<BatchProgress> {
+        self.stream.read_gaussians(max_items, &mut self.gaussians)?;
+        Ok(self.stream.progress())
+    }
+
+    fn finish(self) -> io::Result<Self::Model> {
+        if !self.stream.progress().done {
+            return Err(crate::source_format::batch::incomplete());
+        }
+        Ok(PlyGaussians(self.gaussians))
+    }
+}
+
+/// PLY writer for an existing collection, writing at most one batch per step.
+pub struct PlyBatchWriter<'a, W: Write> {
+    writer: W,
+    gaussians: &'a PlyGaussians,
+    written: usize,
+}
+
+impl<'a, W: Write> PlyBatchWriter<'a, W> {
+    pub fn new(mut writer: W, gaussians: &'a PlyGaussians) -> io::Result<Self> {
+        write_header(&mut writer, gaussians.len())?;
+        Ok(Self {
+            writer,
+            gaussians,
+            written: 0,
+        })
+    }
+}
+
+impl<W: Write> BatchWrite for PlyBatchWriter<'_, W> {
+    type Writer = W;
+
+    fn progress(&self) -> BatchProgress {
+        let total = self.gaussians.len();
+        BatchProgress {
+            phase: "vertices",
+            completed_in_phase: self.written,
+            total_in_phase: total,
+            completed_units: self.written,
+            total_units: total,
+            done: self.written == total,
+        }
+    }
+
+    fn step(&mut self, max_items: NonZeroUsize) -> io::Result<BatchProgress> {
+        let end = self.written + max_items.get().min(self.gaussians.len() - self.written);
+        for gaussian in &self.gaussians.0[self.written..end] {
+            self.writer.write_all(bytemuck::bytes_of(gaussian))?;
+            self.written += 1;
+        }
+        Ok(self.progress())
+    }
+
+    fn finish(self) -> io::Result<W> {
+        if !self.progress().done {
+            return Err(crate::source_format::batch::incomplete());
+        }
+        Ok(self.writer)
     }
 }
 

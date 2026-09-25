@@ -51,6 +51,13 @@ pub enum SpzGaussiansCollectError<T> {
     EmptyIterator,
 }
 
+/// The error type for parsing [`SpzPhase`](crate::SpzPhase) from str.
+#[derive(Debug, Error)]
+pub enum SpzPhaseFromStrError {
+    #[error("invalid SPZ phase: {0}")]
+    InvalidSpzPhase(String),
+}
+
 /// The error type for downloading buffer.
 #[derive(Debug, Error)]
 pub enum DownloadBufferError {
