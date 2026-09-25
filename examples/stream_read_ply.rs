@@ -14,7 +14,7 @@ use std::{io::BufReader, num::NonZeroUsize};
 use glam::*;
 use wgpu_3dgs_core::{self as gs, BufferWrapper, GaussianStream};
 
-type GaussianPod = gs::GaussianPodWithShHalfCov3dHalfConfigs;
+type GaussianPod = gs::PackedGaussian<gs::ShHalf, gs::CovHalf>;
 
 #[pollster::main]
 async fn main() {

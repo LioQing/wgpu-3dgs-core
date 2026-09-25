@@ -29,6 +29,7 @@ pub trait GaussianShConfig {
 }
 
 /// The single precision SH configuration of Gaussian.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GaussianShSingleConfig;
 
 impl GaussianShConfig for GaussianShSingleConfig {
@@ -46,6 +47,7 @@ impl GaussianShConfig for GaussianShSingleConfig {
 }
 
 /// The half precision SH configuration of Gaussian.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GaussianShHalfConfig;
 
 impl GaussianShConfig for GaussianShHalfConfig {
@@ -84,6 +86,7 @@ impl GaussianShConfig for GaussianShHalfConfig {
 /// The 8 bit signed normalized SH configuration of Gaussian.
 ///
 /// This is by the fact that SH coefficients are within \[-1, 1\].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GaussianShNorm8Config;
 
 impl GaussianShConfig for GaussianShNorm8Config {
@@ -123,6 +126,7 @@ impl GaussianShConfig for GaussianShNorm8Config {
 /// The none SH configuration of Gaussian.
 ///
 /// Calling [`GaussianShConfig::to_sh`] will panic on this config.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GaussianShNoneConfig;
 
 impl GaussianShConfig for GaussianShNoneConfig {
@@ -167,6 +171,7 @@ pub trait GaussianCov3dConfig {
 /// The unconverted rotation and scale covariance 3D configuration of Gaussian.
 ///
 /// Instead of storing the covariance matrix, this config stores the rotation and scale directly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GaussianCov3dRotScaleConfig;
 
 impl GaussianCov3dConfig for GaussianCov3dRotScaleConfig {
@@ -189,6 +194,7 @@ impl GaussianCov3dConfig for GaussianCov3dRotScaleConfig {
 /// The single precision covariance 3D configuration of Gaussian.
 ///
 /// Calling [`GaussianCov3dConfig::to_rot_scale`] will panic on this config.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GaussianCov3dSingleConfig;
 
 impl GaussianCov3dConfig for GaussianCov3dSingleConfig {
@@ -220,6 +226,7 @@ impl GaussianCov3dConfig for GaussianCov3dSingleConfig {
 /// The half precision covariance 3D configuration of Gaussian.
 ///
 /// Calling [`GaussianCov3dConfig::to_rot_scale`] will panic on this config.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GaussianCov3dHalfConfig;
 
 impl GaussianCov3dConfig for GaussianCov3dHalfConfig {
@@ -235,3 +242,18 @@ impl GaussianCov3dConfig for GaussianCov3dHalfConfig {
         panic!("Cannot convert from Cov3d Half configuration")
     }
 }
+
+/// Single-precision SH coefficients.
+pub type ShSingle = GaussianShSingleConfig;
+/// Half-precision SH coefficients.
+pub type ShHalf = GaussianShHalfConfig;
+/// Signed normalized 8-bit SH coefficients.
+pub type ShNorm8 = GaussianShNorm8Config;
+/// No SH coefficients.
+pub type ShNone = GaussianShNoneConfig;
+/// Rotation-and-scale covariance encoding.
+pub type CovRotScale = GaussianCov3dRotScaleConfig;
+/// Single-precision covariance encoding.
+pub type CovSingle = GaussianCov3dSingleConfig;
+/// Half-precision covariance encoding.
+pub type CovHalf = GaussianCov3dHalfConfig;

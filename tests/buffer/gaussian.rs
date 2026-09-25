@@ -1,6 +1,9 @@
 use assert_matches::assert_matches;
 use pollster::FutureExt;
-use wgpu_3dgs_core::{BufferWrapper, Gaussian, GaussianPod, GaussiansBuffer, IterGaussian};
+use wgpu_3dgs_core::{
+    BufferWrapper, CovHalf, CovRotScale, CovSingle, Gaussian, GaussianPod, GaussiansBuffer,
+    IterGaussian, PackedGaussian, ShHalf, ShNone, ShNorm8, ShSingle,
+};
 
 use crate::{
     common::{TestContext, given},
@@ -306,9 +309,9 @@ fn test_gaussians_buffer_download_gaussians_should_download_buffer_successfully(
         assert_eq!(gaussians_downloaded, gaussian_pods_gaussians);
     }
 
-    body::<wgpu_3dgs_core::GaussianPodWithShSingleCov3dRotScaleConfigs>();
-    body::<wgpu_3dgs_core::GaussianPodWithShHalfCov3dRotScaleConfigs>();
-    body::<wgpu_3dgs_core::GaussianPodWithShNorm8Cov3dRotScaleConfigs>();
+    body::<PackedGaussian<ShSingle, CovRotScale>>();
+    body::<PackedGaussian<ShHalf, CovRotScale>>();
+    body::<PackedGaussian<ShNorm8, CovRotScale>>();
 }
 
 mod test_gaussians_buffer_download_gaussians_when_configs_unsupported_should_panic {
@@ -333,7 +336,7 @@ mod test_gaussians_buffer_download_gaussians_when_configs_unsupported_should_pan
 #[should_panic]
 fn test_gaussians_buffer_download_gaussians_when_sh_single_cov3d_single_should_panic() {
     test_gaussians_buffer_download_gaussians_when_configs_unsupported_should_panic::body::<
-        wgpu_3dgs_core::GaussianPodWithShSingleCov3dSingleConfigs,
+        PackedGaussian<ShSingle, CovSingle>,
     >();
 }
 
@@ -341,7 +344,7 @@ fn test_gaussians_buffer_download_gaussians_when_sh_single_cov3d_single_should_p
 #[should_panic]
 fn test_gaussians_buffer_download_gaussians_when_sh_single_cov3d_half_should_panic() {
     test_gaussians_buffer_download_gaussians_when_configs_unsupported_should_panic::body::<
-        wgpu_3dgs_core::GaussianPodWithShSingleCov3dHalfConfigs,
+        PackedGaussian<ShSingle, CovHalf>,
     >();
 }
 
@@ -349,7 +352,7 @@ fn test_gaussians_buffer_download_gaussians_when_sh_single_cov3d_half_should_pan
 #[should_panic]
 fn test_gaussians_buffer_download_gaussians_when_sh_half_cov3d_single_should_panic() {
     test_gaussians_buffer_download_gaussians_when_configs_unsupported_should_panic::body::<
-        wgpu_3dgs_core::GaussianPodWithShHalfCov3dSingleConfigs,
+        PackedGaussian<ShHalf, CovSingle>,
     >();
 }
 
@@ -357,7 +360,7 @@ fn test_gaussians_buffer_download_gaussians_when_sh_half_cov3d_single_should_pan
 #[should_panic]
 fn test_gaussians_buffer_download_gaussians_when_sh_half_cov3d_half_should_panic() {
     test_gaussians_buffer_download_gaussians_when_configs_unsupported_should_panic::body::<
-        wgpu_3dgs_core::GaussianPodWithShHalfCov3dHalfConfigs,
+        PackedGaussian<ShHalf, CovHalf>,
     >();
 }
 
@@ -365,7 +368,7 @@ fn test_gaussians_buffer_download_gaussians_when_sh_half_cov3d_half_should_panic
 #[should_panic]
 fn test_gaussians_buffer_download_gaussians_when_sh_norm8_cov3d_single_should_panic() {
     test_gaussians_buffer_download_gaussians_when_configs_unsupported_should_panic::body::<
-        wgpu_3dgs_core::GaussianPodWithShNorm8Cov3dSingleConfigs,
+        PackedGaussian<ShNorm8, CovSingle>,
     >();
 }
 
@@ -373,7 +376,7 @@ fn test_gaussians_buffer_download_gaussians_when_sh_norm8_cov3d_single_should_pa
 #[should_panic]
 fn test_gaussians_buffer_download_gaussians_when_sh_norm8_cov3d_half_should_panic() {
     test_gaussians_buffer_download_gaussians_when_configs_unsupported_should_panic::body::<
-        wgpu_3dgs_core::GaussianPodWithShNorm8Cov3dHalfConfigs,
+        PackedGaussian<ShNorm8, CovHalf>,
     >();
 }
 
@@ -381,7 +384,7 @@ fn test_gaussians_buffer_download_gaussians_when_sh_norm8_cov3d_half_should_pani
 #[should_panic]
 fn test_gaussians_buffer_download_gaussians_when_sh_none_cov3d_rot_scale_should_panic() {
     test_gaussians_buffer_download_gaussians_when_configs_unsupported_should_panic::body::<
-        wgpu_3dgs_core::GaussianPodWithShNoneCov3dRotScaleConfigs,
+        PackedGaussian<ShNone, CovRotScale>,
     >();
 }
 
@@ -389,7 +392,7 @@ fn test_gaussians_buffer_download_gaussians_when_sh_none_cov3d_rot_scale_should_
 #[should_panic]
 fn test_gaussians_buffer_download_gaussians_when_sh_none_cov3d_single_should_panic() {
     test_gaussians_buffer_download_gaussians_when_configs_unsupported_should_panic::body::<
-        wgpu_3dgs_core::GaussianPodWithShNoneCov3dSingleConfigs,
+        PackedGaussian<ShNone, CovSingle>,
     >();
 }
 
@@ -397,7 +400,7 @@ fn test_gaussians_buffer_download_gaussians_when_sh_none_cov3d_single_should_pan
 #[should_panic]
 fn test_gaussians_buffer_download_gaussians_when_sh_none_cov3d_half_should_panic() {
     test_gaussians_buffer_download_gaussians_when_configs_unsupported_should_panic::body::<
-        wgpu_3dgs_core::GaussianPodWithShNoneCov3dHalfConfigs,
+        PackedGaussian<ShNone, CovHalf>,
     >();
 }
 
