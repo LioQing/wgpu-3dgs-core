@@ -402,7 +402,7 @@ fn test_gaussians_buffer_download_gaussians_when_sh_none_cov3d_half_should_panic
 }
 
 #[test]
-fn test_gaussians_buffer_try_from_and_into_wgpu_buffer_should_be_equal() {
+fn test_gaussians_buffer_wgpu_buffer_round_trip_should_be_equal() {
     fn body<G: GaussianPod>() {
         let ctx = TestContext::new();
         let gaussians = (0..3).map(given::gaussian_with_seed).collect::<Vec<_>>();

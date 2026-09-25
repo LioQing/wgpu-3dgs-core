@@ -145,7 +145,7 @@ fn test_gaussians_from_iter_should_have_internal_source() {
 }
 
 #[test]
-fn test_gaussians_write_to_file_and_read_from_file_when_source_is_ply_should_be_equal() {
+fn test_gaussians_file_round_trip_when_source_is_ply_should_be_equal() {
     let gaussians = Gaussians::from(given::ply_gaussians());
     let path = given::temp_file_path(".ply");
 
@@ -157,7 +157,7 @@ fn test_gaussians_write_to_file_and_read_from_file_when_source_is_ply_should_be_
 }
 
 #[test]
-fn test_gaussians_write_to_file_and_read_from_file_when_source_is_spz_should_be_equal() {
+fn test_gaussians_file_round_trip_when_source_is_spz_should_be_equal() {
     let gaussians = Gaussians::from(given::spz_gaussians());
     let path = given::temp_file_path(".spz");
 
@@ -196,7 +196,7 @@ fn test_gaussians_read_from_file_when_source_is_internal_should_return_error() {
 }
 
 #[test]
-fn test_gaussians_write_to_and_read_from_when_source_is_ply_should_be_equal() {
+fn test_gaussians_buffer_round_trip_when_source_is_ply_should_be_equal() {
     let gaussians = Gaussians::from(given::ply_gaussians());
 
     let mut buffer = Vec::new();
@@ -208,7 +208,7 @@ fn test_gaussians_write_to_and_read_from_when_source_is_ply_should_be_equal() {
 }
 
 #[test]
-fn test_gaussians_write_to_and_read_from_when_source_is_spz_should_be_equal() {
+fn test_gaussians_buffer_round_trip_when_source_is_spz_should_be_equal() {
     let gaussians = Gaussians::from(given::spz_gaussians());
 
     let mut buffer = Vec::new();

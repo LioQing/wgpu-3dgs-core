@@ -88,10 +88,7 @@ pub fn gaussian(
     );
 
     assert!(
-        (a.color.x as i16 - b.color.x as i16).unsigned_abs() as u8 <= color_tolerance
-            && (a.color.y as i16 - b.color.y as i16).unsigned_abs() as u8 <= color_tolerance
-            && (a.color.z as i16 - b.color.z as i16).unsigned_abs() as u8 <= color_tolerance
-            && (a.color.w as i16 - b.color.w as i16).unsigned_abs() as u8 <= color_tolerance,
+        a.color.abs_diff_eq(b.color, color_tolerance as f32 / 255.0),
         "color assertion failed\n left: {:?}\nright: {:?}",
         a.color,
         b.color

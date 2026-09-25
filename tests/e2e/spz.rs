@@ -72,6 +72,21 @@ fn given_spz_gaussian_and_header(
 }
 
 #[test]
+fn test_spz_color_round_trip_should_preserve_all_byte_values() {
+    let (mut spz, header) = given_spz_gaussian_and_header(1, &Default::default());
+    for value in 0..=255 {
+        spz.color = [value; 3];
+        spz.alpha = value;
+
+        let gaussian = Gaussian::from_spz(spz.as_ref(), &header);
+        let round_trip = gaussian.to_spz(&header, &Default::default());
+
+        assert_eq!(round_trip.color, spz.color);
+        assert_eq!(round_trip.alpha, spz.alpha);
+    }
+}
+
+#[test]
 fn test_spz_gaussian_pod_len_and_is_empty_should_be_correct() {
     let spz_gaussians = given::spz_gaussians();
 
@@ -80,7 +95,7 @@ fn test_spz_gaussian_pod_len_and_is_empty_should_be_correct() {
 }
 
 #[test]
-fn test_spz_gaussians_write_to_file_and_read_from_file_should_be_equal() {
+fn test_spz_gaussians_file_round_trip_should_be_equal() {
     let spz_gaussians = given::spz_gaussians();
     let path = given::temp_file_path(".spz");
 
@@ -95,7 +110,7 @@ fn test_spz_gaussians_write_to_file_and_read_from_file_should_be_equal() {
 }
 
 #[test]
-fn test_spz_gaussians_write_to_and_read_from_should_be_equal() {
+fn test_spz_gaussians_buffer_round_trip_should_be_equal() {
     let spz_gaussians = given::spz_gaussians();
 
     let mut buffer = Vec::new();
@@ -223,7 +238,7 @@ fn test_spz_decompressed_reads_when_header_or_fields_are_truncated_should_return
     assert_eq!(end, bytes.len());
 }
 
-fn test_spz_gaussians_write_to_with_options_and_read_from_should_be_equal(
+fn test_spz_gaussians_buffer_round_trip_with_options_should_preserve_count(
     options: &SpzGaussiansFromGaussianSliceOptions,
 ) {
     let gaussians = given::gaussians();
@@ -237,10 +252,10 @@ fn test_spz_gaussians_write_to_with_options_and_read_from_should_be_equal(
 }
 
 #[test]
-fn test_spz_gaussians_write_to_with_options_when_versions_and_read_from_should_be_equal() {
+fn test_spz_gaussians_buffer_round_trip_when_versions_vary_should_preserve_count() {
     for version in SpzGaussiansHeader::SUPPORTED_VERSIONS {
         println!("Version: {version}");
-        test_spz_gaussians_write_to_with_options_and_read_from_should_be_equal(
+        test_spz_gaussians_buffer_round_trip_with_options_should_preserve_count(
             &SpzGaussiansFromGaussianSliceOptions {
                 version,
                 ..Default::default()
@@ -250,10 +265,10 @@ fn test_spz_gaussians_write_to_with_options_when_versions_and_read_from_should_b
 }
 
 #[test]
-fn test_spz_gaussians_write_to_with_options_when_sh_degrees_and_read_from_should_be_equal() {
+fn test_spz_gaussians_buffer_round_trip_when_sh_degrees_vary_should_preserve_count() {
     for sh_degree in SpzGaussiansHeader::SUPPORTED_SH_DEGREES {
         println!("SH Degree: {sh_degree}");
-        test_spz_gaussians_write_to_with_options_and_read_from_should_be_equal(
+        test_spz_gaussians_buffer_round_trip_with_options_should_preserve_count(
             &SpzGaussiansFromGaussianSliceOptions {
                 sh_degree: SpzGaussianShDegree::new(sh_degree).expect("valid SH degree"),
                 ..Default::default()
@@ -263,10 +278,10 @@ fn test_spz_gaussians_write_to_with_options_when_sh_degrees_and_read_from_should
 }
 
 #[test]
-fn test_spz_gaussians_write_to_with_options_when_fractional_bits_and_read_from_should_be_equal() {
+fn test_spz_gaussians_buffer_round_trip_when_fractional_bits_vary_should_preserve_count() {
     for fractional_bits in [8, 12, 16] {
         println!("Fractional Bits: {fractional_bits}");
-        test_spz_gaussians_write_to_with_options_and_read_from_should_be_equal(
+        test_spz_gaussians_buffer_round_trip_with_options_should_preserve_count(
             &SpzGaussiansFromGaussianSliceOptions {
                 fractional_bits,
                 ..Default::default()
