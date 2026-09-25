@@ -3,16 +3,27 @@
 //! Run with:
 //!
 //! ```sh
-//! cargo run --example write_ply -- "path/to/output.ply"
+//! cargo run --example write-ply -- "path/to/output.ply" [batch_size]
 //! ```
+//! Omit `batch_size` to write normally, or provide a non-zero number of items per
+//! step to print writing progress.
+
+use std::{
+    io::{BufWriter, Write},
+    num::NonZeroUsize,
+};
 
 use glam::*;
-use wgpu_3dgs_core::{self as gs, WriteIterGaussian};
+use wgpu_3dgs_core::{self as gs, BatchWrite, WriteIterGaussian};
 
 fn main() {
     let model_path = std::env::args()
         .nth(1)
         .unwrap_or_else(|| "target/output.ply".to_string());
+    let batch_size = std::env::args().nth(2).map(|size| {
+        size.parse::<NonZeroUsize>()
+            .expect("batch_size must be a non-zero integer")
+    });
 
     let gaussians = [
         gs::Gaussian {
@@ -47,7 +58,29 @@ fn main() {
 
     println!("Writing {} gaussians to {}", gaussians.0.len(), model_path);
 
-    gaussians
-        .write_to_file(&model_path)
-        .expect("write PLY file");
+    if let Some(batch_size) = batch_size {
+        let file = std::fs::File::create(&model_path).expect("create PLY file");
+        let mut writer =
+            gs::PlyBatchWriter::new(BufWriter::new(file), &gaussians).expect("PLY writer");
+        while !writer.progress().done {
+            let progress = writer.step(batch_size).expect("write PLY batch");
+            println!(
+                "Writing {}: {}/{} ({}/{})",
+                progress.phase,
+                progress.completed_in_phase,
+                progress.total_in_phase,
+                progress.completed_units,
+                progress.total_units,
+            );
+        }
+        writer
+            .finish()
+            .expect("finish PLY writing")
+            .flush()
+            .expect("flush PLY file");
+    } else {
+        gaussians
+            .write_to_file(&model_path)
+            .expect("write PLY file");
+    }
 }

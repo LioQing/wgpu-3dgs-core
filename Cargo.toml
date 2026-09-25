@@ -35,6 +35,11 @@ path = "examples/read_ply.rs"
 doc-scrape-examples = true
 
 [[example]]
+name = "progressive-read-ply"
+path = "examples/progressive_read_ply.rs"
+doc-scrape-examples = true
+
+[[example]]
 name = "write-spz"
 path = "examples/write_spz.rs"
 doc-scrape-examples = true
