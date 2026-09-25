@@ -14,7 +14,7 @@ fn one() -> NonZeroUsize {
 }
 
 #[test]
-fn ply_stream_delivers_each_gaussian_before_completion() {
+fn ply_stream_should_deliver_each_gaussian_before_completion() {
     let original = given::ply_gaussians();
     let mut bytes = Vec::new();
     original.write_to(&mut bytes).unwrap();
@@ -33,7 +33,7 @@ fn ply_stream_delivers_each_gaussian_before_completion() {
 }
 
 #[test]
-fn ply_batch_round_trip_and_incomplete_finish() {
+fn ply_batch_when_finish_is_incomplete_should_return_error_and_round_trip() {
     let original = given::ply_gaussians();
     let mut bytes = Vec::new();
     let mut writer = PlyBatchWriter::new(&mut bytes, &original).unwrap();
@@ -67,7 +67,7 @@ fn ply_batch_round_trip_and_incomplete_finish() {
 }
 
 #[test]
-fn spz_batch_round_trip_all_versions_and_sh_degrees() {
+fn spz_batch_when_versions_and_sh_degrees_vary_should_round_trip() {
     for version in 1..=3 {
         for degree in 0..=3 {
             let original = SpzGaussians::from_gaussians_with_options(
@@ -116,7 +116,7 @@ fn spz_batch_round_trip_all_versions_and_sh_degrees() {
 }
 
 #[test]
-fn spz_batch_finish_rejects_truncated_gzip_trailer() {
+fn spz_batch_when_gzip_trailer_is_truncated_should_return_error() {
     let original = given::spz_gaussians();
     let mut bytes = Vec::new();
     original.write_to(&mut bytes).unwrap();
@@ -130,7 +130,7 @@ fn spz_batch_finish_rejects_truncated_gzip_trailer() {
 }
 
 #[test]
-fn empty_ply_batches_are_already_done() {
+fn ply_batch_when_empty_should_be_already_done() {
     let original = PlyGaussians(Vec::new());
     let bytes = PlyBatchWriter::new(Vec::new(), &original)
         .unwrap()
@@ -142,7 +142,7 @@ fn empty_ply_batches_are_already_done() {
 }
 
 #[test]
-fn empty_spz_batches_are_already_done() {
+fn spz_batch_when_empty_should_be_already_done() {
     let original = SpzGaussians {
         header: SpzGaussiansHeader::new(3, 0, SpzGaussianShDegree::new(0).unwrap(), 12, false)
             .unwrap(),
@@ -164,7 +164,7 @@ fn empty_spz_batches_are_already_done() {
 }
 
 #[test]
-fn ply_stream_rejects_truncated_record() {
+fn ply_stream_when_record_is_truncated_should_return_error() {
     let original = given::ply_gaussians();
     let mut bytes = Vec::new();
     original.write_to(&mut bytes).unwrap();

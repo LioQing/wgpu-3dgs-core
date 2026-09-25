@@ -2,7 +2,8 @@ use std::io::Write;
 
 use assert_matches::assert_matches;
 use wgpu_3dgs_core::{
-    IterGaussian, PlyGaussianPod, PlyGaussians, ReadIterGaussian, WriteIterGaussian, glam::*,
+    IterGaussian, PlyGaussianPod, PlyGaussians, PlyHeader, ReadIterGaussian, WriteIterGaussian,
+    glam::*,
 };
 
 use crate::common::{assert, given};
@@ -121,6 +122,68 @@ fn test_ply_gaussians_read_from_when_format_is_custom_and_le_should_match_origin
     assert_eq!(gaussians_read.len(), 2);
     assert::ply_gaussian_pod(&gaussians.0[0], &gaussians_read.0[0]);
     assert::ply_gaussian_pod(&gaussians.0[1], &gaussians_read.0[1]);
+}
+
+#[test]
+fn test_ply_read_gaussians_when_headers_are_inria_or_custom_should_support_them() {
+    let original = given::ply_gaussians();
+    let mut inria = Vec::new();
+    original.write_to(&mut inria).unwrap();
+
+    let buffers = [
+        inria,
+        given_custom_gaussians_ply_buffer(&original.0, ply_rs::ply::Encoding::Ascii),
+        given_custom_gaussians_ply_buffer(&original.0, ply_rs::ply::Encoding::BinaryLittleEndian),
+        given_custom_gaussians_ply_buffer(&original.0, ply_rs::ply::Encoding::BinaryBigEndian),
+    ];
+
+    for (index, bytes) in buffers.iter().enumerate() {
+        let mut input = bytes.as_slice();
+        let header = PlyGaussians::read_header(&mut input).unwrap();
+        assert_eq!(header.count(), Some(original.len()));
+        if index == 0 {
+            assert_matches!(header, PlyHeader::Inria(_));
+        } else {
+            assert_matches!(header, PlyHeader::Custom(_));
+        }
+
+        let actual = PlyGaussians::read_gaussians(&mut input, header)
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(actual.len(), original.len());
+        for (expected, actual) in original.iter().zip(&actual) {
+            assert::ply_gaussian_pod(expected, actual);
+        }
+        assert!(input.is_empty());
+    }
+}
+
+#[test]
+fn test_ply_read_gaussians_when_unexpected_eof_should_return_error() {
+    let original = given::ply_gaussians();
+    let mut bytes = Vec::new();
+    original.write_to(&mut bytes).unwrap();
+    bytes.pop();
+
+    let mut input = bytes.as_slice();
+    let header = PlyGaussians::read_header(&mut input).unwrap();
+    let mut records = PlyGaussians::read_gaussians(&mut input, header).unwrap();
+    assert_eq!(records.next().unwrap().unwrap(), original.0[0]);
+    assert_matches!(records.next(), Some(Err(e)) if e.kind() == std::io::ErrorKind::UnexpectedEof);
+    assert!(records.next().is_none());
+}
+
+#[test]
+fn test_ply_read_gaussians_when_custom_header_without_vertex_should_return_error() {
+    let bytes = b"ply\nformat ascii 1.0\nelement fragment 1\nproperty float x\nend_header\n";
+    let header = ply_rs::parser::Parser::<ply_rs::ply::DefaultElement>::new()
+        .read_header(&mut bytes.as_slice())
+        .unwrap();
+    match PlyGaussians::read_gaussians(&mut bytes.as_slice(), PlyHeader::Custom(header)) {
+        Err(e) => assert_eq!(e.kind(), std::io::ErrorKind::InvalidData),
+        Ok(_) => panic!("expected a missing vertex error"),
+    }
 }
 
 #[test]

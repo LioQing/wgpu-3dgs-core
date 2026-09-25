@@ -978,7 +978,8 @@ pub enum SpzPhase {
 }
 
 impl SpzPhase {
-    fn next(self) -> Self {
+    /// Get the next phase after the current one.
+    pub fn next(self) -> Self {
         match self {
             Self::Positions => Self::Alphas,
             Self::Alphas => Self::Colors,
@@ -989,7 +990,8 @@ impl SpzPhase {
         }
     }
 
-    fn name(self) -> &'static str {
+    /// Get the phase name used in progress reports.
+    pub fn name(self) -> &'static str {
         match self {
             Self::Positions => "positions",
             Self::Alphas => "alphas",
