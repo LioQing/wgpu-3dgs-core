@@ -21,7 +21,7 @@ const ASSERT_GAUSSIAN_OPTIONS: assert::GaussianOptions = assert::GaussianOptions
 };
 
 #[test]
-fn spz_phase_name_should_round_trip_through_from_str() {
+fn test_spz_phase_name_should_round_trip_through_from_str() {
     for phase in [
         SpzPhase::Positions,
         SpzPhase::Alphas,
