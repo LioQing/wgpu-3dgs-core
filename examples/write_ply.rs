@@ -49,19 +49,17 @@ fn main() {
         },
     ];
 
-    let gaussians = gs::PlyGaussians::from(
-        gaussians
-            .iter()
-            .map(gs::Gaussian::to_ply)
-            .collect::<Vec<_>>(),
-    );
-
-    println!("Writing {} gaussians to {}", gaussians.0.len(), model_path);
+    println!("Writing {} gaussians to {}", gaussians.len(), model_path);
 
     if let Some(batch_size) = batch_size {
         let file = std::fs::File::create(&model_path).expect("create PLY file");
-        let mut writer =
-            gs::PlyBatchWriter::new(BufWriter::new(file), &gaussians).expect("PLY writer");
+        let count = gaussians.len();
+        let mut writer = gs::PlyBatchWriter::from_iter(
+            BufWriter::new(file),
+            count,
+            gaussians.into_iter().map(|gaussian| Ok(gaussian.to_ply())),
+        )
+        .expect("PLY writer");
         while !writer.progress().done {
             let progress = writer.step(batch_size).expect("write PLY batch");
             println!(
@@ -79,8 +77,13 @@ fn main() {
             .flush()
             .expect("flush PLY file");
     } else {
-        gaussians
-            .write_to_file(&model_path)
-            .expect("write PLY file");
+        gs::PlyGaussians::from(
+            gaussians
+                .iter()
+                .map(gs::Gaussian::to_ply)
+                .collect::<Vec<_>>(),
+        )
+        .write_to_file(&model_path)
+        .expect("write PLY file");
     }
 }

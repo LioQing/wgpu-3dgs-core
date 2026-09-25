@@ -64,10 +64,12 @@ pub trait BatchWrite {
 /// Read individual Gaussians before the entire source file has been read.
 ///
 /// Unlike [`BatchRead`], the caller owns the decoded data and may discard each batch after
-/// reading it. Only formats supporting early delivery implement this trait.
-pub trait ProgressiveGaussianRead {
+/// reading it. Only formats supporting early delivery implement this trait. [`Iterator::next`]
+/// yields one `io::Result` per Gaussian, or `None` at completion. An I/O error is yielded once;
+/// subsequent calls return `None` and `progress().done` remains false. Discard the stream then.
+pub trait GaussianStream: Iterator<Item = io::Result<Self::Gaussian>> {
     /// A single Gaussian in the original source format.
-    type Item;
+    type Gaussian;
 
     /// Number of Gaussians declared in the file header.
     fn total_gaussians(&self) -> usize;
@@ -76,12 +78,26 @@ pub trait ProgressiveGaussianRead {
     fn progress(&self) -> BatchProgress;
 
     /// Append up to `max_gaussians` items to `out`, returning the number appended.
-    /// A return of zero indicates completion only when `progress().done` is true.
-    fn read_gaussians(
+    /// Successfully read items remain in `out` if a later read fails. A return of zero
+    /// indicates completion only when `progress().done` is true.
+    fn next_batch(
         &mut self,
         max_gaussians: NonZeroUsize,
-        out: &mut Vec<Self::Item>,
-    ) -> io::Result<usize>;
+        out: &mut Vec<Self::Gaussian>,
+    ) -> io::Result<usize> {
+        let mut count = 0;
+        for _ in 0..max_gaussians.get() {
+            match self.next() {
+                Some(Ok(gaussian)) => {
+                    out.push(gaussian);
+                    count += 1;
+                }
+                Some(Err(error)) => return Err(error),
+                None => break,
+            }
+        }
+        Ok(count)
+    }
 }
 
 pub(crate) fn incomplete() -> io::Error {

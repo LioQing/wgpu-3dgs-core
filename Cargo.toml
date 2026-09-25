@@ -35,8 +35,8 @@ path = "examples/read_ply.rs"
 doc-scrape-examples = true
 
 [[example]]
-name = "progressive-read-ply"
-path = "examples/progressive_read_ply.rs"
+name = "stream-read-ply"
+path = "examples/stream_read_ply.rs"
 doc-scrape-examples = true
 
 [[example]]

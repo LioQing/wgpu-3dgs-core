@@ -6,8 +6,8 @@ use std::{
 use bytemuck::Zeroable;
 
 use crate::{
-    BatchProgress, BatchRead, BatchWrite, Gaussian, IterGaussian, ProgressiveGaussianRead,
-    ReadIterGaussian, WriteIterGaussian,
+    BatchProgress, BatchRead, BatchWrite, Gaussian, GaussianStream, IterGaussian, ReadIterGaussian,
+    WriteIterGaussian, source_format,
 };
 
 /// The POD representation of Gaussian in PLY format.
@@ -134,7 +134,7 @@ impl From<&Gaussian> for PlyGaussianPod {
 
 /// Header of PLY file.
 ///
-/// This represents the header parsed by [`PlyGaussians::read_ply_header`].
+/// This represents the header parsed by [`PlyGaussians::read_header`].
 #[derive(Debug, Clone)]
 pub enum PlyHeader {
     /// The Inria PLY format.
@@ -244,21 +244,6 @@ fn read_custom(
         ply_rs::ply::Encoding::BinaryBigEndian => ply_rs::parser::Parser::<PlyGaussianPod>::new()
             .read_big_endian_element(reader, vertex)?,
     })
-}
-
-fn write_header(writer: &mut impl Write, count: usize) -> io::Result<()> {
-    const SYSTEM_ENDIANNESS: ply_rs::ply::Encoding = match cfg!(target_endian = "little") {
-        true => ply_rs::ply::Encoding::BinaryLittleEndian,
-        false => ply_rs::ply::Encoding::BinaryBigEndian,
-    };
-
-    writeln!(writer, "ply")?;
-    writeln!(writer, "format {SYSTEM_ENDIANNESS} 1.0")?;
-    writeln!(writer, "element vertex {count}")?;
-    for property in PlyGaussians::PLY_PROPERTIES {
-        writeln!(writer, "property float {property}")?;
-    }
-    writeln!(writer, "end_header")
 }
 
 /// A collection of Gaussians in PLY format.
@@ -438,15 +423,16 @@ impl WriteIterGaussian for PlyGaussians {
     }
 }
 
-/// PLY reader that delivers records before the whole file has been read.
-pub struct PlyGaussianProgressiveReader<R: BufRead> {
+/// PLY stream that delivers records before the whole file has been read.
+pub struct PlyGaussianStream<R: BufRead> {
     reader: R,
     header: PlyHeader,
     read: usize,
     total: usize,
+    failed: bool,
 }
 
-impl<R: BufRead> PlyGaussianProgressiveReader<R> {
+impl<R: BufRead> PlyGaussianStream<R> {
     pub fn new(mut reader: R) -> io::Result<Self> {
         let header = PlyGaussians::read_header(&mut reader)?;
         let total = header.count().ok_or_else(vertex_element_not_found_error)?;
@@ -456,12 +442,38 @@ impl<R: BufRead> PlyGaussianProgressiveReader<R> {
             header,
             read: 0,
             total,
+            failed: false,
         })
     }
 }
 
-impl<R: BufRead> ProgressiveGaussianRead for PlyGaussianProgressiveReader<R> {
-    type Item = PlyGaussianPod;
+impl<R: BufRead> Iterator for PlyGaussianStream<R> {
+    type Item = io::Result<PlyGaussianPod>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.failed || self.read == self.total {
+            return None;
+        }
+
+        let result = match &self.header {
+            PlyHeader::Inria(..) => read_inria(&mut self.reader),
+            PlyHeader::Custom(header) => read_custom(&mut self.reader, header),
+        };
+        match result {
+            Ok(gaussian) => {
+                self.read += 1;
+                Some(Ok(gaussian))
+            }
+            Err(error) => {
+                self.failed = true;
+                Some(Err(error))
+            }
+        }
+    }
+}
+
+impl<R: BufRead> GaussianStream for PlyGaussianStream<R> {
+    type Gaussian = PlyGaussianPod;
 
     fn total_gaussians(&self) -> usize {
         self.total
@@ -477,35 +489,18 @@ impl<R: BufRead> ProgressiveGaussianRead for PlyGaussianProgressiveReader<R> {
             done: self.read == self.total,
         }
     }
-
-    fn read_gaussians(
-        &mut self,
-        max_gaussians: NonZeroUsize,
-        out: &mut Vec<Self::Item>,
-    ) -> io::Result<usize> {
-        let count = max_gaussians.get().min(self.total - self.read);
-        for _ in 0..count {
-            let gaussian = match &self.header {
-                PlyHeader::Inria(..) => read_inria(&mut self.reader)?,
-                PlyHeader::Custom(header) => read_custom(&mut self.reader, header)?,
-            };
-            out.push(gaussian);
-            self.read += 1;
-        }
-        Ok(count)
-    }
 }
 
-/// Whole-model PLY reader built on the [`PlyGaussianProgressiveReader`].
+/// Whole-model PLY reader built on the [`PlyGaussianStream`].
 pub struct PlyBatchReader<R: BufRead> {
-    stream: PlyGaussianProgressiveReader<R>,
+    stream: PlyGaussianStream<R>,
     gaussians: Vec<PlyGaussianPod>,
 }
 
 impl<R: BufRead> PlyBatchReader<R> {
     pub fn new(reader: R) -> io::Result<Self> {
         Ok(Self {
-            stream: PlyGaussianProgressiveReader::new(reader)?,
+            stream: PlyGaussianStream::new(reader)?,
             gaussians: Vec::new(),
         })
     }
@@ -519,55 +514,96 @@ impl<R: BufRead> BatchRead for PlyBatchReader<R> {
     }
 
     fn step(&mut self, max_items: NonZeroUsize) -> io::Result<BatchProgress> {
-        self.stream.read_gaussians(max_items, &mut self.gaussians)?;
+        self.stream.next_batch(max_items, &mut self.gaussians)?;
         Ok(self.stream.progress())
     }
 
     fn finish(self) -> io::Result<Self::Model> {
         if !self.stream.progress().done {
-            return Err(crate::source_format::batch::incomplete());
+            return Err(source_format::batch::incomplete());
         }
         Ok(PlyGaussians(self.gaussians))
     }
 }
 
-/// PLY writer for an existing collection, writing at most one batch per step.
-pub struct PlyBatchWriter<'a, W: Write> {
+/// PLY writer that consumes an iterator incrementally, writing at most one batch per step.
+///
+/// The PLY header requires the number of Gaussians up front. Only that many items are consumed,
+/// extra iterator items are left unread. Discard the writer after an iterator or I/O error.
+pub struct PlyBatchWriter<W: Write, I: Iterator<Item = io::Result<PlyGaussianPod>>> {
     writer: W,
-    gaussians: &'a PlyGaussians,
+    gaussians: I,
+    total: usize,
     written: usize,
 }
 
-impl<'a, W: Write> PlyBatchWriter<'a, W> {
-    pub fn new(mut writer: W, gaussians: &'a PlyGaussians) -> io::Result<Self> {
-        write_header(&mut writer, gaussians.len())?;
-        Ok(Self {
-            writer,
-            gaussians,
-            written: 0,
-        })
+/// Iterator used by [`PlyBatchWriter::new`] for an existing PLY collection.
+pub type PlyGaussiansBatchIter<'a> = std::iter::Map<
+    std::iter::Copied<std::slice::Iter<'a, PlyGaussianPod>>,
+    fn(PlyGaussianPod) -> io::Result<PlyGaussianPod>,
+>;
+
+impl<'a, W: Write> PlyBatchWriter<W, PlyGaussiansBatchIter<'a>> {
+    /// Write a header for an existing collection, then consume it in batches.
+    pub fn new(writer: W, gaussians: &'a PlyGaussians) -> io::Result<Self> {
+        Self::from_iter(writer, gaussians.len(), gaussians.0.iter().copied().map(Ok))
     }
 }
 
-impl<W: Write> BatchWrite for PlyBatchWriter<'_, W> {
+impl<W: Write, I: Iterator<Item = io::Result<PlyGaussianPod>>> PlyBatchWriter<W, I> {
+    /// Write the PLY header and prepare to consume `count` Gaussians from `gaussians`.
+    ///
+    /// The iterator is not advanced until [`BatchWrite::step`] is called. If it ends before
+    /// `count`, `step` returns `UnexpectedEof`, additional items are never requested.
+    pub fn from_iter(mut writer: W, count: usize, gaussians: I) -> io::Result<Self> {
+        Self::write_header(&mut writer, count)?;
+
+        Ok(Self {
+            writer,
+            gaussians,
+            total: count,
+            written: 0,
+        })
+    }
+
+    fn write_header(writer: &mut impl Write, count: usize) -> io::Result<()> {
+        const SYSTEM_ENDIANNESS: ply_rs::ply::Encoding = match cfg!(target_endian = "little") {
+            true => ply_rs::ply::Encoding::BinaryLittleEndian,
+            false => ply_rs::ply::Encoding::BinaryBigEndian,
+        };
+
+        writeln!(writer, "ply")?;
+        writeln!(writer, "format {SYSTEM_ENDIANNESS} 1.0")?;
+        writeln!(writer, "element vertex {count}")?;
+        for property in PlyGaussians::PLY_PROPERTIES {
+            writeln!(writer, "property float {property}")?;
+        }
+        writeln!(writer, "end_header")
+    }
+}
+
+impl<W: Write, I: Iterator<Item = io::Result<PlyGaussianPod>>> BatchWrite for PlyBatchWriter<W, I> {
     type Writer = W;
 
     fn progress(&self) -> BatchProgress {
-        let total = self.gaussians.len();
         BatchProgress {
             phase: "vertices",
             completed_in_phase: self.written,
-            total_in_phase: total,
+            total_in_phase: self.total,
             completed_units: self.written,
-            total_units: total,
-            done: self.written == total,
+            total_units: self.total,
+            done: self.written == self.total,
         }
     }
 
     fn step(&mut self, max_items: NonZeroUsize) -> io::Result<BatchProgress> {
-        let end = self.written + max_items.get().min(self.gaussians.len() - self.written);
-        for gaussian in &self.gaussians.0[self.written..end] {
-            self.writer.write_all(bytemuck::bytes_of(gaussian))?;
+        let count = max_items.get().min(self.total - self.written);
+        for _ in 0..count {
+            let gaussian = self
+                .gaussians
+                .next()
+                .ok_or_else(source_format::batch::incomplete)??;
+            self.writer.write_all(bytemuck::bytes_of(&gaussian))?;
             self.written += 1;
         }
         Ok(self.progress())
@@ -575,7 +611,7 @@ impl<W: Write> BatchWrite for PlyBatchWriter<'_, W> {
 
     fn finish(self) -> io::Result<W> {
         if !self.progress().done {
-            return Err(crate::source_format::batch::incomplete());
+            return Err(source_format::batch::incomplete());
         }
         Ok(self.writer)
     }
