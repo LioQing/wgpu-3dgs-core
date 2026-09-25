@@ -625,8 +625,18 @@ impl<R: BufRead> GaussiansStream<R> {
     }
 }
 
+impl<R: BufRead> Iterator for GaussiansStream<R> {
+    type Item = io::Result<Gaussian>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.stream
+            .next()
+            .map(|result| result.map(|pod| Gaussian::from_ply(&pod)))
+    }
+}
+
 impl<R: BufRead> GaussianStream for GaussiansStream<R> {
-    type Item = Gaussian;
+    type Gaussian = Gaussian;
 
     fn total_gaussians(&self) -> usize {
         self.stream.total_gaussians()
@@ -634,17 +644,6 @@ impl<R: BufRead> GaussianStream for GaussiansStream<R> {
 
     fn progress(&self) -> BatchProgress {
         self.stream.progress()
-    }
-
-    fn read_gaussians(
-        &mut self,
-        max_gaussians: NonZeroUsize,
-        out: &mut Vec<Self::Item>,
-    ) -> io::Result<usize> {
-        let mut batch = Vec::new();
-        let result = self.stream.read_gaussians(max_gaussians, &mut batch);
-        out.extend(batch.iter().map(Gaussian::from_ply));
-        result
     }
 }
 

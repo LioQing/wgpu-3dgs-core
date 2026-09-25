@@ -24,13 +24,30 @@ fn test_ply_stream_should_deliver_each_gaussian_before_completion() {
     assert_eq!(stream.total_gaussians(), original.len());
 
     let mut out = Vec::new();
-    assert_eq!(stream.read_gaussians(one(), &mut out).unwrap(), 1);
+    assert_eq!(stream.next().unwrap().unwrap(), original.0[0]);
+    assert_eq!(stream.next_batch(one(), &mut out).unwrap(), 1);
+    assert_eq!(out, original.0[1..]);
+    assert!(GaussianStream::progress(&stream).done);
+    assert_eq!(stream.next_batch(one(), &mut out).unwrap(), 0);
+    assert!(stream.next().is_none());
+}
+
+#[test]
+fn test_ply_stream_when_reading_batches_and_single_items_should_share_progress() {
+    let original = given::ply_gaussians();
+    let mut bytes = Vec::new();
+    original.write_to(&mut bytes).unwrap();
+
+    let mut stream = PlyGaussianStream::new(bytes.as_slice()).unwrap();
+    let mut out = Vec::new();
+    assert_eq!(stream.next_batch(one(), &mut out).unwrap(), 1);
     assert_eq!(out, original.0[..1]);
     assert!(!GaussianStream::progress(&stream).done);
-    assert_eq!(stream.read_gaussians(one(), &mut out).unwrap(), 1);
-    assert_eq!(out, original.0);
+    assert_eq!(stream.next().unwrap().unwrap(), original.0[1]);
+    assert_eq!(stream.next_batch(one(), &mut out).unwrap(), 0);
+    assert_eq!(out, original.0[..1]);
     assert!(GaussianStream::progress(&stream).done);
-    assert_eq!(stream.read_gaussians(one(), &mut out).unwrap(), 0);
+    assert!(stream.next().is_none());
 }
 
 #[test]
@@ -173,12 +190,14 @@ fn test_ply_stream_when_record_is_truncated_should_return_error() {
     let mut stream = PlyGaussianStream::new(bytes.as_slice()).unwrap();
 
     let mut out = Vec::new();
-    assert_eq!(stream.read_gaussians(one(), &mut out).unwrap(), 1);
+    assert_eq!(stream.next_batch(one(), &mut out).unwrap(), 1);
     assert_eq!(
-        stream.read_gaussians(one(), &mut out).unwrap_err().kind(),
+        stream.next_batch(one(), &mut out).unwrap_err().kind(),
         ErrorKind::UnexpectedEof
     );
     assert_eq!(out.len(), 1);
+    assert!(!stream.progress().done);
+    assert!(stream.next().is_none());
 }
 
 #[test]
@@ -254,12 +273,12 @@ fn test_gaussians_stream_when_source_is_ply_should_deliver_unified_gaussians_in_
     assert_eq!(stream.total_gaussians(), original.len());
     let mut out = vec![given::gaussians()[0]];
     for (index, expected) in original.iter_gaussian().enumerate() {
-        assert_eq!(stream.read_gaussians(one(), &mut out).unwrap(), 1);
+        assert_eq!(stream.next_batch(one(), &mut out).unwrap(), 1);
         assert_eq!(out[index + 1], expected);
         assert_eq!(stream.progress().completed_units, index + 1);
     }
     assert!(stream.progress().done);
-    assert_eq!(stream.read_gaussians(one(), &mut out).unwrap(), 0);
+    assert_eq!(stream.next_batch(one(), &mut out).unwrap(), 0);
     assert_eq!(out.len(), original.len() + 1);
 }
 
@@ -282,7 +301,7 @@ fn test_gaussians_stream_when_ply_record_is_truncated_should_keep_previous_gauss
 
     assert_eq!(
         stream
-            .read_gaussians(NonZeroUsize::new(original.len()).unwrap(), &mut out)
+            .next_batch(NonZeroUsize::new(original.len()).unwrap(), &mut out)
             .unwrap_err()
             .kind(),
         ErrorKind::UnexpectedEof
@@ -294,6 +313,8 @@ fn test_gaussians_stream_when_ply_record_is_truncated_should_keep_previous_gauss
             .take(original.len() - 1)
             .collect::<Vec<_>>()
     );
+    assert!(!stream.progress().done);
+    assert!(stream.next().is_none());
 }
 
 #[test]
@@ -318,10 +339,43 @@ fn test_gaussians_stream_when_batch_exceeds_remaining_should_append_only_remaini
 
     assert_eq!(
         stream
-            .read_gaussians(NonZeroUsize::new(original.len() + 1).unwrap(), &mut out)
+            .next_batch(NonZeroUsize::new(original.len() + 1).unwrap(), &mut out)
             .unwrap(),
         original.len()
     );
     assert_eq!(out, original.iter_gaussian().collect::<Vec<_>>());
     assert!(stream.progress().done);
+}
+
+#[test]
+fn test_gaussians_stream_iterator_should_return_unified_gaussians() {
+    let original = given::ply_gaussians();
+    let mut bytes = Vec::new();
+    original.write_to(&mut bytes).unwrap();
+
+    let stream = GaussiansStream::new(bytes.as_slice(), GaussiansSource::Ply).unwrap();
+    assert_eq!(
+        stream.collect::<std::io::Result<Vec<_>>>().unwrap(),
+        original.iter_gaussian().collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_gaussians_stream_iterator_when_record_is_truncated_should_yield_error_once() {
+    let original = given::ply_gaussians();
+    let mut bytes = Vec::new();
+    original.write_to(&mut bytes).unwrap();
+    bytes.truncate(bytes.len() - 1);
+
+    let mut stream = GaussiansStream::new(bytes.as_slice(), GaussiansSource::Ply).unwrap();
+    assert_eq!(
+        stream.next().unwrap().unwrap(),
+        original.iter_gaussian().next().unwrap()
+    );
+    assert_eq!(
+        stream.next().unwrap().unwrap_err().kind(),
+        ErrorKind::UnexpectedEof
+    );
+    assert!(stream.next().is_none());
+    assert!(!stream.progress().done);
 }

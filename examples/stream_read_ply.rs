@@ -57,7 +57,7 @@ async fn main() {
         batch.clear();
         let start = stream.progress().completed_units;
         stream
-            .read_gaussians(batch_size, &mut batch)
+            .next_batch(batch_size, &mut batch)
             .expect("read PLY batch");
 
         decoded.clear();

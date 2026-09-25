@@ -7,7 +7,7 @@ Please also check out the [`wgpu-3dgs-viewer` changelog](https://github.com/LioQ
 ### Added
 
 - 🔄 Add `BatchRead`, `BatchWrite`, and `BatchProgress` for bounded-step PLY and SPZ reads and writes, including `GaussiansBatchReader` and `GaussiansBatchWriter` for unified models. [#34](https://github.com/LioQing/wgpu-3dgs-core/pull/34)
-- 📥 Add `GaussianStream`, `PlyGaussianStream`, and `GaussiansStream` to consume PLY Gaussians before the whole file is loaded; SPZ does not support streaming Gaussian delivery. [#34](https://github.com/LioQing/wgpu-3dgs-core/pull/34)
+- 📥 Add `GaussianStream`, `PlyGaussianStream`, and `GaussiansStream` to consume PLY Gaussians before the whole file is loaded, using `Iterator::next` or `next_batch` for caller-owned batches; SPZ does not support streaming Gaussian delivery. [#34](https://github.com/LioQing/wgpu-3dgs-core/pull/34)
 
 ### Breaking Changes
 

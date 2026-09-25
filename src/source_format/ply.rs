@@ -429,6 +429,7 @@ pub struct PlyGaussianStream<R: BufRead> {
     header: PlyHeader,
     read: usize,
     total: usize,
+    failed: bool,
 }
 
 impl<R: BufRead> PlyGaussianStream<R> {
@@ -441,12 +442,38 @@ impl<R: BufRead> PlyGaussianStream<R> {
             header,
             read: 0,
             total,
+            failed: false,
         })
     }
 }
 
+impl<R: BufRead> Iterator for PlyGaussianStream<R> {
+    type Item = io::Result<PlyGaussianPod>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.failed || self.read == self.total {
+            return None;
+        }
+
+        let result = match &self.header {
+            PlyHeader::Inria(..) => read_inria(&mut self.reader),
+            PlyHeader::Custom(header) => read_custom(&mut self.reader, header),
+        };
+        match result {
+            Ok(gaussian) => {
+                self.read += 1;
+                Some(Ok(gaussian))
+            }
+            Err(error) => {
+                self.failed = true;
+                Some(Err(error))
+            }
+        }
+    }
+}
+
 impl<R: BufRead> GaussianStream for PlyGaussianStream<R> {
-    type Item = PlyGaussianPod;
+    type Gaussian = PlyGaussianPod;
 
     fn total_gaussians(&self) -> usize {
         self.total
@@ -461,23 +488,6 @@ impl<R: BufRead> GaussianStream for PlyGaussianStream<R> {
             total_units: self.total,
             done: self.read == self.total,
         }
-    }
-
-    fn read_gaussians(
-        &mut self,
-        max_gaussians: NonZeroUsize,
-        out: &mut Vec<Self::Item>,
-    ) -> io::Result<usize> {
-        let count = max_gaussians.get().min(self.total - self.read);
-        for _ in 0..count {
-            let gaussian = match &self.header {
-                PlyHeader::Inria(..) => read_inria(&mut self.reader)?,
-                PlyHeader::Custom(header) => read_custom(&mut self.reader, header)?,
-            };
-            out.push(gaussian);
-            self.read += 1;
-        }
-        Ok(count)
     }
 }
 
@@ -504,7 +514,7 @@ impl<R: BufRead> BatchRead for PlyBatchReader<R> {
     }
 
     fn step(&mut self, max_items: NonZeroUsize) -> io::Result<BatchProgress> {
-        self.stream.read_gaussians(max_items, &mut self.gaussians)?;
+        self.stream.next_batch(max_items, &mut self.gaussians)?;
         Ok(self.stream.progress())
     }
 
