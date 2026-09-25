@@ -3,11 +3,10 @@ use glam::*;
 use wgpu::util::DeviceExt;
 
 use crate::{
-    BufferWrapper, DownloadBufferError, Gaussian, GaussianCov3dConfig, GaussianCov3dHalfConfig,
-    GaussianCov3dRotScaleConfig, GaussianCov3dSingleConfig, GaussianShConfig, GaussianShHalfConfig,
-    GaussianShNoneConfig, GaussianShNorm8Config, GaussianShSingleConfig,
-    GaussiansBufferTryFromBufferError, GaussiansBufferUpdateError, GaussiansBufferUpdateRangeError,
-    IterGaussian,
+    BufferWrapper, CovHalf, CovRotScale, CovSingle, DownloadBufferError, Gaussian,
+    GaussianCov3dConfig, GaussianShConfig, GaussiansBufferTryFromBufferError,
+    GaussiansBufferUpdateError, GaussiansBufferUpdateRangeError, IterGaussian, ShHalf, ShNone,
+    ShNorm8, ShSingle,
 };
 
 /// The Gaussians storage buffer.
@@ -265,13 +264,13 @@ pub trait GaussianPod:
     /// You may want to use [`GaussianPod::wesl_features`] most of the time instead.
     fn features() -> [(&'static str, bool); 7] {
         [
-            GaussianShSingleConfig::FEATURE,
-            GaussianShHalfConfig::FEATURE,
-            GaussianShNorm8Config::FEATURE,
-            GaussianShNoneConfig::FEATURE,
-            GaussianCov3dRotScaleConfig::FEATURE,
-            GaussianCov3dSingleConfig::FEATURE,
-            GaussianCov3dHalfConfig::FEATURE,
+            ShSingle::FEATURE,
+            ShHalf::FEATURE,
+            ShNorm8::FEATURE,
+            ShNone::FEATURE,
+            CovRotScale::FEATURE,
+            CovSingle::FEATURE,
+            CovHalf::FEATURE,
         ]
         .map(|name| {
             (
@@ -398,24 +397,24 @@ where
 macro_rules! gaussian_pod_layout {
     (sh = $sh:ident, cov3d = $cov3d:ident, padding_size = $padding:expr) => {
         paste::paste! {
-            impl sealed::Sealed for ([< GaussianSh $sh Config >], [< GaussianCov3d $cov3d Config >]) {}
+            impl sealed::Sealed for ([< Sh $sh >], [< Cov $cov3d >]) {}
 
-            impl GaussianPodLayout for ([< GaussianSh $sh Config >], [< GaussianCov3d $cov3d Config >]) {
+            impl GaussianPodLayout for ([< Sh $sh >], [< Cov $cov3d >]) {
                 type Padding = [f32; $padding];
             }
 
             #[doc = "Compatibility alias for a `PackedGaussian` layout."]
             #[deprecated(note = "Use `PackedGaussian<Sh..., Cov...>` with the corresponding configs instead. This will be removed in 0.10.")]
             pub type [< GaussianPodWithSh $sh Cov3d $cov3d Configs >] =
-                PackedGaussian<[< GaussianSh $sh Config >], [< GaussianCov3d $cov3d Config >]>;
+                PackedGaussian<[< Sh $sh >], [< Cov $cov3d >]>;
 
             const _: () = {
-                type G = PackedGaussian<[< GaussianSh $sh Config >], [< GaussianCov3d $cov3d Config >]>;
+                type G = PackedGaussian<[< Sh $sh >], [< Cov $cov3d >]>;
                 assert!(std::mem::offset_of!(G, pos) == 0);
                 assert!(std::mem::offset_of!(G, color) == 12);
                 assert!(std::mem::offset_of!(G, sh) == 16);
-                assert!(std::mem::offset_of!(G, cov3d) == 16 + std::mem::size_of::<<[< GaussianSh $sh Config >] as GaussianShConfig>::Field>());
-                assert!(std::mem::offset_of!(G, padding) == std::mem::offset_of!(G, cov3d) + std::mem::size_of::<<[< GaussianCov3d $cov3d Config >] as GaussianCov3dConfig>::Field>());
+                assert!(std::mem::offset_of!(G, cov3d) == 16 + std::mem::size_of::<<[< Sh $sh >] as GaussianShConfig>::Field>());
+                assert!(std::mem::offset_of!(G, padding) == std::mem::offset_of!(G, cov3d) + std::mem::size_of::<<[< Cov $cov3d >] as GaussianCov3dConfig>::Field>());
                 assert!(std::mem::size_of::<G>() == std::mem::offset_of!(G, padding) + $padding * 4);
                 assert!(std::mem::size_of::<G>() % 16 == 0);
             };
