@@ -1,4 +1,4 @@
-use std::{io::ErrorKind, num::NonZeroUsize};
+use std::{cell::Cell, io::ErrorKind, num::NonZeroUsize};
 
 use wgpu_3dgs_core::{
     BatchRead, BatchWrite, GaussianStream, Gaussians, GaussiansBatchReader, GaussiansBatchWriter,
@@ -85,6 +85,103 @@ fn test_ply_batch_when_finish_is_incomplete_should_return_error_and_round_trip()
 }
 
 #[test]
+fn test_ply_batch_writer_from_iter_should_pull_only_declared_count_in_steps() {
+    let original = given::ply_gaussians();
+    let polled = Cell::new(0);
+    let gaussians = original
+        .0
+        .iter()
+        .copied()
+        .map(|gaussian| {
+            polled.set(polled.get() + 1);
+            Ok(gaussian)
+        })
+        .chain(std::iter::once_with(|| panic!("extra item was pulled")));
+
+    let mut writer = PlyBatchWriter::from_iter(Vec::new(), original.len(), gaussians).unwrap();
+    assert_eq!(polled.get(), 0);
+    assert_eq!(writer.progress().total_units, original.len());
+    assert_eq!(writer.step(one()).unwrap().completed_units, 1);
+    assert_eq!(polled.get(), 1);
+    assert!(
+        writer
+            .step(NonZeroUsize::new(original.len()).unwrap())
+            .unwrap()
+            .done
+    );
+    assert_eq!(polled.get(), original.len());
+    assert!(writer.step(one()).unwrap().done);
+    let bytes = writer.finish().unwrap();
+    assert_eq!(
+        PlyGaussians::read_from(&mut bytes.as_slice()).unwrap(),
+        original
+    );
+}
+
+#[test]
+fn test_ply_batch_writer_from_iter_when_input_is_short_should_return_error() {
+    let original = given::ply_gaussians();
+    let mut writer = PlyBatchWriter::from_iter(
+        Vec::new(),
+        original.len(),
+        std::iter::once(Ok(original.0[0])),
+    )
+    .unwrap();
+
+    assert_eq!(
+        writer
+            .step(NonZeroUsize::new(original.len()).unwrap())
+            .unwrap_err()
+            .kind(),
+        ErrorKind::UnexpectedEof
+    );
+    assert_eq!(writer.progress().completed_units, 1);
+    assert!(!writer.progress().done);
+    assert_eq!(
+        writer.finish().unwrap_err().kind(),
+        ErrorKind::UnexpectedEof
+    );
+}
+
+#[test]
+fn test_ply_batch_writer_from_iter_when_item_fails_should_propagate_error() {
+    let original = given::ply_gaussians();
+    let gaussians = std::iter::once(Ok(original.0[0])).chain(std::iter::once(Err(
+        std::io::Error::new(ErrorKind::InvalidData, "bad Gaussian"),
+    )));
+    let mut writer = PlyBatchWriter::from_iter(Vec::new(), original.len(), gaussians).unwrap();
+
+    assert_eq!(
+        writer
+            .step(NonZeroUsize::new(original.len()).unwrap())
+            .unwrap_err()
+            .kind(),
+        ErrorKind::InvalidData
+    );
+    assert_eq!(writer.progress().completed_units, 1);
+    assert!(!writer.progress().done);
+}
+
+#[test]
+fn test_ply_batch_writer_from_iter_should_accept_a_ply_stream() {
+    let original = given::ply_gaussians();
+    let mut input = Vec::new();
+    original.write_to(&mut input).unwrap();
+    let stream = PlyGaussianStream::new(input.as_slice()).unwrap();
+    let mut writer =
+        PlyBatchWriter::from_iter(Vec::new(), stream.total_gaussians(), stream).unwrap();
+
+    while !writer.progress().done {
+        writer.step(one()).unwrap();
+    }
+    let output = writer.finish().unwrap();
+    assert_eq!(
+        PlyGaussians::read_from(&mut output.as_slice()).unwrap(),
+        original
+    );
+}
+
+#[test]
 fn test_spz_batch_when_versions_and_sh_degrees_vary_should_round_trip() {
     for version in 1..=3 {
         for degree in 0..=3 {
@@ -157,6 +254,22 @@ fn test_ply_batch_when_empty_should_be_already_done() {
     let reader = PlyBatchReader::new(bytes.as_slice()).unwrap();
     assert!(BatchRead::progress(&reader).done);
     assert_eq!(reader.finish().unwrap(), original);
+}
+
+#[test]
+fn test_ply_batch_writer_from_iter_when_count_is_zero_should_not_poll_iterator() {
+    let writer = PlyBatchWriter::from_iter(
+        Vec::new(),
+        0,
+        std::iter::once_with(|| panic!("iterator was polled")),
+    )
+    .unwrap();
+    assert!(writer.progress().done);
+    let bytes = writer.finish().unwrap();
+    assert_eq!(
+        PlyGaussians::read_from(&mut bytes.as_slice()).unwrap(),
+        PlyGaussians(Vec::new())
+    );
 }
 
 #[test]

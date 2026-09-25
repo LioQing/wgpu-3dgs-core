@@ -7,9 +7,9 @@ use glam::*;
 
 use crate::{
     BatchProgress, BatchRead, BatchWrite, GaussianStream, PlyBatchReader, PlyBatchWriter,
-    PlyGaussianPod, PlyGaussianStream, PlyGaussians, SpzBatchReader, SpzBatchWriter, SpzGaussian,
-    SpzGaussianPosition, SpzGaussianPositionRef, SpzGaussianRef, SpzGaussianRotation,
-    SpzGaussianRotationRef, SpzGaussianSh, SpzGaussians, SpzGaussiansHeader,
+    PlyGaussianPod, PlyGaussianStream, PlyGaussians, PlyGaussiansBatchIter, SpzBatchReader,
+    SpzBatchWriter, SpzGaussian, SpzGaussianPosition, SpzGaussianPositionRef, SpzGaussianRef,
+    SpzGaussianRotation, SpzGaussianRotationRef, SpzGaussianSh, SpzGaussians, SpzGaussiansHeader,
 };
 
 /// A trait of representing an iterable collection of [`Gaussian`].
@@ -560,7 +560,7 @@ impl<R: BufRead> BatchRead for GaussiansBatchReader<R> {
 
 /// Whole-model batch writer for the unified Gaussian representation.
 pub enum GaussiansBatchWriter<'a, W: Write> {
-    Ply(PlyBatchWriter<'a, W>),
+    Ply(PlyBatchWriter<W, PlyGaussiansBatchIter<'a>>),
     Spz(SpzBatchWriter<'a, W>),
 }
 

@@ -12,7 +12,7 @@ use async_trait::async_trait;
 /// A trait to enable any wrapper to act like a [`wgpu::Buffer`].
 ///
 /// This trait provides methods to download the buffer data asynchronously. However, if you want to
-/// override the async methods, you should use the [`async_trait`] crate to implement the trait.
+/// override the async methods, you should use the [`async_trait`](https://crates.io/crates/async-trait) crate to implement the trait.
 #[async_trait]
 pub trait BufferWrapper: Into<wgpu::Buffer> {
     /// The default usages.
