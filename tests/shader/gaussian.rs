@@ -1,9 +1,7 @@
 use pollster::FutureExt;
 use wgpu_3dgs_core::{
-    BufferWrapper, ComputeBundleBuilder, GaussianCov3dConfig, GaussianPod,
-    GaussianPodWithShHalfCov3dSingleConfigs, GaussianPodWithShNorm8Cov3dSingleConfigs,
-    GaussianPodWithShSingleCov3dHalfConfigs, GaussianPodWithShSingleCov3dRotScaleConfigs,
-    GaussianPodWithShSingleCov3dSingleConfigs, GaussiansBuffer, glam::*,
+    BufferWrapper, ComputeBundleBuilder, CovHalf, CovRotScale, CovSingle, GaussianCov3dConfig,
+    GaussianPod, GaussiansBuffer, PackedGaussian, ShHalf, ShNorm8, ShSingle, glam::*,
 };
 
 use crate::{
@@ -161,7 +159,7 @@ fn dispatch_test<G: GaussianPod>(ctx: &TestContext, buffer: &GaussiansBuffer<G>)
 fn test_gaussian_unpack_color_should_return_correct_value() {
     let ctx = TestContext::new();
 
-    type G = GaussianPodWithShSingleCov3dSingleConfigs;
+    type G = PackedGaussian<ShSingle, CovSingle>;
 
     let gaussian = given::gaussian();
     let gaussians = vec![gaussian];
@@ -187,7 +185,7 @@ fn test_gaussian_unpack_color_should_return_correct_value() {
 fn test_gaussian_unpack_sh_when_config_is_single_should_return_correct_value() {
     let ctx = TestContext::new();
 
-    type G = GaussianPodWithShSingleCov3dSingleConfigs;
+    type G = PackedGaussian<ShSingle, CovSingle>;
 
     let gaussian = given::gaussian();
     let gaussians = vec![gaussian];
@@ -216,7 +214,7 @@ fn test_gaussian_unpack_sh_when_config_is_single_should_return_correct_value() {
 fn test_gaussian_unpack_sh_when_config_is_half_should_return_correct_value() {
     let ctx = TestContext::new();
 
-    type G = GaussianPodWithShHalfCov3dSingleConfigs;
+    type G = PackedGaussian<ShHalf, CovSingle>;
 
     let gaussian = given::gaussian();
     let gaussians = vec![gaussian];
@@ -245,7 +243,7 @@ fn test_gaussian_unpack_sh_when_config_is_half_should_return_correct_value() {
 fn test_gaussian_unpack_sh_when_config_is_norm_8_should_return_correct_value() {
     let ctx = TestContext::new();
 
-    type G = GaussianPodWithShNorm8Cov3dSingleConfigs;
+    type G = PackedGaussian<ShNorm8, CovSingle>;
 
     let gaussian = given::gaussian();
     let gaussians = vec![gaussian];
@@ -274,7 +272,7 @@ fn test_gaussian_unpack_sh_when_config_is_norm_8_should_return_correct_value() {
 fn test_gaussian_unpack_cov3d_when_config_is_rot_scale_should_return_correct_value() {
     let ctx = TestContext::new();
 
-    type G = GaussianPodWithShSingleCov3dRotScaleConfigs;
+    type G = PackedGaussian<ShSingle, CovRotScale>;
 
     let gaussian = given::gaussian();
     let gaussians = vec![gaussian];
@@ -286,7 +284,7 @@ fn test_gaussian_unpack_cov3d_when_config_is_rot_scale_should_return_correct_val
 
     let output = dispatch_test(&ctx, &buffer);
 
-    let expected_cov3d = <GaussianPodWithShSingleCov3dSingleConfigs as wgpu_3dgs_core::GaussianPod>::Cov3dConfig::from_rot_scale(
+    let expected_cov3d = <PackedGaussian<ShSingle, CovSingle> as wgpu_3dgs_core::GaussianPod>::Cov3dConfig::from_rot_scale(
         gaussian.rot,
         gaussian.scale,
     );
@@ -306,7 +304,7 @@ fn test_gaussian_unpack_cov3d_when_config_is_rot_scale_should_return_correct_val
 fn test_gaussian_unpack_cov3d_when_config_is_single_should_return_correct_value() {
     let ctx = TestContext::new();
 
-    type G = GaussianPodWithShSingleCov3dSingleConfigs;
+    type G = PackedGaussian<ShSingle, CovSingle>;
 
     let gaussian = given::gaussian();
     let gaussians = vec![gaussian];
@@ -318,7 +316,7 @@ fn test_gaussian_unpack_cov3d_when_config_is_single_should_return_correct_value(
 
     let output = dispatch_test(&ctx, &buffer);
 
-    let expected_cov3d = <GaussianPodWithShSingleCov3dSingleConfigs as wgpu_3dgs_core::GaussianPod>::Cov3dConfig::from_rot_scale(
+    let expected_cov3d = <PackedGaussian<ShSingle, CovSingle> as wgpu_3dgs_core::GaussianPod>::Cov3dConfig::from_rot_scale(
         gaussian.rot,
         gaussian.scale,
     );
@@ -338,7 +336,7 @@ fn test_gaussian_unpack_cov3d_when_config_is_single_should_return_correct_value(
 fn test_gaussian_unpack_cov3d_when_config_is_half_should_return_correct_value() {
     let ctx = TestContext::new();
 
-    type G = GaussianPodWithShSingleCov3dHalfConfigs;
+    type G = PackedGaussian<ShSingle, CovHalf>;
 
     let gaussian = given::gaussian();
     let gaussians = vec![gaussian];
@@ -350,7 +348,7 @@ fn test_gaussian_unpack_cov3d_when_config_is_half_should_return_correct_value() 
 
     let output = dispatch_test(&ctx, &buffer);
 
-    let expected_cov3d = <GaussianPodWithShSingleCov3dSingleConfigs as wgpu_3dgs_core::GaussianPod>::Cov3dConfig::from_rot_scale(
+    let expected_cov3d = <PackedGaussian<ShSingle, CovSingle> as wgpu_3dgs_core::GaussianPod>::Cov3dConfig::from_rot_scale(
         gaussian.rot,
         gaussian.scale,
     );

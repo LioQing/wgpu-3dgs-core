@@ -4,13 +4,13 @@ use half::f16;
 /// The spherical harmonics configuration of Gaussian.
 ///
 /// Currently, there are four configurations:
-/// - Single precision [`GaussianShSingleConfig`](crate::GaussianShSingleConfig)
+/// - Single precision [`ShSingle`]
 ///     - Format: 15 * [`Vec3`]
-/// - Half precision [`GaussianShHalfConfig`](crate::GaussianShHalfConfig)
+/// - Half precision [`ShHalf`]
 ///     - Format: (15 * 3 + 1) * [`struct@f16`]
-/// - 8 bit normalized [`GaussianShNorm8Config`](crate::GaussianShNorm8Config)
+/// - 8 bit normalized [`ShNorm8`]
 ///     - Format: (15 * 3 + 3) * [`prim@i8`]
-/// - None [`GaussianShNoneConfig`](crate::GaussianShNoneConfig)
+/// - None [`ShNone`]
 ///    - Cannot be converted back to SH
 pub trait GaussianShConfig {
     /// The feature name of the configuration.
@@ -28,10 +28,11 @@ pub trait GaussianShConfig {
     fn to_sh(field: &Self::Field) -> [Vec3; 15];
 }
 
-/// The single precision SH configuration of Gaussian.
-pub struct GaussianShSingleConfig;
+/// Single-precision SH coefficients.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ShSingle;
 
-impl GaussianShConfig for GaussianShSingleConfig {
+impl GaussianShConfig for ShSingle {
     const FEATURE: &'static str = "sh_single";
 
     type Field = [Vec3; 15];
@@ -45,10 +46,11 @@ impl GaussianShConfig for GaussianShSingleConfig {
     }
 }
 
-/// The half precision SH configuration of Gaussian.
-pub struct GaussianShHalfConfig;
+/// Half-precision SH coefficients.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ShHalf;
 
-impl GaussianShConfig for GaussianShHalfConfig {
+impl GaussianShConfig for ShHalf {
     const FEATURE: &'static str = "sh_half";
 
     type Field = [f16; 3 * 15 + 1];
@@ -84,9 +86,10 @@ impl GaussianShConfig for GaussianShHalfConfig {
 /// The 8 bit signed normalized SH configuration of Gaussian.
 ///
 /// This is by the fact that SH coefficients are within \[-1, 1\].
-pub struct GaussianShNorm8Config;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ShNorm8;
 
-impl GaussianShConfig for GaussianShNorm8Config {
+impl GaussianShConfig for ShNorm8 {
     const FEATURE: &'static str = "sh_norm8";
 
     type Field = [i8; 3 * 15 + 3];
@@ -123,9 +126,10 @@ impl GaussianShConfig for GaussianShNorm8Config {
 /// The none SH configuration of Gaussian.
 ///
 /// Calling [`GaussianShConfig::to_sh`] will panic on this config.
-pub struct GaussianShNoneConfig;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ShNone;
 
-impl GaussianShConfig for GaussianShNoneConfig {
+impl GaussianShConfig for ShNone {
     const FEATURE: &'static str = "sh_none";
 
     type Field = ();
@@ -140,12 +144,12 @@ impl GaussianShConfig for GaussianShNoneConfig {
 /// The covariance 3D configuration of Gaussian.
 ///
 /// Currently, there are three configurations:
-/// - Rotation and scale [`GaussianCov3dRotScaleConfig`](crate::GaussianCov3dRotScaleConfig)
+/// - Rotation and scale [`CovRotScale`]
 ///     - Format: [`Quat`] + [`Vec3`]
-/// - Single precision [`GaussianCov3dSingleConfig`](crate::GaussianCov3dSingleConfig)
+/// - Single precision [`CovSingle`]
 ///     - Format: 6 * [`prim@f32`]
 ///     - Cannot be converted back to rotation and scale
-/// - Half precision [`GaussianCov3dHalfConfig`](crate::GaussianCov3dHalfConfig)
+/// - Half precision [`CovHalf`]
 ///     - Format: 6 * [`struct@f16`]
 ///     - Cannot be converted back to rotation and scale
 pub trait GaussianCov3dConfig {
@@ -167,9 +171,10 @@ pub trait GaussianCov3dConfig {
 /// The unconverted rotation and scale covariance 3D configuration of Gaussian.
 ///
 /// Instead of storing the covariance matrix, this config stores the rotation and scale directly.
-pub struct GaussianCov3dRotScaleConfig;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CovRotScale;
 
-impl GaussianCov3dConfig for GaussianCov3dRotScaleConfig {
+impl GaussianCov3dConfig for CovRotScale {
     const FEATURE: &'static str = "cov3d_rot_scale";
 
     type Field = [f32; 7]; // (rot: [f32; 4], scale: [f32; 3])
@@ -189,9 +194,10 @@ impl GaussianCov3dConfig for GaussianCov3dRotScaleConfig {
 /// The single precision covariance 3D configuration of Gaussian.
 ///
 /// Calling [`GaussianCov3dConfig::to_rot_scale`] will panic on this config.
-pub struct GaussianCov3dSingleConfig;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CovSingle;
 
-impl GaussianCov3dConfig for GaussianCov3dSingleConfig {
+impl GaussianCov3dConfig for CovSingle {
     const FEATURE: &'static str = "cov3d_single";
 
     type Field = [f32; 6];
@@ -220,18 +226,60 @@ impl GaussianCov3dConfig for GaussianCov3dSingleConfig {
 /// The half precision covariance 3D configuration of Gaussian.
 ///
 /// Calling [`GaussianCov3dConfig::to_rot_scale`] will panic on this config.
-pub struct GaussianCov3dHalfConfig;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CovHalf;
 
-impl GaussianCov3dConfig for GaussianCov3dHalfConfig {
+impl GaussianCov3dConfig for CovHalf {
     const FEATURE: &'static str = "cov3d_half";
 
     type Field = [f16; 6];
 
     fn from_rot_scale(rot: Quat, scale: Vec3) -> Self::Field {
-        GaussianCov3dSingleConfig::from_rot_scale(rot, scale).map(f16::from_f32)
+        CovSingle::from_rot_scale(rot, scale).map(f16::from_f32)
     }
 
     fn to_rot_scale(_field: &Self::Field) -> (Quat, Vec3) {
         panic!("Cannot convert from Cov3d Half configuration")
+    }
+}
+
+/// Compatibility alias for [`CovHalf`].
+#[deprecated(note = "Use `CovHalf` instead. This will be removed in 0.10.")]
+pub use CovHalf as GaussianCov3dHalfConfig;
+/// Compatibility alias for [`CovRotScale`].
+#[deprecated(note = "Use `CovRotScale` instead. This will be removed in 0.10.")]
+pub use CovRotScale as GaussianCov3dRotScaleConfig;
+/// Compatibility alias for [`CovSingle`].
+#[deprecated(note = "Use `CovSingle` instead. This will be removed in 0.10.")]
+pub use CovSingle as GaussianCov3dSingleConfig;
+/// Compatibility alias for [`ShHalf`].
+#[deprecated(note = "Use `ShHalf` instead. This will be removed in 0.10.")]
+pub use ShHalf as GaussianShHalfConfig;
+/// Compatibility alias for [`ShNone`].
+#[deprecated(note = "Use `ShNone` instead. This will be removed in 0.10.")]
+pub use ShNone as GaussianShNoneConfig;
+/// Compatibility alias for [`ShNorm8`].
+#[deprecated(note = "Use `ShNorm8` instead. This will be removed in 0.10.")]
+pub use ShNorm8 as GaussianShNorm8Config;
+/// Compatibility alias for [`ShSingle`].
+#[deprecated(note = "Use `ShSingle` instead. This will be removed in 0.10.")]
+pub use ShSingle as GaussianShSingleConfig;
+
+#[cfg(test)]
+#[allow(deprecated)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn legacy_names_remain_usable_as_types_and_values() {
+        fn same_type<T>(_: T, _: T) {}
+
+        same_type(ShSingle, GaussianShSingleConfig);
+        same_type(ShHalf, GaussianShHalfConfig);
+        same_type(ShNorm8, GaussianShNorm8Config);
+        same_type(ShNone, GaussianShNoneConfig);
+        same_type(CovRotScale, GaussianCov3dRotScaleConfig);
+        same_type(CovSingle, GaussianCov3dSingleConfig);
+        same_type(CovHalf, GaussianCov3dHalfConfig);
     }
 }

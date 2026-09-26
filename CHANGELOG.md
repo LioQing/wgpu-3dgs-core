@@ -9,6 +9,10 @@ Please also check out the [`wgpu-3dgs-viewer` changelog](https://github.com/LioQ
 - 🔄 Add `BatchRead`, `BatchWrite`, and `BatchProgress` for bounded-step PLY and SPZ reads and writes, including `GaussiansBatchReader` and `GaussiansBatchWriter` for unified models. [#34](https://github.com/LioQing/wgpu-3dgs-core/pull/34) [#36](https://github.com/LioQing/wgpu-3dgs-core/pull/36)
 - 📥 Add `GaussianStream`, `PlyGaussianStream`, and `GaussiansStream` to consume PLY Gaussians before the whole file is loaded, using `Iterator::next` or `next_batch` for caller-owned batches, SPZ does not support streaming Gaussian delivery. [#34](https://github.com/LioQing/wgpu-3dgs-core/pull/34) [#36](https://github.com/LioQing/wgpu-3dgs-core/pull/36)
 
+### Changed
+
+- 🧩 Update `GaussianPodWithSh...Cov3d...Configs` to `PackedGaussian<Sh..., Cov...>` so it is more ergonomic now. The old names remain available but are deprecated, and are planned to be removed in version 0.10. [#38](https://github.com/LioQing/wgpu-3dgs-core/pull/38)
+
 ### Breaking Changes
 
 - Update `Gaussian::color` to use `Vec4` with floating-point linear RGB and opacity instead of `U8Vec4`. [#35](https://github.com/LioQing/wgpu-3dgs-core/pull/35)

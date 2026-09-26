@@ -3,11 +3,10 @@ use glam::*;
 use wgpu::util::DeviceExt;
 
 use crate::{
-    BufferWrapper, DownloadBufferError, Gaussian, GaussianCov3dConfig, GaussianCov3dHalfConfig,
-    GaussianCov3dRotScaleConfig, GaussianCov3dSingleConfig, GaussianShConfig, GaussianShHalfConfig,
-    GaussianShNoneConfig, GaussianShNorm8Config, GaussianShSingleConfig,
-    GaussiansBufferTryFromBufferError, GaussiansBufferUpdateError, GaussiansBufferUpdateRangeError,
-    IterGaussian,
+    BufferWrapper, CovHalf, CovRotScale, CovSingle, DownloadBufferError, Gaussian,
+    GaussianCov3dConfig, GaussianShConfig, GaussiansBufferTryFromBufferError,
+    GaussiansBufferUpdateError, GaussiansBufferUpdateRangeError, IterGaussian, ShHalf, ShNone,
+    ShNorm8, ShSingle,
 };
 
 /// The Gaussians storage buffer.
@@ -230,12 +229,8 @@ impl<G: GaussianPod> TryFrom<wgpu::Buffer> for GaussiansBuffer<G> {
 
 /// The Gaussian POD trait.
 ///
-/// The number of configurations for this is the combination of all the [`GaussianShConfig`]
-/// and [`GaussianCov3dConfig`].
-///
-/// You can use the corresponding config by using the name in the following format:
-/// `GaussianPodWithSh{ShConfig}Cov3d{Cov3dConfig}Configs`, e.g.
-/// [`GaussianPodWithShSingleCov3dRotScaleConfigs`].
+/// Use [`PackedGaussian`] with an SH and covariance config to select a layout, e.g.
+/// `PackedGaussian<ShHalf, CovHalf>`.
 pub trait GaussianPod:
     for<'a> From<&'a Gaussian>
     + Into<Gaussian>
@@ -269,13 +264,13 @@ pub trait GaussianPod:
     /// You may want to use [`GaussianPod::wesl_features`] most of the time instead.
     fn features() -> [(&'static str, bool); 7] {
         [
-            GaussianShSingleConfig::FEATURE,
-            GaussianShHalfConfig::FEATURE,
-            GaussianShNorm8Config::FEATURE,
-            GaussianShNoneConfig::FEATURE,
-            GaussianCov3dRotScaleConfig::FEATURE,
-            GaussianCov3dSingleConfig::FEATURE,
-            GaussianCov3dHalfConfig::FEATURE,
+            ShSingle::FEATURE,
+            ShHalf::FEATURE,
+            ShNorm8::FEATURE,
+            ShNone::FEATURE,
+            CovRotScale::FEATURE,
+            CovSingle::FEATURE,
+            CovHalf::FEATURE,
         ]
         .map(|name| {
             (
@@ -297,98 +292,153 @@ pub trait GaussianPod:
     }
 }
 
-/// Macro to create the POD representation of Gaussian given the configurations.
-macro_rules! gaussian_pod {
+mod sealed {
+    /// This trait exists to avoid other crates from implementing
+    /// [`GaussianPodLayout`](super::GaussianPodLayout).
+    pub trait Sealed {}
+}
+
+/// Supported combinations of SH and covariance encoding, with explicit GPU stride padding.
+///
+/// Only the combinations implemented by this crate can be used as [`PackedGaussian`] layouts.
+pub trait GaussianPodLayout: sealed::Sealed {
+    type Padding: bytemuck::Pod + bytemuck::Zeroable + std::fmt::Debug + Copy + PartialEq;
+}
+
+/// A GPU-ready Gaussian selected by its SH and covariance encodings.
+///
+/// For example, `PackedGaussian<ShHalf, CovHalf>`. The padding is part of the
+/// storage-buffer stride and must match the WESL `Gaussian` struct.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PackedGaussian<Sh: GaussianShConfig, Cov: GaussianCov3dConfig>
+where
+    (Sh, Cov): GaussianPodLayout,
+{
+    pub pos: Vec3,
+    pub color: U8Vec4,
+    pub sh: Sh::Field,
+    pub cov3d: Cov::Field,
+    pub padding: <(Sh, Cov) as GaussianPodLayout>::Padding,
+}
+
+// SAFETY: Every field is Zeroable. Only the sealed combinations below have a layout.
+unsafe impl<Sh, Cov> bytemuck::Zeroable for PackedGaussian<Sh, Cov>
+where
+    Sh: GaussianShConfig + Copy,
+    Cov: GaussianCov3dConfig + Copy,
+    (Sh, Cov): GaussianPodLayout,
+{
+}
+
+// SAFETY: The fields are Pod, and the size/offset assertions for every sealed
+// combination below guarantee that repr(C) introduces no implicit padding.
+unsafe impl<Sh, Cov> bytemuck::Pod for PackedGaussian<Sh, Cov>
+where
+    Sh: GaussianShConfig + Copy + 'static,
+    Cov: GaussianCov3dConfig + Copy + 'static,
+    (Sh, Cov): GaussianPodLayout,
+{
+}
+
+impl<Sh, Cov> From<&Gaussian> for PackedGaussian<Sh, Cov>
+where
+    Sh: GaussianShConfig,
+    Cov: GaussianCov3dConfig,
+    (Sh, Cov): GaussianPodLayout,
+{
+    fn from(gaussian: &Gaussian) -> Self {
+        Self {
+            pos: gaussian.pos,
+            color: (gaussian.color * 255.0)
+                .round()
+                .clamp(Vec4::ZERO, Vec4::splat(255.0))
+                .as_u8vec4(),
+            sh: Sh::from_sh(&gaussian.sh),
+            cov3d: Cov::from_rot_scale(gaussian.rot, gaussian.scale),
+            padding: bytemuck::Zeroable::zeroed(),
+        }
+    }
+}
+
+impl<Sh, Cov> From<PackedGaussian<Sh, Cov>> for Gaussian
+where
+    Sh: GaussianShConfig,
+    Cov: GaussianCov3dConfig,
+    (Sh, Cov): GaussianPodLayout,
+{
+    fn from(pod: PackedGaussian<Sh, Cov>) -> Self {
+        let (rot, scale) = Cov::to_rot_scale(&pod.cov3d);
+        Self {
+            rot,
+            pos: pod.pos,
+            color: pod.color.as_vec4() / 255.0,
+            sh: Sh::to_sh(&pod.sh),
+            scale,
+        }
+    }
+}
+
+impl<Sh, Cov> GaussianPod for PackedGaussian<Sh, Cov>
+where
+    Sh: GaussianShConfig + std::fmt::Debug + Copy + PartialEq + Send + Sync + 'static,
+    Cov: GaussianCov3dConfig + std::fmt::Debug + Copy + PartialEq + Send + Sync + 'static,
+    Sh::Field: std::fmt::Debug + PartialEq + Send + Sync,
+    Cov::Field: std::fmt::Debug + PartialEq + Send + Sync,
+    (Sh, Cov): GaussianPodLayout,
+    <(Sh, Cov) as GaussianPodLayout>::Padding: Send + Sync,
+{
+    type ShConfig = Sh;
+    type Cov3dConfig = Cov;
+}
+
+// Preserve the old public names as aliases, only one generic POD definition is needed.
+// TODO: Remove this old name in version 0.10.
+macro_rules! gaussian_pod_layout {
     (sh = $sh:ident, cov3d = $cov3d:ident, padding_size = $padding:expr) => {
         paste::paste! {
-            #[repr(C)]
-            #[derive(Debug, Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
-            pub struct [< GaussianPodWith Sh $sh Cov3d $cov3d Configs >] {
-                pub pos: Vec3,
-                pub color: U8Vec4,
-                pub sh: <[< GaussianSh $sh Config >] as GaussianShConfig>::Field,
-                pub cov3d: <[< GaussianCov3d $cov3d Config >] as GaussianCov3dConfig>::Field,
-                pub padding: [f32; $padding],
+            impl sealed::Sealed for ([< Sh $sh >], [< Cov $cov3d >]) {}
+
+            impl GaussianPodLayout for ([< Sh $sh >], [< Cov $cov3d >]) {
+                type Padding = [f32; $padding];
             }
 
-            impl From<&Gaussian> for [< GaussianPodWith Sh $sh Cov3d $cov3d Configs >] {
-                fn from(gaussian: &Gaussian) -> Self {
-                    // Covariance
-                    let cov3d = <[< GaussianCov3d $cov3d Config >]>::from_rot_scale(
-                        gaussian.rot,
-                        gaussian.scale,
-                    );
+            #[doc = "Compatibility alias for a `PackedGaussian` layout."]
+            #[deprecated(note = "Use `PackedGaussian<Sh..., Cov...>` with the corresponding configs instead. This will be removed in 0.10.")]
+            pub type [< GaussianPodWithSh $sh Cov3d $cov3d Configs >] =
+                PackedGaussian<[< Sh $sh >], [< Cov $cov3d >]>;
 
-                    // Color
-                    let color = (gaussian.color * 255.0)
-                        .round()
-                        .clamp(Vec4::ZERO, Vec4::splat(255.0))
-                        .as_u8vec4();
-
-                    // Spherical harmonics
-                    let sh = [< GaussianSh $sh Config >]::from_sh(&gaussian.sh);
-
-                    // Position
-                    let pos = gaussian.pos;
-
-                    Self {
-                        pos,
-                        color,
-                        sh,
-                        cov3d,
-                        padding: [0.0; $padding],
-                    }
-                }
-            }
-
-            impl From<[< GaussianPodWith Sh $sh Cov3d $cov3d Configs >]> for Gaussian {
-                fn from(pod: [< GaussianPodWith Sh $sh Cov3d $cov3d Configs >]) -> Self {
-                    // Position
-                    let pos = pod.pos;
-
-                    // Spherical harmonics
-                    let sh = [< GaussianSh $sh Config >]::to_sh(&pod.sh);
-
-                    // Color
-                    let color = pod.color.as_vec4() / 255.0;
-
-                    // Rotation
-                    let (rot, scale) = <[< GaussianCov3d $cov3d Config >]>::to_rot_scale(&pod.cov3d);
-
-                    Self {
-                        rot,
-                        pos,
-                        color,
-                        sh,
-                        scale,
-                    }
-                }
-            }
-
-            impl GaussianPod for [< GaussianPodWith Sh $sh Cov3d $cov3d Configs >] {
-                type ShConfig = [< GaussianSh $sh Config >];
-                type Cov3dConfig = [< GaussianCov3d $cov3d Config >];
-            }
+            const _: () = {
+                type G = PackedGaussian<[< Sh $sh >], [< Cov $cov3d >]>;
+                assert!(std::mem::offset_of!(G, pos) == 0);
+                assert!(std::mem::offset_of!(G, color) == 12);
+                assert!(std::mem::offset_of!(G, sh) == 16);
+                assert!(std::mem::offset_of!(G, cov3d) == 16 + std::mem::size_of::<<[< Sh $sh >] as GaussianShConfig>::Field>());
+                assert!(std::mem::offset_of!(G, padding) == std::mem::offset_of!(G, cov3d) + std::mem::size_of::<<[< Cov $cov3d >] as GaussianCov3dConfig>::Field>());
+                assert!(std::mem::size_of::<G>() == std::mem::offset_of!(G, padding) + $padding * 4);
+                assert!(std::mem::size_of::<G>() % 16 == 0);
+            };
         }
     };
 }
 
-gaussian_pod!(sh = Single, cov3d = RotScale, padding_size = 0);
-gaussian_pod!(sh = Single, cov3d = Single, padding_size = 1);
-gaussian_pod!(sh = Single, cov3d = Half, padding_size = 0);
-gaussian_pod!(sh = Half, cov3d = RotScale, padding_size = 2);
-gaussian_pod!(sh = Half, cov3d = Single, padding_size = 3);
-gaussian_pod!(sh = Half, cov3d = Half, padding_size = 2);
-gaussian_pod!(sh = Norm8, cov3d = RotScale, padding_size = 1);
-gaussian_pod!(sh = Norm8, cov3d = Single, padding_size = 2);
-gaussian_pod!(sh = Norm8, cov3d = Half, padding_size = 1);
-gaussian_pod!(sh = None, cov3d = RotScale, padding_size = 1);
-gaussian_pod!(sh = None, cov3d = Single, padding_size = 2);
-gaussian_pod!(sh = None, cov3d = Half, padding_size = 1);
+gaussian_pod_layout!(sh = Single, cov3d = RotScale, padding_size = 0);
+gaussian_pod_layout!(sh = Single, cov3d = Single, padding_size = 1);
+gaussian_pod_layout!(sh = Single, cov3d = Half, padding_size = 0);
+gaussian_pod_layout!(sh = Half, cov3d = RotScale, padding_size = 2);
+gaussian_pod_layout!(sh = Half, cov3d = Single, padding_size = 3);
+gaussian_pod_layout!(sh = Half, cov3d = Half, padding_size = 2);
+gaussian_pod_layout!(sh = Norm8, cov3d = RotScale, padding_size = 1);
+gaussian_pod_layout!(sh = Norm8, cov3d = Single, padding_size = 2);
+gaussian_pod_layout!(sh = Norm8, cov3d = Half, padding_size = 1);
+gaussian_pod_layout!(sh = None, cov3d = RotScale, padding_size = 1);
+gaussian_pod_layout!(sh = None, cov3d = Single, padding_size = 2);
+gaussian_pod_layout!(sh = None, cov3d = Half, padding_size = 1);
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{CovHalf, CovRotScale, CovSingle, ShHalf, ShNone, ShNorm8, ShSingle};
 
     macro_rules! test_pod_from_gaussian {
         ($name:ident, $pod_type:ty, true) => {
@@ -396,7 +446,7 @@ mod tests {
                 #[test]
                 #[should_panic]
                 fn [<test_ $name _into_gaussian_should_panic>]() {
-                    let pod = $pod_type::from_gaussian(&Gaussian {
+                    let pod = <$pod_type>::from_gaussian(&Gaussian {
                         rot: Quat::from_xyzw(0.0, 0.0, 0.0, 1.0),
                         pos: Vec3::new(1.0, 2.0, 3.0),
                         color: Vec4::new(255.0, 128.0, 64.0, 32.0) / 255.0,
@@ -412,7 +462,7 @@ mod tests {
             paste::paste! {
                 #[test]
                 fn [<test_ $name _into_gaussian_should_equal_original_pod>]() {
-                    let pod = $pod_type::from_gaussian(&Gaussian {
+                    let pod = <$pod_type>::from_gaussian(&Gaussian {
                         rot: Quat::from_xyzw(0.0, 0.0, 0.0, 1.0),
                         pos: Vec3::new(1.0, 2.0, 3.0),
                         color: Vec4::new(255.0, 128.0, 64.0, 32.0) / 255.0,
@@ -453,7 +503,7 @@ mod tests {
                         scale: Vec3::new(1.0, 2.0, 3.0),
                     };
 
-                    let pod = $pod_type::from_gaussian(&gaussian);
+                    let pod = <$pod_type>::from_gaussian(&gaussian);
 
                     assert_eq!(gaussian.pos, pod.pos);
                     assert_eq!(gaussian.color, pod.color.as_vec4() / 255.0);
@@ -482,7 +532,7 @@ mod tests {
                         scale: Vec3::ONE,
                     };
 
-                    let pod = $pod_type::from_gaussian(&gaussian);
+                    let pod = <$pod_type>::from_gaussian(&gaussian);
 
                     assert_eq!(pod.color, U8Vec4::new(0, 255, 128, 31));
                 }
@@ -529,17 +579,67 @@ mod tests {
     mod pod {
         use super::*;
 
-        test_pod!(single_rotscale, GaussianPodWithShSingleCov3dRotScaleConfigs, false);
-        test_pod!(single_single, GaussianPodWithShSingleCov3dSingleConfigs, true);
-        test_pod!(single_half, GaussianPodWithShSingleCov3dHalfConfigs, true);
-        test_pod!(half_rotscale, GaussianPodWithShHalfCov3dRotScaleConfigs, false);
-        test_pod!(test_half_single, GaussianPodWithShHalfCov3dSingleConfigs, true);
-        test_pod!(test_half_half, GaussianPodWithShHalfCov3dHalfConfigs, true);
-        test_pod!(norm8_rotscale, GaussianPodWithShNorm8Cov3dRotScaleConfigs, false);
-        test_pod!(norm8_single, GaussianPodWithShNorm8Cov3dSingleConfigs, true);
-        test_pod!(norm8_half, GaussianPodWithShNorm8Cov3dHalfConfigs, true);
-        test_pod!(none_rotscale, GaussianPodWithShNoneCov3dRotScaleConfigs, true);
-        test_pod!(none_single, GaussianPodWithShNoneCov3dSingleConfigs, true);
-        test_pod!(none_half, GaussianPodWithShNoneCov3dHalfConfigs, true);
+        test_pod!(single_rotscale, PackedGaussian<ShSingle, CovRotScale>, false);
+        test_pod!(single_single, PackedGaussian<ShSingle, CovSingle>, true);
+        test_pod!(single_half, PackedGaussian<ShSingle, CovHalf>, true);
+        test_pod!(half_rotscale, PackedGaussian<ShHalf, CovRotScale>, false);
+        test_pod!(test_half_single, PackedGaussian<ShHalf, CovSingle>, true);
+        test_pod!(test_half_half, PackedGaussian<ShHalf, CovHalf>, true);
+        test_pod!(norm8_rotscale, PackedGaussian<ShNorm8, CovRotScale>, false);
+        test_pod!(norm8_single, PackedGaussian<ShNorm8, CovSingle>, true);
+        test_pod!(norm8_half, PackedGaussian<ShNorm8, CovHalf>, true);
+        test_pod!(none_rotscale, PackedGaussian<ShNone, CovRotScale>, true);
+        test_pod!(none_single, PackedGaussian<ShNone, CovSingle>, true);
+        test_pod!(none_half, PackedGaussian<ShNone, CovHalf>, true);
+    }
+
+    #[test]
+    #[allow(deprecated)] // Verify the old public name still resolves to the generic layout.
+    fn test_generic_pod_strides_match_existing_shader_layouts() {
+        assert_eq!(
+            std::mem::size_of::<PackedGaussian<ShSingle, CovRotScale>>(),
+            224
+        );
+        assert_eq!(
+            std::mem::size_of::<PackedGaussian<ShSingle, CovSingle>>(),
+            224
+        );
+        assert_eq!(
+            std::mem::size_of::<PackedGaussian<ShSingle, CovHalf>>(),
+            208
+        );
+        assert_eq!(
+            std::mem::size_of::<PackedGaussian<ShHalf, CovRotScale>>(),
+            144
+        );
+        assert_eq!(
+            std::mem::size_of::<PackedGaussian<ShHalf, CovSingle>>(),
+            144
+        );
+        assert_eq!(std::mem::size_of::<PackedGaussian<ShHalf, CovHalf>>(), 128);
+        assert_eq!(
+            std::mem::size_of::<PackedGaussian<ShNorm8, CovRotScale>>(),
+            96
+        );
+        assert_eq!(
+            std::mem::size_of::<PackedGaussian<ShNorm8, CovSingle>>(),
+            96
+        );
+        assert_eq!(std::mem::size_of::<PackedGaussian<ShNorm8, CovHalf>>(), 80);
+        assert_eq!(
+            std::mem::size_of::<PackedGaussian<ShNone, CovRotScale>>(),
+            48
+        );
+        assert_eq!(std::mem::size_of::<PackedGaussian<ShNone, CovSingle>>(), 48);
+        assert_eq!(std::mem::size_of::<PackedGaussian<ShNone, CovHalf>>(), 32);
+        let pod = PackedGaussian::<ShHalf, CovHalf>::from_gaussian(&Gaussian {
+            rot: Quat::IDENTITY,
+            pos: Vec3::ZERO,
+            color: Vec4::ONE,
+            sh: [Vec3::ZERO; 15],
+            scale: Vec3::ONE,
+        });
+        let legacy: GaussianPodWithShHalfCov3dHalfConfigs = pod;
+        assert_eq!(legacy, pod);
     }
 }
