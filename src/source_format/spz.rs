@@ -511,6 +511,17 @@ impl SpzGaussiansHeader {
             ));
         }
 
+        if !Self::SUPPORTED_SH_DEGREES.contains(&pod.sh_degree.get()) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "Unsupported SPZ SH degree: {}, expected one of {:?}",
+                    pod.sh_degree.get(),
+                    Self::SUPPORTED_SH_DEGREES
+                ),
+            ));
+        }
+
         Ok(Self(pod))
     }
 
@@ -706,6 +717,32 @@ pub struct SpzGaussians {
 }
 
 impl SpzGaussians {
+    fn empty(header: SpzGaussiansHeader) -> Self {
+        Self {
+            header,
+            positions: if header.uses_float16() {
+                SpzGaussiansPositions::Float16(Vec::new())
+            } else {
+                SpzGaussiansPositions::FixedPoint24(Vec::new())
+            },
+            scales: Vec::new(),
+            rotations: if header.uses_quat_smallest_three() {
+                SpzGaussiansRotations::QuatSmallestThree(Vec::new())
+            } else {
+                SpzGaussiansRotations::QuatFirstThree(Vec::new())
+            },
+            alphas: Vec::new(),
+            colors: Vec::new(),
+            shs: match header.sh_degree().get() {
+                0 => SpzGaussiansShs::Zero,
+                1 => SpzGaussiansShs::One(Vec::new()),
+                2 => SpzGaussiansShs::Two(Vec::new()),
+                3 => SpzGaussiansShs::Three(Vec::new()),
+                _ => unreachable!(),
+            },
+        }
+    }
+
     /// Get the number of Gaussians.
     pub fn len(&self) -> usize {
         self.header.num_points()
@@ -837,6 +874,9 @@ impl SpzGaussians {
     }
 
     /// Convert from an [`IntoIterator`] of [`SpzGaussian`]s.
+    ///
+    /// An empty iterator produces empty fields with variants determined by the header,
+    /// provided the header's point count is zero.
     pub fn from_iter(
         header: SpzGaussiansHeader,
         iter: impl IntoIterator<Item = SpzGaussian>,
@@ -854,6 +894,17 @@ impl SpzGaussians {
                 )
             })
             .multiunzip::<(Vec<_>, Vec<_>, Vec<_>, Vec<_>, Vec<_>, Vec<_>)>();
+
+        if positions.is_empty() {
+            return if header.num_points() == 0 {
+                Ok(Self::empty(header))
+            } else {
+                Err(SpzGaussiansFromIterError::CountMismatch {
+                    actual_count: 0,
+                    header_count: header.num_points(),
+                })
+            };
+        }
 
         let positions = positions
             .into_iter()
@@ -1090,29 +1141,7 @@ impl<R: Read> SpzBatchReader<R> {
 
         Ok(Self {
             decoder,
-            gaussians: SpzGaussians {
-                header,
-                positions: if header.uses_float16() {
-                    SpzGaussiansPositions::Float16(Vec::new())
-                } else {
-                    SpzGaussiansPositions::FixedPoint24(Vec::new())
-                },
-                alphas: Vec::new(),
-                colors: Vec::new(),
-                scales: Vec::new(),
-                rotations: if header.uses_quat_smallest_three() {
-                    SpzGaussiansRotations::QuatSmallestThree(Vec::new())
-                } else {
-                    SpzGaussiansRotations::QuatFirstThree(Vec::new())
-                },
-                shs: match header.sh_degree().get() {
-                    0 => SpzGaussiansShs::Zero,
-                    1 => SpzGaussiansShs::One(Vec::new()),
-                    2 => SpzGaussiansShs::Two(Vec::new()),
-                    3 => SpzGaussiansShs::Three(Vec::new()),
-                    _ => unreachable!(),
-                },
-            },
+            gaussians: SpzGaussians::empty(header),
             phase,
             completed,
         })
