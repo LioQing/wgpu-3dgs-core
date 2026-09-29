@@ -438,6 +438,76 @@ fn test_spz_gaussians_from_gaussians_with_options_when_header_version_is_invalid
 }
 
 #[test]
+fn test_spz_gaussians_from_empty_iter_should_use_header_variants() {
+    for version in SpzGaussiansHeader::SUPPORTED_VERSIONS {
+        for degree in SpzGaussiansHeader::SUPPORTED_SH_DEGREES {
+            let options = SpzGaussiansFromGaussianSliceOptions {
+                version,
+                sh_degree: SpzGaussianShDegree::new(degree).unwrap(),
+                ..Default::default()
+            };
+            let (_, header) = given_spz_gaussian_and_header(0, &options);
+            let spz = SpzGaussians::from_iter(header, std::iter::empty::<SpzGaussian>()).unwrap();
+
+            assert_eq!(spz.header, header);
+            assert!(spz.is_empty());
+            assert_eq!(spz.iter().count(), 0);
+            assert_eq!(spz.iter_gaussian().count(), 0);
+            assert!(spz.scales.is_empty());
+            assert!(spz.alphas.is_empty());
+            assert!(spz.colors.is_empty());
+            assert_eq!(spz.positions.len(), 0);
+            assert_eq!(spz.rotations.len(), 0);
+            assert_eq!(spz.shs.degree(), header.sh_degree());
+            assert_eq!(
+                matches!(spz.positions, SpzGaussiansPositions::Float16(_)),
+                header.uses_float16()
+            );
+            assert_eq!(
+                matches!(spz.rotations, SpzGaussiansRotations::QuatSmallestThree(_)),
+                header.uses_quat_smallest_three()
+            );
+
+            let from_gaussians =
+                SpzGaussians::from_gaussians_with_options(Vec::<Gaussian>::new(), &options)
+                    .unwrap();
+            assert_eq!(from_gaussians, spz);
+
+            let mut decompressed = Vec::new();
+            spz.write_decompressed(&mut decompressed).unwrap();
+            assert_eq!(
+                SpzGaussians::read_decompressed(&mut decompressed.as_slice()).unwrap(),
+                spz
+            );
+
+            let mut compressed = Vec::new();
+            spz.write_to(&mut compressed).unwrap();
+            assert_eq!(
+                SpzGaussians::read_from(&mut compressed.as_slice()).unwrap(),
+                spz
+            );
+        }
+    }
+
+    let collected: SpzGaussians = std::iter::empty::<Gaussian>().collect();
+    assert!(collected.is_empty());
+    assert_eq!(collected.shs.degree(), SpzGaussianShDegree::default());
+}
+
+#[test]
+fn test_spz_gaussians_from_empty_iter_when_header_count_is_nonzero_should_return_count_mismatch() {
+    let (_, header) = given_spz_gaussian_and_header(2, &Default::default());
+
+    assert_matches!(
+        SpzGaussians::from_iter(header, std::iter::empty::<SpzGaussian>()),
+        Err(SpzGaussiansFromIterError::CountMismatch {
+            actual_count: 0,
+            header_count: 2
+        })
+    );
+}
+
+#[test]
 fn test_spz_gaussians_from_iter_when_invalid_mixed_position_variant_should_return_error() {
     let (gaussian, header) = given_spz_gaussian_and_header(2, &Default::default());
     let gaussians = vec![
@@ -631,6 +701,32 @@ fn test_sh_gaussians_header_try_from_pod_when_magic_is_incorrect_should_return_e
         result,
         Err(e) if e.kind() == std::io::ErrorKind::InvalidData &&
             e.to_string() == "Invalid SPZ magic number: 0, expected 5053474E"
+    );
+}
+
+#[test]
+fn test_spz_gaussians_header_when_sh_degree_is_invalid_should_return_error() {
+    let invalid_degree: SpzGaussianShDegree = bytemuck::cast(4u8);
+    let pod = SpzGaussiansHeaderPod {
+        magic: SpzGaussiansHeader::MAGIC,
+        version: 3,
+        num_points: 0,
+        sh_degree: invalid_degree,
+        fractional_bits: 12,
+        flags: 0,
+        reserved: 0,
+    };
+
+    assert_matches!(
+        SpzGaussiansHeader::try_from_pod(pod),
+        Err(e) if e.kind() == ErrorKind::InvalidData
+    );
+
+    let bytes = bytemuck::bytes_of(&pod);
+    let mut input = bytes;
+    assert_matches!(
+        SpzGaussians::read_header(&mut input),
+        Err(e) if e.kind() == ErrorKind::InvalidData
     );
 }
 
