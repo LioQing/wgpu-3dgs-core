@@ -31,6 +31,7 @@ async fn main() {
         .unwrap_or(NonZeroUsize::new(4096).unwrap());
 
     println!("Reading gaussians from {}", model_path);
+
     let file = std::fs::File::open(&model_path).expect("open PLY file");
     let mut stream = gs::PlyGaussianStream::new(BufReader::new(file)).expect("PLY stream");
 
@@ -53,6 +54,7 @@ async fn main() {
 
     let gaussians_buffer =
         gs::GaussiansBuffer::<GaussianPod>::new_empty(&device, stream.total_gaussians());
+
     let mut batch = Vec::new();
     let mut decoded = Vec::new();
 

@@ -81,13 +81,10 @@ fn main() {
             .flush()
             .expect("flush PLY file");
     } else {
-        gs::PlyGaussians::from(
-            gaussians
-                .iter()
-                .map(gs::Gaussian::to_ply)
-                .collect::<Vec<_>>(),
-        )
-        .write_to_file(&model_path)
-        .expect("write PLY file");
+        gaussians
+            .iter()
+            .collect::<gs::PlyGaussians>()
+            .write_to_file(&model_path)
+            .expect("write PLY file");
     }
 }
