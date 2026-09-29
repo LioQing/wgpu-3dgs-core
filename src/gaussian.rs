@@ -7,7 +7,7 @@ use glam::*;
 
 use crate::{
     BatchProgress, BatchRead, BatchWrite, GaussianStream, PlyBatchReader, PlyBatchWriter,
-    PlyGaussianPod, PlyGaussianStream, PlyGaussians, PlyGaussiansBatchIter, SpzBatchReader,
+    PlyGaussian, PlyGaussianStream, PlyGaussians, PlyGaussiansBatchIter, SpzBatchReader,
     SpzBatchWriter, SpzGaussian, SpzGaussianPosition, SpzGaussianPositionRef, SpzGaussianRef,
     SpzGaussianRotation, SpzGaussianRotationRef, SpzGaussianSh, SpzGaussians, SpzGaussiansHeader,
 };
@@ -70,18 +70,26 @@ impl Gaussian {
     /// The constant to convert from SH coefficient at degree 0 to linear color in SPZ.
     pub const SPZ_SH0_TO_LINEAR_FACTOR: f32 = 0.15;
 
-    /// Convert from [`PlyGaussianPod`].
-    pub fn from_ply(ply: &PlyGaussianPod) -> Self {
-        let pos = Vec3::from_array(ply.pos);
+    /// Convert from [`PlyGaussian`]. SH coefficients above degree 3 are discarded.
+    pub fn from_ply(ply: &PlyGaussian) -> Self {
+        let pos = ply.pos;
 
-        let rot = Quat::from_xyzw(ply.rot[1], ply.rot[2], ply.rot[3], ply.rot[0]).normalize();
+        let rot = ply.rot.normalize();
 
-        let scale = Vec3::from_array(ply.scale).exp();
+        let scale = ply.scale.exp();
 
-        let color = (Vec3::from_array(ply.color) * Self::SH0_TO_LINEAR_FACTOR + Vec3::splat(0.5))
+        let color = (ply.color * Self::SH0_TO_LINEAR_FACTOR + Vec3::splat(0.5))
             .extend(1.0 / (1.0 + (-ply.alpha).exp()));
 
-        let sh = std::array::from_fn(|i| Vec3::new(ply.sh[i], ply.sh[i + 15], ply.sh[i + 30]));
+        // TODO: Support 1/2/4 for native internal Gaussian.
+        let count = ply.sh.len() / 3;
+        let sh = std::array::from_fn(|i| {
+            if i < count {
+                Vec3::new(ply.sh[i], ply.sh[i + count], ply.sh[i + 2 * count])
+            } else {
+                Vec3::ZERO
+            }
+        });
 
         Self {
             rot,
@@ -92,29 +100,30 @@ impl Gaussian {
         }
     }
 
-    /// Convert to [`PlyGaussianPod`].
-    pub fn to_ply(&self) -> PlyGaussianPod {
-        let pos = self.pos.to_array();
+    /// Convert to a degree-3 [`PlyGaussian`].
+    pub fn to_ply(&self) -> PlyGaussian {
+        let pos = self.pos;
 
-        let rot = [self.rot.w, self.rot.x, self.rot.y, self.rot.z];
+        let rot = self.rot;
 
-        let scale = self.scale.map(|x| x.ln()).to_array();
+        let scale = self.scale.map(|x| x.ln());
 
         let rgba = self.color;
-        let color = ((rgba.xyz() - Vec3::splat(0.5)) / Self::SH0_TO_LINEAR_FACTOR).to_array();
+        let color = (rgba.xyz() - Vec3::splat(0.5)) / Self::SH0_TO_LINEAR_FACTOR;
 
         let alpha = -(1.0 / rgba.w - 1.0).ln();
 
-        let mut sh = [0.0; 3 * 15];
+        // TODO: Support 1/2/4 for native internal Gaussian.
+        let mut sh = vec![0.0; 3 * 15];
         for i in 0..15 {
             sh[i] = self.sh[i].x;
             sh[i + 15] = self.sh[i].y;
             sh[i + 30] = self.sh[i].z;
         }
 
-        let normal = [0.0, 0.0, 1.0];
+        let normal = Vec3::Z;
 
-        PlyGaussianPod {
+        PlyGaussian {
             pos,
             normal,
             color,

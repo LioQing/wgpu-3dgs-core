@@ -54,12 +54,15 @@ fn main() {
     if let Some(batch_size) = batch_size {
         let file = std::fs::File::create(&model_path).expect("create PLY file");
         let count = gaussians.len();
+
         let mut writer = gs::PlyBatchWriter::from_iter(
             BufWriter::new(file),
             count,
+            3,
             gaussians.into_iter().map(|gaussian| Ok(gaussian.to_ply())),
         )
         .expect("PLY writer");
+
         while !writer.progress().done {
             let progress = writer.step(batch_size).expect("write PLY batch");
             println!(
@@ -71,6 +74,7 @@ fn main() {
                 progress.total_units,
             );
         }
+
         writer
             .finish()
             .expect("finish PLY writing")

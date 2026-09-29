@@ -47,6 +47,7 @@ async fn main() {
     let gaussians = if let Some(batch_size) = batch_size {
         let file = std::fs::File::open(&model_path).expect("open SPZ file");
         let mut reader = gs::SpzBatchReader::new(BufReader::new(file)).expect("SPZ reader");
+
         while !reader.progress().done {
             let progress = reader.step(batch_size).expect("read SPZ batch");
             println!(
@@ -58,6 +59,7 @@ async fn main() {
                 progress.total_units,
             );
         }
+
         reader.finish().expect("finish SPZ reading")
     } else {
         gs::SpzGaussians::read_from_file(&model_path).expect("gaussians")

@@ -71,6 +71,7 @@ fn main() {
         let file = std::fs::File::create(&model_path).expect("create SPZ file");
         let mut writer =
             gs::SpzBatchWriter::new(BufWriter::new(file), &gaussians).expect("SPZ writer");
+
         while !writer.progress().done {
             let progress = writer.step(batch_size).expect("write SPZ batch");
             println!(
@@ -82,6 +83,7 @@ fn main() {
                 progress.total_units,
             );
         }
+
         writer
             .finish()
             .expect("finish SPZ writing")

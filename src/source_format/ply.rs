@@ -3,130 +3,172 @@ use std::{
     num::NonZeroUsize,
 };
 
-use bytemuck::Zeroable;
+use glam::{Quat, Vec3};
 
 use crate::{
     BatchProgress, BatchRead, BatchWrite, Gaussian, GaussianStream, IterGaussian, ReadIterGaussian,
     WriteIterGaussian, source_format,
 };
 
-/// The POD representation of Gaussian in PLY format.
-///
-/// Fields are stored as arrays because using glam types would add padding
-/// according to C alignment rules.
-#[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct PlyGaussianPod {
-    pub pos: [f32; 3],
-    pub normal: [f32; 3],
-    pub color: [f32; 3],
-    pub sh: [f32; 3 * 15],
-    pub alpha: f32,
-    pub scale: [f32; 3],
-    pub rot: [f32; 4],
+fn sh_count(degree: u8) -> usize {
+    (degree as usize + 1).pow(2) - 1
 }
 
-impl PlyGaussianPod {
-    /// Set the value of a property by name.
-    pub fn set_value(&mut self, name: &str, value: f32) {
-        macro_rules! set_prop {
-            ($name:expr, $field:expr) => {
-                $field = value
-            };
-        }
+fn degree_from_len(len: usize) -> Option<u8> {
+    (0..=4).find(|&degree| sh_count(degree) * 3 == len)
+}
 
+fn invalid_data(message: impl Into<String>) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, message.into())
+}
+
+fn validate_degree(degree: u8) -> io::Result<()> {
+    if degree > 4 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("unsupported PLY SH degree: {degree}"),
+        ));
+    }
+
+    Ok(())
+}
+
+/// A Gaussian as stored in a PLY file. `sh` is channel-major: all red coefficients,
+/// then green, then blue. The DC coefficients are stored separately in `color`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlyGaussian {
+    pub pos: Vec3,
+    pub normal: Vec3,
+    pub color: Vec3,
+    pub sh: Vec<f32>,
+    pub alpha: f32,
+    pub scale: Vec3,
+    /// Rotation in xyzw order; PLY stores it in wxyz order.
+    pub rot: Quat,
+}
+
+impl PlyGaussian {
+    fn empty(sh_degree: u8) -> Self {
+        Self {
+            pos: Vec3::ZERO,
+            normal: Vec3::ZERO,
+            color: Vec3::ZERO,
+            sh: vec![0.0; sh_count(sh_degree) * 3],
+            alpha: 0.0,
+            scale: Vec3::ZERO,
+            rot: Quat::from_xyzw(0.0, 0.0, 0.0, 0.0),
+        }
+    }
+
+    fn set_value(&mut self, name: &str, value: f32) {
         match name {
-            "x" => set_prop!("x", self.pos[0]),
-            "y" => set_prop!("y", self.pos[1]),
-            "z" => set_prop!("z", self.pos[2]),
-            "nx" => set_prop!("nx", self.normal[0]),
-            "ny" => set_prop!("ny", self.normal[1]),
-            "nz" => set_prop!("nz", self.normal[2]),
-            "f_dc_0" => set_prop!("f_dc_0", self.color[0]),
-            "f_dc_1" => set_prop!("f_dc_1", self.color[1]),
-            "f_dc_2" => set_prop!("f_dc_2", self.color[2]),
-            "f_rest_0" => set_prop!("f_rest_0", self.sh[0]),
-            "f_rest_1" => set_prop!("f_rest_1", self.sh[1]),
-            "f_rest_2" => set_prop!("f_rest_2", self.sh[2]),
-            "f_rest_3" => set_prop!("f_rest_3", self.sh[3]),
-            "f_rest_4" => set_prop!("f_rest_4", self.sh[4]),
-            "f_rest_5" => set_prop!("f_rest_5", self.sh[5]),
-            "f_rest_6" => set_prop!("f_rest_6", self.sh[6]),
-            "f_rest_7" => set_prop!("f_rest_7", self.sh[7]),
-            "f_rest_8" => set_prop!("f_rest_8", self.sh[8]),
-            "f_rest_9" => set_prop!("f_rest_9", self.sh[9]),
-            "f_rest_10" => set_prop!("f_rest_10", self.sh[10]),
-            "f_rest_11" => set_prop!("f_rest_11", self.sh[11]),
-            "f_rest_12" => set_prop!("f_rest_12", self.sh[12]),
-            "f_rest_13" => set_prop!("f_rest_13", self.sh[13]),
-            "f_rest_14" => set_prop!("f_rest_14", self.sh[14]),
-            "f_rest_15" => set_prop!("f_rest_15", self.sh[15]),
-            "f_rest_16" => set_prop!("f_rest_16", self.sh[16]),
-            "f_rest_17" => set_prop!("f_rest_17", self.sh[17]),
-            "f_rest_18" => set_prop!("f_rest_18", self.sh[18]),
-            "f_rest_19" => set_prop!("f_rest_19", self.sh[19]),
-            "f_rest_20" => set_prop!("f_rest_20", self.sh[20]),
-            "f_rest_21" => set_prop!("f_rest_21", self.sh[21]),
-            "f_rest_22" => set_prop!("f_rest_22", self.sh[22]),
-            "f_rest_23" => set_prop!("f_rest_23", self.sh[23]),
-            "f_rest_24" => set_prop!("f_rest_24", self.sh[24]),
-            "f_rest_25" => set_prop!("f_rest_25", self.sh[25]),
-            "f_rest_26" => set_prop!("f_rest_26", self.sh[26]),
-            "f_rest_27" => set_prop!("f_rest_27", self.sh[27]),
-            "f_rest_28" => set_prop!("f_rest_28", self.sh[28]),
-            "f_rest_29" => set_prop!("f_rest_29", self.sh[29]),
-            "f_rest_30" => set_prop!("f_rest_30", self.sh[30]),
-            "f_rest_31" => set_prop!("f_rest_31", self.sh[31]),
-            "f_rest_32" => set_prop!("f_rest_32", self.sh[32]),
-            "f_rest_33" => set_prop!("f_rest_33", self.sh[33]),
-            "f_rest_34" => set_prop!("f_rest_34", self.sh[34]),
-            "f_rest_35" => set_prop!("f_rest_35", self.sh[35]),
-            "f_rest_36" => set_prop!("f_rest_36", self.sh[36]),
-            "f_rest_37" => set_prop!("f_rest_37", self.sh[37]),
-            "f_rest_38" => set_prop!("f_rest_38", self.sh[38]),
-            "f_rest_39" => set_prop!("f_rest_39", self.sh[39]),
-            "f_rest_40" => set_prop!("f_rest_40", self.sh[40]),
-            "f_rest_41" => set_prop!("f_rest_41", self.sh[41]),
-            "f_rest_42" => set_prop!("f_rest_42", self.sh[42]),
-            "f_rest_43" => set_prop!("f_rest_43", self.sh[43]),
-            "f_rest_44" => set_prop!("f_rest_44", self.sh[44]),
-            "opacity" => set_prop!("opacity", self.alpha),
-            "scale_0" => set_prop!("scale_0", self.scale[0]),
-            "scale_1" => set_prop!("scale_1", self.scale[1]),
-            "scale_2" => set_prop!("scale_2", self.scale[2]),
-            "rot_0" => set_prop!("rot_0", self.rot[0]),
-            "rot_1" => set_prop!("rot_1", self.rot[1]),
-            "rot_2" => set_prop!("rot_2", self.rot[2]),
-            "rot_3" => set_prop!("rot_3", self.rot[3]),
+            "x" => self.pos.x = value,
+            "y" => self.pos.y = value,
+            "z" => self.pos.z = value,
+            "nx" => self.normal.x = value,
+            "ny" => self.normal.y = value,
+            "nz" => self.normal.z = value,
+            "f_dc_0" => self.color.x = value,
+            "f_dc_1" => self.color.y = value,
+            "f_dc_2" => self.color.z = value,
+            "opacity" => self.alpha = value,
+            "scale_0" => self.scale.x = value,
+            "scale_1" => self.scale.y = value,
+            "scale_2" => self.scale.z = value,
+            "rot_0" => self.rot.w = value,
+            "rot_1" => self.rot.x = value,
+            "rot_2" => self.rot.y = value,
+            "rot_3" => self.rot.z = value,
             _ => {
-                log::warn!("Unknown property: {name}");
+                if let Some(index) = name
+                    .strip_prefix("f_rest_")
+                    .and_then(|s| s.parse::<usize>().ok())
+                {
+                    self.sh[index] = value; // The header validates all SH indices first.
+                }
             }
         }
     }
-}
 
-impl ply_rs::ply::PropertyAccess for PlyGaussianPod {
-    fn new() -> Self {
-        PlyGaussianPod::zeroed()
+    fn values(&self) -> impl Iterator<Item = f32> + '_ {
+        self.pos
+            .to_array()
+            .into_iter()
+            .chain(self.normal.to_array())
+            .chain(self.color.to_array())
+            .chain(self.sh.iter().copied())
+            .chain([self.alpha])
+            .chain(self.scale.to_array())
+            .chain([self.rot.w, self.rot.x, self.rot.y, self.rot.z])
     }
 
-    fn set_property(&mut self, property_name: String, property: ply_rs::ply::Property) {
-        let ply_rs::ply::Property::Float(value) = property else {
-            log::error!("Property {property_name} is not a float");
-            return;
-        };
+    /// Read one PLY Gaussian record into [`PlyGaussian`].
+    ///
+    /// `header` may be parsed by calling [`PlyGaussians::read_header`].
+    fn read_from(reader: &mut impl BufRead, header: &PlyHeader) -> io::Result<PlyGaussian> {
+        use ply_rs::ply::{Encoding, Property};
 
-        self.set_value(&property_name, value);
+        let vertex = &header.header.elements["vertex"];
+        let mut gaussian = PlyGaussian::empty(header.sh_degree);
+
+        match header.header.encoding {
+            Encoding::Ascii => {
+                let mut line = String::new();
+                if reader.read_line(&mut line)? == 0 {
+                    return Err(io::ErrorKind::UnexpectedEof.into());
+                }
+
+                let mut values = line.split_whitespace();
+                for (name, property) in &vertex.properties {
+                    let value = values.next().ok_or_else(|| {
+                        invalid_data("Gaussian element property invalid or missing in PLY")
+                    })?;
+
+                    if property.data_type
+                        == ply_rs::ply::PropertyType::Scalar(ply_rs::ply::ScalarType::Float)
+                    {
+                        let value = value.parse::<f32>().map_err(|_| {
+                            invalid_data("Gaussian element property invalid or missing in PLY")
+                        })?;
+
+                        gaussian.set_value(name, value);
+                    }
+                }
+
+                if values.next().is_some() {
+                    return Err(invalid_data("Gaussian element has extra values in PLY"));
+                }
+            }
+            Encoding::BinaryLittleEndian | Encoding::BinaryBigEndian => {
+                let parser = ply_rs::parser::Parser::<ply_rs::ply::DefaultElement>::new();
+
+                let element = match header.header.encoding {
+                    Encoding::BinaryLittleEndian => {
+                        parser.read_little_endian_element(reader, vertex)?
+                    }
+                    Encoding::BinaryBigEndian => parser.read_big_endian_element(reader, vertex)?,
+                    Encoding::Ascii => unreachable!(),
+                };
+
+                for (name, property) in element {
+                    if let Property::Float(value) = property {
+                        gaussian.set_value(&name, value);
+                    }
+                }
+            }
+        }
+
+        Ok(gaussian)
     }
 }
 
-impl From<Gaussian> for PlyGaussianPod {
+impl From<Gaussian> for PlyGaussian {
     fn from(gaussian: Gaussian) -> Self {
         gaussian.to_ply()
     }
 }
 
-impl From<&Gaussian> for PlyGaussianPod {
+impl From<&Gaussian> for PlyGaussian {
     fn from(gaussian: &Gaussian) -> Self {
         gaussian.to_ply()
     }
@@ -136,263 +178,157 @@ impl From<&Gaussian> for PlyGaussianPod {
 ///
 /// This represents the header parsed by [`PlyGaussians::read_header`].
 #[derive(Debug, Clone)]
-pub enum PlyHeader {
-    /// The Inria PLY format.
-    ///
-    /// The number represents the number of Gaussians.
-    ///
-    /// This can be directly loaded into [`PlyGaussianPod`] by [`BufReader::read_exact`](std::io::Read::read_exact).
-    Inria(usize),
-
-    /// Custom PLY format.
-    Custom(ply_rs::ply::Header),
+pub struct PlyHeader {
+    header: ply_rs::ply::Header,
+    sh_degree: u8,
 }
 
 impl PlyHeader {
-    /// Get the number of Gaussians.
-    ///
-    /// Returns [`None`] if the vertex element is not found in [`PlyHeader::Custom`].
-    pub fn count(&self) -> Option<usize> {
-        match self {
-            Self::Inria(count) => Some(*count),
-            Self::Custom(header) => header.elements.get("vertex").map(|vertex| vertex.count),
-        }
+    /// Number of vertex records in the file.
+    pub fn count(&self) -> usize {
+        self.header.elements["vertex"].count
+    }
+
+    /// SH degree inferred from the vertex properties.
+    pub fn sh_degree(&self) -> u8 {
+        self.sh_degree
     }
 }
 
-/// PLY Gaussian [`Result`] iterator.
-pub enum PlyGaussianIter<
-    I: Iterator<Item = Result<PlyGaussianPod, std::io::Error>>,
-    C: Iterator<Item = Result<PlyGaussianPod, std::io::Error>>,
-> {
-    /// The Inria PLY format.
-    Inria(I),
-
-    /// Custom PLY format.
-    ///
-    /// This still is the same properties as Inria format, but may have different order.
-    Custom(C),
-}
-
-impl<
-    I: Iterator<Item = Result<PlyGaussianPod, std::io::Error>>,
-    C: Iterator<Item = Result<PlyGaussianPod, std::io::Error>>,
-> Iterator for PlyGaussianIter<I, C>
-{
-    type Item = Result<PlyGaussianPod, std::io::Error>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match self {
-            Self::Inria(iter) => iter.next(),
-            Self::Custom(iter) => iter.next(),
-        }
-    }
-}
-
-fn vertex_element_not_found_error() -> std::io::Error {
-    std::io::Error::new(
-        std::io::ErrorKind::InvalidData,
-        "Gaussian vertex element not found in PLY header",
-    )
-}
-
-fn read_inria(reader: &mut impl BufRead) -> io::Result<PlyGaussianPod> {
-    let mut gaussian = PlyGaussianPod::zeroed();
-    reader.read_exact(bytemuck::bytes_of_mut(&mut gaussian))?;
-    Ok(gaussian)
-}
-
-fn read_custom(
-    reader: &mut impl BufRead,
-    header: &ply_rs::ply::Header,
-) -> io::Result<PlyGaussianPod> {
-    let vertex = header
-        .elements
-        .get("vertex")
-        .ok_or_else(vertex_element_not_found_error)?;
-
-    Ok(match header.encoding {
-        ply_rs::ply::Encoding::Ascii => {
-            let mut line = String::new();
-            reader.read_line(&mut line)?;
-
-            let mut gaussian = PlyGaussianPod::zeroed();
-            vertex
-                .properties
-                .keys()
-                .zip(
-                    line.split_whitespace()
-                        .map(|s| Some(s.parse::<f32>()))
-                        .chain(std::iter::repeat(None)),
-                )
-                .try_for_each(|(name, value)| match value {
-                    Some(Ok(value)) => {
-                        gaussian.set_value(name, value);
-                        Ok(())
-                    }
-                    Some(Err(_)) | None => Err(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        "Gaussian element property invalid or missing in PLY",
-                    )),
-                })?;
-            gaussian
-        }
-        ply_rs::ply::Encoding::BinaryLittleEndian => {
-            ply_rs::parser::Parser::<PlyGaussianPod>::new()
-                .read_little_endian_element(reader, vertex)?
-        }
-        ply_rs::ply::Encoding::BinaryBigEndian => ply_rs::parser::Parser::<PlyGaussianPod>::new()
-            .read_big_endian_element(reader, vertex)?,
-    })
-}
-
-/// A collection of Gaussians in PLY format.
-///
-/// The PLY file is expected to be the same format as the one used in the original Inria
-/// implementation, or a custom PLY file with the same properties.
-///
-/// See [`PlyGaussians::PLY_PROPERTIES`] for a list of expected properties.
+/// A collection of PLY Gaussians with one shared SH degree.
 #[derive(Debug, Clone, PartialEq)]
-pub struct PlyGaussians(pub Vec<PlyGaussianPod>);
+pub struct PlyGaussians {
+    pub gaussians: Vec<PlyGaussian>,
+    pub sh_degree: u8,
+}
 
 impl PlyGaussians {
-    /// The list of properties in the PLY file.
-    pub const PLY_PROPERTIES: &[&str] = &[
-        "x",
-        "y",
-        "z",
-        "nx",
-        "ny",
-        "nz",
-        "f_dc_0",
-        "f_dc_1",
-        "f_dc_2",
-        "f_rest_0",
-        "f_rest_1",
-        "f_rest_2",
-        "f_rest_3",
-        "f_rest_4",
-        "f_rest_5",
-        "f_rest_6",
-        "f_rest_7",
-        "f_rest_8",
-        "f_rest_9",
-        "f_rest_10",
-        "f_rest_11",
-        "f_rest_12",
-        "f_rest_13",
-        "f_rest_14",
-        "f_rest_15",
-        "f_rest_16",
-        "f_rest_17",
-        "f_rest_18",
-        "f_rest_19",
-        "f_rest_20",
-        "f_rest_21",
-        "f_rest_22",
-        "f_rest_23",
-        "f_rest_24",
-        "f_rest_25",
-        "f_rest_26",
-        "f_rest_27",
-        "f_rest_28",
-        "f_rest_29",
-        "f_rest_30",
-        "f_rest_31",
-        "f_rest_32",
-        "f_rest_33",
-        "f_rest_34",
-        "f_rest_35",
-        "f_rest_36",
-        "f_rest_37",
-        "f_rest_38",
-        "f_rest_39",
-        "f_rest_40",
-        "f_rest_41",
-        "f_rest_42",
-        "f_rest_43",
-        "f_rest_44",
-        "opacity",
-        "scale_0",
-        "scale_1",
-        "scale_2",
-        "rot_0",
-        "rot_1",
-        "rot_2",
-        "rot_3",
-    ];
+    /// Construct a collection, checking that all records have the declared SH degree.
+    pub fn new(gaussians: Vec<PlyGaussian>, sh_degree: u8) -> io::Result<Self> {
+        validate_degree(sh_degree)?;
 
-    /// Get the number of Gaussians.
+        if gaussians
+            .iter()
+            .any(|g| g.sh.len() != sh_count(sh_degree) * 3)
+        {
+            return Err(invalid_data(
+                "PLY Gaussian SH count does not match the degree",
+            ));
+        }
+
+        Ok(Self {
+            gaussians,
+            sh_degree,
+        })
+    }
+
+    /// The number of Gaussians.
     pub fn len(&self) -> usize {
-        self.0.len()
+        self.gaussians.len()
     }
 
     /// Check if there are no Gaussians.
     pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
+        self.gaussians.is_empty()
     }
 
     /// Iterate over the Gaussians.
-    pub fn iter(&self) -> impl ExactSizeIterator<Item = &PlyGaussianPod> {
-        self.0.iter()
+    pub fn iter(&self) -> impl ExactSizeIterator<Item = &PlyGaussian> {
+        self.gaussians.iter()
     }
 
     /// Iterate over the Gaussians mutably.
-    pub fn iter_mut(&mut self) -> impl ExactSizeIterator<Item = &mut PlyGaussianPod> {
-        self.0.iter_mut()
+    pub fn iter_mut(&mut self) -> impl ExactSizeIterator<Item = &mut PlyGaussian> {
+        self.gaussians.iter_mut()
     }
 
-    /// Read a PLY header.
+    /// Read and validate the vertex properties and infer the SH degree.
     ///
-    /// See [`PlyGaussians::PLY_PROPERTIES`] for a list of expected properties.
-    pub fn read_header(reader: &mut impl BufRead) -> Result<PlyHeader, std::io::Error> {
-        let parser = ply_rs::parser::Parser::<ply_rs::ply::DefaultElement>::new();
-        let header = parser.read_header(reader)?;
+    /// SH degree 0 to 4 are supported.
+    pub fn read_header(reader: &mut impl BufRead) -> io::Result<PlyHeader> {
+        use ply_rs::ply::{PropertyType, ScalarType};
+
+        let header =
+            ply_rs::parser::Parser::<ply_rs::ply::DefaultElement>::new().read_header(reader)?;
+
+        // The stream starts at the first element's data. Other leading elements
+        // would have to be consumed before reading any vertices.
+        if header.elements.keys().next().map(String::as_str) != Some("vertex") {
+            return Err(invalid_data(
+                "Gaussian vertex element not found in PLY header",
+            ));
+        }
+
         let vertex = header
             .elements
             .get("vertex")
-            .ok_or_else(vertex_element_not_found_error)?;
+            .ok_or_else(|| invalid_data("Gaussian vertex element not found in PLY header"))?;
 
-        const SYSTEM_ENDIANNESS: ply_rs::ply::Encoding = match cfg!(target_endian = "little") {
-            true => ply_rs::ply::Encoding::BinaryLittleEndian,
-            false => ply_rs::ply::Encoding::BinaryBigEndian,
-        };
-
-        let ply_header = match vertex
+        // List properties contain a variable number of ASCII tokens. Refuse
+        // them rather than mistaking a later value for an SH coefficient.
+        if vertex
             .properties
-            .iter()
-            .zip(Self::PLY_PROPERTIES.iter())
-            .all(|((a, property), b)| {
-                a == *b
-                    && property.data_type
-                        == ply_rs::ply::PropertyType::Scalar(ply_rs::ply::ScalarType::Float)
-            })
-            && vertex.properties.len() == Self::PLY_PROPERTIES.len()
-            && header.encoding == SYSTEM_ENDIANNESS
+            .values()
+            .any(|p| !matches!(p.data_type, PropertyType::Scalar(_)))
         {
-            true => PlyHeader::Inria(vertex.count),
-            false => PlyHeader::Custom(header),
-        };
+            return Err(invalid_data("PLY vertex list properties are unsupported"));
+        }
 
-        Ok(ply_header)
+        let mut rest = 0;
+        for name in vertex.properties.keys() {
+            if name.starts_with("f_rest_") {
+                rest += 1;
+            }
+        }
+
+        let sh_degree = degree_from_len(rest)
+            .ok_or_else(|| invalid_data(format!("unsupported PLY SH coefficient count: {rest}")))?;
+
+        for name in [
+            "x", "y", "z", "f_dc_0", "f_dc_1", "f_dc_2", "opacity", "scale_0", "scale_1",
+            "scale_2", "rot_0", "rot_1", "rot_2", "rot_3",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .chain((0..rest).map(|i| format!("f_rest_{i}")))
+        {
+            match vertex.properties.get(&name) {
+                Some(prop) if prop.data_type == PropertyType::Scalar(ScalarType::Float) => (),
+                _ => {
+                    return Err(invalid_data(format!(
+                        "missing or non-float PLY property: {name}"
+                    )));
+                }
+            }
+        }
+
+        for name in ["nx", "ny", "nz"] {
+            if vertex
+                .properties
+                .get(name)
+                .is_some_and(|p| p.data_type != PropertyType::Scalar(ScalarType::Float))
+            {
+                return Err(invalid_data(format!("non-float PLY property: {name}")));
+            }
+        }
+
+        Ok(PlyHeader { header, sh_degree })
     }
 
-    /// Read the PLY Gaussians into [`PlyGaussianPod`].
+    /// Read the PLY Gaussians into [`PlyGaussian`].
     ///
     /// `header` may be parsed by calling [`PlyGaussians::read_header`].
     pub fn read_gaussians(
         reader: &mut impl BufRead,
         header: PlyHeader,
-    ) -> Result<impl Iterator<Item = Result<PlyGaussianPod, std::io::Error>>, std::io::Error> {
-        let count = header.count().ok_or_else(vertex_element_not_found_error)?;
-        log::info!("Reading PLY format with {count} Gaussians");
+    ) -> io::Result<impl Iterator<Item = io::Result<PlyGaussian>> + '_> {
+        let count = header.count();
+        log::info!(
+            "Reading PLY format with {count} Gaussians (SH degree {})",
+            header.sh_degree()
+        );
 
-        Ok(match header {
-            PlyHeader::Inria(..) => PlyGaussianIter::Inria((0..count).map(|_| read_inria(reader))),
-            PlyHeader::Custom(header) => {
-                PlyGaussianIter::Custom((0..count).map(move |_| read_custom(reader, &header)))
-            }
-        })
+        Ok((0..count).map(move |_| PlyGaussian::read_from(reader, &header)))
     }
 }
 
@@ -403,7 +339,7 @@ impl IterGaussian for PlyGaussians {
 }
 
 impl ReadIterGaussian for PlyGaussians {
-    fn read_from(reader: &mut impl BufRead) -> std::io::Result<Self> {
+    fn read_from(reader: &mut impl BufRead) -> io::Result<Self> {
         let mut reader = PlyBatchReader::new(reader)?;
         while !BatchRead::progress(&reader).done {
             reader.step(NonZeroUsize::new(4096).unwrap())?;
@@ -413,13 +349,44 @@ impl ReadIterGaussian for PlyGaussians {
 }
 
 impl WriteIterGaussian for PlyGaussians {
-    fn write_to(&self, writer: &mut impl std::io::Write) -> std::io::Result<()> {
+    fn write_to(&self, writer: &mut impl Write) -> io::Result<()> {
         let mut writer = PlyBatchWriter::new(writer, self)?;
         while !BatchWrite::progress(&writer).done {
             writer.step(NonZeroUsize::new(4096).unwrap())?;
         }
         writer.finish()?;
         Ok(())
+    }
+}
+
+impl From<Vec<PlyGaussian>> for PlyGaussians {
+    fn from(gaussians: Vec<PlyGaussian>) -> Self {
+        // FromIterator cannot report an error; writing checks every record.
+        let sh_degree = gaussians
+            .first()
+            .and_then(|g| degree_from_len(g.sh.len()))
+            .unwrap_or(3);
+
+        Self {
+            gaussians,
+            sh_degree,
+        }
+    }
+}
+
+impl<G: AsRef<Gaussian>> FromIterator<G> for PlyGaussians {
+    fn from_iter<T: IntoIterator<Item = G>>(iter: T) -> Self {
+        Self::from(
+            iter.into_iter()
+                .map(|g| g.as_ref().to_ply())
+                .collect::<Vec<_>>(),
+        )
+    }
+}
+
+impl FromIterator<PlyGaussian> for PlyGaussians {
+    fn from_iter<T: IntoIterator<Item = PlyGaussian>>(iter: T) -> Self {
+        Self::from(iter.into_iter().collect::<Vec<_>>())
     }
 }
 
@@ -435,7 +402,7 @@ pub struct PlyGaussianStream<R: BufRead> {
 impl<R: BufRead> PlyGaussianStream<R> {
     pub fn new(mut reader: R) -> io::Result<Self> {
         let header = PlyGaussians::read_header(&mut reader)?;
-        let total = header.count().ok_or_else(vertex_element_not_found_error)?;
+        let total = header.count();
 
         Ok(Self {
             reader,
@@ -445,21 +412,22 @@ impl<R: BufRead> PlyGaussianStream<R> {
             failed: false,
         })
     }
+
+    /// SH degree of the streamed PLY records.
+    pub fn sh_degree(&self) -> u8 {
+        self.header.sh_degree()
+    }
 }
 
 impl<R: BufRead> Iterator for PlyGaussianStream<R> {
-    type Item = io::Result<PlyGaussianPod>;
+    type Item = io::Result<PlyGaussian>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.failed || self.read == self.total {
             return None;
         }
 
-        let result = match &self.header {
-            PlyHeader::Inria(..) => read_inria(&mut self.reader),
-            PlyHeader::Custom(header) => read_custom(&mut self.reader, header),
-        };
-        match result {
+        match PlyGaussian::read_from(&mut self.reader, &self.header) {
             Ok(gaussian) => {
                 self.read += 1;
                 Some(Ok(gaussian))
@@ -473,7 +441,7 @@ impl<R: BufRead> Iterator for PlyGaussianStream<R> {
 }
 
 impl<R: BufRead> GaussianStream for PlyGaussianStream<R> {
-    type Gaussian = PlyGaussianPod;
+    type Gaussian = PlyGaussian;
 
     fn total_gaussians(&self) -> usize {
         self.total
@@ -494,7 +462,7 @@ impl<R: BufRead> GaussianStream for PlyGaussianStream<R> {
 /// Whole-model PLY reader built on the [`PlyGaussianStream`].
 pub struct PlyBatchReader<R: BufRead> {
     stream: PlyGaussianStream<R>,
-    gaussians: Vec<PlyGaussianPod>,
+    gaussians: Vec<PlyGaussian>,
 }
 
 impl<R: BufRead> PlyBatchReader<R> {
@@ -522,51 +490,53 @@ impl<R: BufRead> BatchRead for PlyBatchReader<R> {
         if !self.stream.progress().done {
             return Err(source_format::batch::incomplete());
         }
-        Ok(PlyGaussians(self.gaussians))
+        PlyGaussians::new(self.gaussians, self.stream.sh_degree())
     }
 }
 
-/// PLY writer that consumes an iterator incrementally, writing at most one batch per step.
-///
-/// The PLY header requires the number of Gaussians up front. Only that many items are consumed,
-/// extra iterator items are left unread. Discard the writer after an iterator or I/O error.
-pub struct PlyBatchWriter<W: Write, I: Iterator<Item = io::Result<PlyGaussianPod>>> {
+/// PLY writer that consumes an iterator incrementally. The degree and count must
+/// be supplied before writing the header; each record is checked before writing.
+pub struct PlyBatchWriter<W: Write, I: Iterator<Item = io::Result<PlyGaussian>>> {
     writer: W,
     gaussians: I,
+    sh_degree: u8,
     total: usize,
     written: usize,
 }
 
-/// Iterator used by [`PlyBatchWriter::new`] for an existing PLY collection.
 pub type PlyGaussiansBatchIter<'a> = std::iter::Map<
-    std::iter::Copied<std::slice::Iter<'a, PlyGaussianPod>>,
-    fn(PlyGaussianPod) -> io::Result<PlyGaussianPod>,
+    std::iter::Cloned<std::slice::Iter<'a, PlyGaussian>>,
+    fn(PlyGaussian) -> io::Result<PlyGaussian>,
 >;
 
 impl<'a, W: Write> PlyBatchWriter<W, PlyGaussiansBatchIter<'a>> {
-    /// Write a header for an existing collection, then consume it in batches.
     pub fn new(writer: W, gaussians: &'a PlyGaussians) -> io::Result<Self> {
-        Self::from_iter(writer, gaussians.len(), gaussians.0.iter().copied().map(Ok))
+        Self::from_iter(
+            writer,
+            gaussians.len(),
+            gaussians.sh_degree,
+            gaussians.gaussians.iter().cloned().map(Ok),
+        )
     }
 }
 
-impl<W: Write, I: Iterator<Item = io::Result<PlyGaussianPod>>> PlyBatchWriter<W, I> {
-    /// Write the PLY header and prepare to consume `count` Gaussians from `gaussians`.
-    ///
-    /// The iterator is not advanced until [`BatchWrite::step`] is called. If it ends before
-    /// `count`, `step` returns `UnexpectedEof`, additional items are never requested.
-    pub fn from_iter(mut writer: W, count: usize, gaussians: I) -> io::Result<Self> {
-        Self::write_header(&mut writer, count)?;
+impl<W: Write, I: Iterator<Item = io::Result<PlyGaussian>>> PlyBatchWriter<W, I> {
+    /// Write a header and prepare to consume `count` records with the given SH degree.
+    pub fn from_iter(mut writer: W, count: usize, sh_degree: u8, gaussians: I) -> io::Result<Self> {
+        validate_degree(sh_degree)?;
+
+        Self::write_header(&mut writer, count, sh_degree)?;
 
         Ok(Self {
             writer,
             gaussians,
+            sh_degree,
             total: count,
             written: 0,
         })
     }
 
-    fn write_header(writer: &mut impl Write, count: usize) -> io::Result<()> {
+    fn write_header(writer: &mut impl Write, count: usize, sh_degree: u8) -> io::Result<()> {
         const SYSTEM_ENDIANNESS: ply_rs::ply::Encoding = match cfg!(target_endian = "little") {
             true => ply_rs::ply::Encoding::BinaryLittleEndian,
             false => ply_rs::ply::Encoding::BinaryBigEndian,
@@ -575,14 +545,28 @@ impl<W: Write, I: Iterator<Item = io::Result<PlyGaussianPod>>> PlyBatchWriter<W,
         writeln!(writer, "ply")?;
         writeln!(writer, "format {SYSTEM_ENDIANNESS} 1.0")?;
         writeln!(writer, "element vertex {count}")?;
-        for property in PlyGaussians::PLY_PROPERTIES {
+
+        for property in [
+            "x", "y", "z", "nx", "ny", "nz", "f_dc_0", "f_dc_1", "f_dc_2",
+        ] {
             writeln!(writer, "property float {property}")?;
         }
+
+        for i in 0..sh_count(sh_degree) * 3 {
+            writeln!(writer, "property float f_rest_{i}")?;
+        }
+
+        for property in [
+            "opacity", "scale_0", "scale_1", "scale_2", "rot_0", "rot_1", "rot_2", "rot_3",
+        ] {
+            writeln!(writer, "property float {property}")?;
+        }
+
         writeln!(writer, "end_header")
     }
 }
 
-impl<W: Write, I: Iterator<Item = io::Result<PlyGaussianPod>>> BatchWrite for PlyBatchWriter<W, I> {
+impl<W: Write, I: Iterator<Item = io::Result<PlyGaussian>>> BatchWrite for PlyBatchWriter<W, I> {
     type Writer = W;
 
     fn progress(&self) -> BatchProgress {
@@ -598,14 +582,27 @@ impl<W: Write, I: Iterator<Item = io::Result<PlyGaussianPod>>> BatchWrite for Pl
 
     fn step(&mut self, max_items: NonZeroUsize) -> io::Result<BatchProgress> {
         let count = max_items.get().min(self.total - self.written);
+
         for _ in 0..count {
             let gaussian = self
                 .gaussians
                 .next()
                 .ok_or_else(source_format::batch::incomplete)??;
-            self.writer.write_all(bytemuck::bytes_of(&gaussian))?;
+
+            if gaussian.sh.len() != sh_count(self.sh_degree) * 3 {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "PLY Gaussian SH count does not match the degree",
+                ));
+            }
+
+            for value in gaussian.values() {
+                self.writer.write_all(&value.to_ne_bytes())?;
+            }
+
             self.written += 1;
         }
+
         Ok(self.progress())
     }
 
@@ -614,23 +611,5 @@ impl<W: Write, I: Iterator<Item = io::Result<PlyGaussianPod>>> BatchWrite for Pl
             return Err(source_format::batch::incomplete());
         }
         Ok(self.writer)
-    }
-}
-
-impl From<Vec<PlyGaussianPod>> for PlyGaussians {
-    fn from(gaussians: Vec<PlyGaussianPod>) -> Self {
-        Self(gaussians)
-    }
-}
-
-impl<G: AsRef<Gaussian>> FromIterator<G> for PlyGaussians {
-    fn from_iter<T: IntoIterator<Item = G>>(iter: T) -> Self {
-        Self(iter.into_iter().map(|g| g.as_ref().to_ply()).collect())
-    }
-}
-
-impl FromIterator<PlyGaussianPod> for PlyGaussians {
-    fn from_iter<T: IntoIterator<Item = PlyGaussianPod>>(iter: T) -> Self {
-        Self(iter.into_iter().collect())
     }
 }
