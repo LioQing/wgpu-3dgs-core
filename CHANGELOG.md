@@ -12,6 +12,7 @@ Please also check out the [`wgpu-3dgs-viewer` changelog](https://github.com/LioQ
 ### Changed
 
 - 🧩 Update `GaussianPodWithSh...Cov3d...Configs` to `PackedGaussian<Sh..., Cov...>` so it is more ergonomic now. The old names remain available but are deprecated, and are planned to be removed in version 0.10. [#38](https://github.com/LioQing/wgpu-3dgs-core/pull/38)
+- 🐛 Fix `SpzGaussians::from_iter` panicking on empty input for zero-point headers, and reject unsupported SPZ SH degrees in headers. [#40](https://github.com/LioQing/wgpu-3dgs-core/pull/40)
 
 ### Breaking Changes
 
