@@ -8,6 +8,7 @@ Please also check out the [`wgpu-3dgs-viewer` changelog](https://github.com/LioQ
 
 - 🔄 Add `BatchRead`, `BatchWrite`, and `BatchProgress` for bounded-step PLY and SPZ reads and writes, including `GaussiansBatchReader` and `GaussiansBatchWriter` for unified models. [#34](https://github.com/LioQing/wgpu-3dgs-core/pull/34) [#36](https://github.com/LioQing/wgpu-3dgs-core/pull/36)
 - 📥 Add `GaussianStream`, `PlyGaussianStream`, and `GaussiansStream` to consume PLY Gaussians before the whole file is loaded, using `Iterator::next` or `next_batch` for caller-owned batches, SPZ does not support streaming Gaussian delivery. [#34](https://github.com/LioQing/wgpu-3dgs-core/pull/34) [#36](https://github.com/LioQing/wgpu-3dgs-core/pull/36)
+- 🔢 Add support for PLY SH degrees 0 to 4, preserving the degree and coefficients in whole-model, batch, and streaming reads and writes. [#44](https://github.com/LioQing/wgpu-3dgs-core/pull/44)
 
 ### Changed
 
@@ -18,7 +19,10 @@ Please also check out the [`wgpu-3dgs-viewer` changelog](https://github.com/LioQ
 
 - Update `Gaussian::color` to use `Vec4` with floating-point linear RGB and opacity instead of `U8Vec4`. [#35](https://github.com/LioQing/wgpu-3dgs-core/pull/35)
 - Update `SpzGaussians::read_from` to validate the gzip trailer and rejects extra decompressed SPZ data, `SpzGaussians::write_to` to reject field lengths or variants that disagree with the header instead of writing an invalid file. [#34](https://github.com/LioQing/wgpu-3dgs-core/pull/34)
-- Update `PlyGaussians::read_header` to classify a native-endian PLY with extra vertex properties as `PlyHeader::Custom` rather than `PlyHeader::Inria`, so callers matching on the header variant may need to handle it differently. [#34](https://github.com/LioQing/wgpu-3dgs-core/pull/34)
+- Replace `PlyGaussianPod` with `PlyGaussian`, using `Vec3`, `Quat`, and `Vec<f32>` fields instead of fixed-size arrays, and validate more strictly when reading from PLY. The new type is no longer `Copy`, `Pod`, or `Zeroable`. [#44](https://github.com/LioQing/wgpu-3dgs-core/pull/44)
+- Replace the `PlyHeader::Inria` and `PlyHeader::Custom` variants with a struct containing `header` and `sh_degree`. [#44](https://github.com/LioQing/wgpu-3dgs-core/pull/44)
+- Change `PlyGaussians` from a tuple struct to named `gaussians` and `sh_degree` fields. Replace infallible construction from PLY records with `PlyGaussians::new`, `TryFrom<Vec<PlyGaussian>>`, and `PlyGaussians::try_from_iter`, rejecting unsupported or inconsistent SH counts with `PlyGaussiansFromIterError` for the latter two. Inferred empty collections default to degree 3. [#44](https://github.com/LioQing/wgpu-3dgs-core/pull/44)
+- Update `PlyBatchWriter::from_iter` to require an explicit `sh_degree` argument before the iterator, and reject records whose SH coefficient counts disagree with the declared degree. [#44](https://github.com/LioQing/wgpu-3dgs-core/pull/44)
 
 ## [0.8.0](https://crates.io/crates/wgpu-3dgs-core/0.8.0) - 2026-08-23
 

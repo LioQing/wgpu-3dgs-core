@@ -20,6 +20,7 @@ fn main() {
     let model_path = std::env::args()
         .nth(1)
         .unwrap_or_else(|| "target/output.ply".to_string());
+
     let batch_size = std::env::args().nth(2).map(|size| {
         size.parse::<NonZeroUsize>()
             .expect("batch_size must be a non-zero integer")
