@@ -21,6 +21,7 @@ async fn main() {
     let model_path = std::env::args()
         .nth(1)
         .unwrap_or_else(|| "examples/model.ply".to_string());
+
     let batch_size = std::env::args()
         .nth(2)
         .map(|size| {
@@ -30,15 +31,18 @@ async fn main() {
         .unwrap_or(NonZeroUsize::new(4096).unwrap());
 
     println!("Reading gaussians from {}", model_path);
+
     let file = std::fs::File::open(&model_path).expect("open PLY file");
     let mut stream = gs::PlyGaussianStream::new(BufReader::new(file)).expect("PLY stream");
 
     let instance =
         wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+
     let adapter = instance
         .request_adapter(&wgpu::RequestAdapterOptions::default())
         .await
         .expect("adapter");
+
     let (device, queue) = adapter
         .request_device(&wgpu::DeviceDescriptor {
             label: Some("Device"),
@@ -50,23 +54,28 @@ async fn main() {
 
     let gaussians_buffer =
         gs::GaussiansBuffer::<GaussianPod>::new_empty(&device, stream.total_gaussians());
+
     let mut batch = Vec::new();
     let mut decoded = Vec::new();
 
     while !stream.progress().done {
         batch.clear();
+
         let start = stream.progress().completed_units;
+
         stream
             .next_batch(batch_size, &mut batch)
             .expect("read PLY batch");
 
         decoded.clear();
         decoded.extend(batch.iter().map(gs::Gaussian::from_ply));
+
         gaussians_buffer
             .update_range(&queue, start, &decoded)
             .expect("upload PLY batch");
 
         let progress = stream.progress();
+
         println!(
             "Reading {}: {}/{} ({}/{})",
             progress.phase,

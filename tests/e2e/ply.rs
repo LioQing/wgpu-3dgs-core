@@ -2,68 +2,88 @@ use std::io::Write;
 
 use assert_matches::assert_matches;
 use wgpu_3dgs_core::{
-    Gaussian, IterGaussian, PlyGaussianPod, PlyGaussians, PlyHeader, ReadIterGaussian,
+    BatchRead, BatchWrite, Gaussian, GaussianStream, IterGaussian, PlyBatchReader, PlyBatchWriter,
+    PlyGaussian, PlyGaussianStream, PlyGaussians, PlyGaussiansFromIterError, ReadIterGaussian,
     WriteIterGaussian, glam::*,
 };
 
 use crate::common::{assert, given};
 
-fn given_custom_gaussians_ply_buffer(
-    plys: &[PlyGaussianPod],
-    endianness: ply_rs::ply::Encoding,
-) -> Vec<u8> {
+fn degree_gaussians(degree: u8) -> PlyGaussians {
+    let count = (degree as usize + 1).pow(2) - 1;
+    let mut gaussian = given::gaussian().to_ply();
+    gaussian.sh = (0..count * 3).map(|i| i as f32 * 0.125 - 1.0).collect();
+
+    PlyGaussians::new(vec![gaussian], degree).unwrap()
+}
+
+fn reordered_buffer(ply: &PlyGaussian, degree: u8, encoding: ply_rs::ply::Encoding) -> Vec<u8> {
     let mut buffer = Vec::new();
 
     writeln!(buffer, "ply").unwrap();
-    writeln!(buffer, "format {} 1.0", endianness).unwrap();
-    writeln!(buffer, "element vertex {}", plys.len()).unwrap();
+    writeln!(buffer, "format {encoding} 1.0").unwrap();
+    writeln!(buffer, "element vertex 1").unwrap();
 
-    let mut properties = PlyGaussians::PLY_PROPERTIES.to_vec();
-    properties.swap(1, 2); // Swap y and z to be different from Inria format.
+    let mut properties: Vec<(String, f32)> = [
+        ("x".to_string(), ply.pos.x),
+        ("z".to_string(), ply.pos.z),
+        ("y".to_string(), ply.pos.y),
+        ("nx".to_string(), ply.normal.x),
+        ("ny".to_string(), ply.normal.y),
+        ("nz".to_string(), ply.normal.z),
+        ("f_dc_0".to_string(), ply.color.x),
+        ("f_dc_1".to_string(), ply.color.y),
+        ("f_dc_2".to_string(), ply.color.z),
+    ]
+    .into();
+    properties.extend(
+        ply.sh
+            .iter()
+            .enumerate()
+            .map(|(i, &v)| (format!("f_rest_{i}"), v)),
+    );
+    properties.extend([
+        ("opacity".to_string(), ply.alpha),
+        ("scale_0".to_string(), ply.scale.x),
+        ("scale_1".to_string(), ply.scale.y),
+        ("scale_2".to_string(), ply.scale.z),
+        ("rot_0".to_string(), ply.rot.w),
+        ("rot_1".to_string(), ply.rot.x),
+        ("rot_2".to_string(), ply.rot.y),
+        ("rot_3".to_string(), ply.rot.z),
+    ]);
 
-    for property in properties {
-        writeln!(buffer, "property float {property}").unwrap();
+    assert_eq!(ply.sh.len(), ((degree as usize + 1).pow(2) - 1) * 3);
+
+    for (name, _) in &properties {
+        writeln!(buffer, "property float {name}").unwrap();
     }
+
     writeln!(buffer, "end_header").unwrap();
 
-    for mut ply in plys.iter().copied() {
-        ply.pos.swap(1, 2); // Swap y and z to be different from Inria format.
-
-        match endianness {
-            ply_rs::ply::Encoding::Ascii => {
-                fn to_string<'a>(v: impl Iterator<Item = &'a (impl ToString + 'a)>) -> String {
-                    v.map(|x| x.to_string()).collect::<Vec<_>>().join(" ")
-                }
-
-                writeln!(
-                    buffer,
-                    "{} {} {} {} {} {} {}",
-                    to_string(ply.pos.iter()),
-                    to_string(ply.normal.iter()),
-                    to_string(ply.color.iter()),
-                    to_string(ply.sh.iter()),
-                    ply.alpha,
-                    to_string(ply.scale.iter()),
-                    to_string(ply.rot.iter()),
-                )
-                .unwrap();
-            }
-            ply_rs::ply::Encoding::BinaryLittleEndian => {
-                buffer.extend_from_slice(bytemuck::bytes_of(&ply));
-            }
-            ply_rs::ply::Encoding::BinaryBigEndian => {
-                const SIZE: usize = std::mem::size_of::<PlyGaussianPod>();
-                let mut bytes: [u8; SIZE] = bytemuck::cast(ply);
-                bytes
-                    .as_chunks_mut::<4>()
-                    .0
-                    .iter_mut()
-                    .for_each(|chunk| chunk.reverse());
-                buffer.extend_from_slice(&bytes);
+    match encoding {
+        ply_rs::ply::Encoding::Ascii => {
+            writeln!(
+                buffer,
+                "{}",
+                properties
+                    .iter()
+                    .map(|(_, v)| v.to_string())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            )
+            .unwrap();
+        }
+        ply_rs::ply::Encoding::BinaryLittleEndian => {
+            for (_, v) in properties {
+                buffer.extend(v.to_le_bytes());
             }
         }
-
-        buffer.flush().unwrap();
+        ply_rs::ply::Encoding::BinaryBigEndian => {
+            for (_, v) in properties {
+                buffer.extend(v.to_be_bytes());
+            }
+        }
     }
 
     buffer
@@ -72,271 +92,292 @@ fn given_custom_gaussians_ply_buffer(
 #[test]
 fn test_ply_color_round_trip_should_preserve_float_precision() {
     for color in [
-        [0.1234567, -0.2345678, 0.3456789],
-        [-3.1234567, 2.2345678, 4.345679],
+        Vec3::new(0.1234567, -0.2345678, 0.3456789),
+        Vec3::new(-3.1234567, 2.2345678, 4.345679),
     ] {
-        let ply = PlyGaussianPod {
+        let ply = PlyGaussian {
             color,
             alpha: 0.1234567,
             ..given::gaussian().to_ply()
         };
 
-        let gaussian = Gaussian::from_ply(&ply);
-        let round_trip = gaussian.to_ply();
+        let round_trip = Gaussian::from_ply(&ply).to_ply();
 
-        assert!(Vec3::from_array(round_trip.color).abs_diff_eq(Vec3::from_array(color), 1e-6));
+        assert!(round_trip.color.abs_diff_eq(color, 1e-6));
         assert!((round_trip.alpha - ply.alpha).abs() < 1e-6);
     }
 }
 
 #[test]
-fn test_ply_gaussian_pod_from_and_gaussian_to_ply_should_be_equal() {
+fn test_ply_gaussian_from_gaussian() {
     let gaussian = given::gaussian();
 
-    let gaussian_to_ply = gaussian.to_ply();
-    let ply_from_ref = PlyGaussianPod::from(&gaussian);
-    let ply_from = PlyGaussianPod::from(gaussian);
-
-    assert::ply_gaussian_pod(&gaussian_to_ply, &ply_from_ref);
-    assert::ply_gaussian_pod(&gaussian_to_ply, &ply_from);
+    assert::ply_gaussian_pod(&gaussian.to_ply(), &PlyGaussian::from(&gaussian));
+    assert::ply_gaussian_pod(&gaussian.to_ply(), &PlyGaussian::from(gaussian));
 }
 
 #[test]
-fn test_ply_gaussian_pod_len_and_is_empty_should_be_correct() {
-    let gaussians = given::ply_gaussians();
+fn test_ply_degrees_round_trip_and_convert_to_degree_three() {
+    for degree in 0..=4 {
+        let original = degree_gaussians(degree);
+        assert_eq!(
+            PlyGaussians::try_from(original.gaussians.clone())
+                .unwrap()
+                .sh_degree,
+            degree
+        );
 
-    assert_eq!(gaussians.len(), 2);
-    assert!(!gaussians.is_empty());
-}
+        let mut bytes = Vec::new();
+        original.write_to(&mut bytes).unwrap();
 
-#[test]
-fn test_ply_gaussians_read_from_when_format_is_custom_and_ascii_should_match_original_gaussian() {
-    let gaussians = given::ply_gaussians();
-    let buffer = given_custom_gaussians_ply_buffer(&gaussians.0, ply_rs::ply::Encoding::Ascii);
-
-    let gaussians_read = PlyGaussians::read_from(&mut buffer.as_slice()).unwrap();
-    assert_eq!(gaussians_read.len(), 2);
-    assert::ply_gaussian_pod(&gaussians.0[0], &gaussians_read.0[0]);
-    assert::ply_gaussian_pod(&gaussians.0[1], &gaussians_read.0[1]);
-}
-
-#[test]
-fn test_ply_gaussians_read_from_when_format_is_custom_and_be_should_match_original_gaussian() {
-    let gaussians = given::ply_gaussians();
-    let buffer =
-        given_custom_gaussians_ply_buffer(&gaussians.0, ply_rs::ply::Encoding::BinaryBigEndian);
-
-    let gaussians_read = PlyGaussians::read_from(&mut buffer.as_slice()).unwrap();
-    assert_eq!(gaussians_read.len(), 2);
-    assert::ply_gaussian_pod(&gaussians.0[0], &gaussians_read.0[0]);
-    assert::ply_gaussian_pod(&gaussians.0[1], &gaussians_read.0[1]);
-}
-
-#[test]
-fn test_ply_gaussians_read_from_when_format_is_custom_and_le_should_match_original_gaussian() {
-    let gaussians = given::ply_gaussians();
-    let buffer =
-        given_custom_gaussians_ply_buffer(&gaussians.0, ply_rs::ply::Encoding::BinaryLittleEndian);
-
-    let gaussians_read = PlyGaussians::read_from(&mut buffer.as_slice()).unwrap();
-    assert_eq!(gaussians_read.len(), 2);
-    assert::ply_gaussian_pod(&gaussians.0[0], &gaussians_read.0[0]);
-    assert::ply_gaussian_pod(&gaussians.0[1], &gaussians_read.0[1]);
-}
-
-#[test]
-fn test_ply_read_gaussians_when_headers_are_inria_or_custom_should_support_them() {
-    let original = given::ply_gaussians();
-    let mut inria = Vec::new();
-    original.write_to(&mut inria).unwrap();
-
-    let buffers = [
-        inria,
-        given_custom_gaussians_ply_buffer(&original.0, ply_rs::ply::Encoding::Ascii),
-        given_custom_gaussians_ply_buffer(&original.0, ply_rs::ply::Encoding::BinaryLittleEndian),
-        given_custom_gaussians_ply_buffer(&original.0, ply_rs::ply::Encoding::BinaryBigEndian),
-    ];
-
-    for (index, bytes) in buffers.iter().enumerate() {
         let mut input = bytes.as_slice();
         let header = PlyGaussians::read_header(&mut input).unwrap();
-        assert_eq!(header.count(), Some(original.len()));
-        if index == 0 {
-            assert_matches!(header, PlyHeader::Inria(_));
-        } else {
-            assert_matches!(header, PlyHeader::Custom(_));
-        }
+
+        assert_eq!(header.sh_degree, degree);
+        assert_eq!(header.count(), 1);
 
         let actual = PlyGaussians::read_gaussians(&mut input, header)
             .unwrap()
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
-        assert_eq!(actual.len(), original.len());
-        for (expected, actual) in original.iter().zip(&actual) {
-            assert::ply_gaussian_pod(expected, actual);
-        }
+
+        assert_eq!(actual, original.gaussians);
         assert!(input.is_empty());
+        assert_eq!(
+            PlyGaussians::read_from(&mut bytes.as_slice()).unwrap(),
+            original
+        );
+
+        let converted = Gaussian::from_ply(&actual[0]);
+        let count = ((degree as usize + 1).pow(2) - 1).min(15);
+
+        for i in 0..15 {
+            let expected = if i < count {
+                Vec3::new(
+                    actual[0].sh[i],
+                    actual[0].sh[i + actual[0].sh.len() / 3],
+                    actual[0].sh[i + 2 * actual[0].sh.len() / 3],
+                )
+            } else {
+                Vec3::ZERO
+            };
+
+            assert_eq!(converted.sh[i], expected);
+        }
     }
 }
 
 #[test]
-fn test_ply_read_gaussians_when_unexpected_eof_should_return_error() {
-    let original = given::ply_gaussians();
+fn test_empty_degree_four_ply_preserves_header() {
+    let original = PlyGaussians::new(Vec::new(), 4).unwrap();
+    let mut bytes = Vec::new();
+    original.write_to(&mut bytes).unwrap();
+
+    assert_eq!(
+        PlyGaussians::read_from(&mut bytes.as_slice()).unwrap(),
+        original
+    );
+}
+
+#[test]
+fn test_ply_reordered_ascii_and_binary_should_preserve_all_degrees() {
+    for degree in [1, 2, 3, 4] {
+        let original = degree_gaussians(degree);
+
+        for encoding in [
+            ply_rs::ply::Encoding::Ascii,
+            ply_rs::ply::Encoding::BinaryLittleEndian,
+            ply_rs::ply::Encoding::BinaryBigEndian,
+        ] {
+            let bytes = reordered_buffer(&original.gaussians[0], degree, encoding);
+
+            assert_eq!(
+                PlyGaussians::read_from(&mut bytes.as_slice()).unwrap(),
+                original
+            );
+        }
+    }
+}
+
+#[test]
+fn test_ply_stream_and_batch_writer_preserve_variable_degree() {
+    for degree in [1, 2, 4] {
+        let original = degree_gaussians(degree);
+        let mut input = Vec::new();
+        original.write_to(&mut input).unwrap();
+
+        let stream = PlyGaussianStream::new(input.as_slice()).unwrap();
+        assert_eq!(stream.header().sh_degree, degree);
+
+        let mut writer = PlyBatchWriter::from_iter(
+            Vec::new(),
+            stream.total_gaussians(),
+            stream.header().sh_degree,
+            stream,
+        )
+        .unwrap();
+
+        writer
+            .step(std::num::NonZeroUsize::new(1).unwrap())
+            .unwrap();
+
+        let output = writer.finish().unwrap();
+        let mut reader = PlyBatchReader::new(output.as_slice()).unwrap();
+
+        reader
+            .step(std::num::NonZeroUsize::new(1).unwrap())
+            .unwrap();
+
+        assert_eq!(reader.finish().unwrap(), original);
+    }
+}
+
+#[test]
+fn test_ply_rejects_missing_vertex_and_malformed_sh() {
+    let missing_vertex =
+        b"ply\nformat ascii 1.0\nelement fragment 1\nproperty float x\nend_header\n";
+    let error = PlyGaussians::read_header(&mut missing_vertex.as_slice()).unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        "Gaussian vertex element not found in PLY header"
+    );
+
+    let original = degree_gaussians(1);
+    let bytes = reordered_buffer(&original.gaussians[0], 1, ply_rs::ply::Encoding::Ascii);
+    let text = String::from_utf8(bytes).unwrap();
+
+    for bad in [
+        text.replace("property float f_rest_0", "property float f_rest_9"),
+        text.replace("property float f_rest_0", "property int f_rest_0"),
+        text.replace("property float f_rest_0\n", ""),
+        text.replace(
+            "property float f_rest_0",
+            "property list uchar float f_rest_0",
+        ),
+    ] {
+        assert_eq!(
+            PlyGaussians::read_header(&mut bad.as_bytes())
+                .unwrap_err()
+                .kind(),
+            std::io::ErrorKind::InvalidData
+        );
+    }
+}
+
+#[test]
+fn test_ply_read_when_missing_value_or_truncated_record_should_error() {
+    let original = degree_gaussians(2);
+    let bytes = reordered_buffer(&original.gaussians[0], 2, ply_rs::ply::Encoding::Ascii);
+    let mut text = String::from_utf8(bytes).unwrap();
+    text.pop();
+
+    let end = text.rfind(' ').unwrap();
+    text.truncate(end);
+
+    let result = PlyGaussians::read_from(&mut text.as_bytes());
+
+    assert_matches!(result, Err(e) if e.kind() == std::io::ErrorKind::InvalidData);
+
     let mut bytes = Vec::new();
     original.write_to(&mut bytes).unwrap();
     bytes.pop();
 
-    let mut input = bytes.as_slice();
-    let header = PlyGaussians::read_header(&mut input).unwrap();
-    let mut records = PlyGaussians::read_gaussians(&mut input, header).unwrap();
-    assert_eq!(records.next().unwrap().unwrap(), original.0[0]);
-    assert_matches!(records.next(), Some(Err(e)) if e.kind() == std::io::ErrorKind::UnexpectedEof);
-    assert!(records.next().is_none());
+    assert_matches!(PlyGaussians::read_from(&mut bytes.as_slice()), Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof);
 }
 
 #[test]
-fn test_ply_read_gaussians_when_custom_header_without_vertex_should_return_error() {
-    let bytes = b"ply\nformat ascii 1.0\nelement fragment 1\nproperty float x\nend_header\n";
-    let header = ply_rs::parser::Parser::<ply_rs::ply::DefaultElement>::new()
-        .read_header(&mut bytes.as_slice())
-        .unwrap();
-    match PlyGaussians::read_gaussians(&mut bytes.as_slice(), PlyHeader::Custom(header)) {
-        Err(e) => assert_eq!(e.kind(), std::io::ErrorKind::InvalidData),
-        Ok(_) => panic!("expected a missing vertex error"),
-    }
-}
+fn test_ply_writer_rejects_mismatched_sh_and_invalid_degree() {
+    assert!(PlyGaussians::new(vec![], 5).is_err());
 
-#[test]
-fn test_ply_gaussians_read_from_when_missing_vertex_should_return_error() {
-    let gaussian = given::gaussian();
-    let ply = gaussian.to_ply();
+    let mut original = degree_gaussians(4);
+    original.gaussians[0].sh.pop();
+    let mut bytes = Vec::new();
 
-    let mut buffer = Vec::new();
-
-    writeln!(buffer, "ply").unwrap();
-    writeln!(buffer, "format ascii 1.0").unwrap();
-    writeln!(buffer, "element fragment 1").unwrap();
-    for property in PlyGaussians::PLY_PROPERTIES {
-        writeln!(buffer, "property float {property}").unwrap();
-    }
-    writeln!(buffer, "end_header").unwrap();
-
-    fn to_string<'a>(v: impl Iterator<Item = &'a (impl ToString + 'a)>) -> String {
-        v.map(|x| x.to_string()).collect::<Vec<_>>().join(" ")
-    }
-
-    writeln!(
-        buffer,
-        "{} {} {} {} {} {} {}",
-        to_string([&ply.pos[0], &ply.pos[2], &ply.pos[1]].iter()),
-        to_string(ply.normal.iter()),
-        to_string(ply.color.iter()),
-        to_string(ply.sh.iter()),
-        ply.alpha,
-        to_string(ply.scale.iter()),
-        to_string(ply.rot.iter()),
-    )
-    .unwrap();
-
-    let result = PlyGaussians::read_from(&mut buffer.as_slice());
-    assert_matches!(
-        result,
-        Err(e) if e.kind() == std::io::ErrorKind::InvalidData &&
-            e.to_string() == "Gaussian vertex element not found in PLY header"
+    assert_eq!(
+        original.write_to(&mut bytes).unwrap_err().kind(),
+        std::io::ErrorKind::InvalidInput
     );
 }
 
 #[test]
-fn test_ply_gaussians_read_from_when_missing_value_should_return_error() {
-    let gaussian = given::gaussian();
-    let ply = gaussian.to_ply();
-
-    let mut buffer = Vec::new();
-
-    writeln!(buffer, "ply").unwrap();
-    writeln!(buffer, "format ascii 1.0").unwrap();
-    writeln!(buffer, "element vertex 1").unwrap();
-    for property in PlyGaussians::PLY_PROPERTIES {
-        writeln!(buffer, "property float {property}").unwrap();
-    }
-    writeln!(buffer, "end_header").unwrap();
-
-    fn to_string<'a>(v: impl Iterator<Item = &'a (impl ToString + 'a)>) -> String {
-        v.map(|x| x.to_string()).collect::<Vec<_>>().join(" ")
-    }
-
-    writeln!(
-        buffer,
-        "{} {} {} {} {} {} {}",
-        to_string([&ply.pos[0], &ply.pos[2], &ply.pos[1]].iter()),
-        to_string(ply.normal.iter()),
-        to_string(ply.color.iter()),
-        to_string(ply.sh.iter()),
-        ply.alpha,
-        to_string(ply.scale.iter().take(2)),
-        to_string(ply.rot.iter()),
-    )
-    .unwrap();
-
-    let result = PlyGaussians::read_from(&mut buffer.as_slice());
-
-    assert_matches!(
-        result,
-        Err(e) if e.kind() == std::io::ErrorKind::InvalidData &&
-            e.to_string() == "Gaussian element property invalid or missing in PLY"
-    );
-}
-
-#[test]
-fn test_ply_gaussians_file_round_trip_should_be_equal() {
+fn test_ply_file_round_trip_and_collection_constructors() {
     let gaussians = given::ply_gaussians();
     let path = given::temp_file_path(".ply");
 
     gaussians.write_to_file(&path).unwrap();
-    let gaussians_read = PlyGaussians::read_from_file(&path).unwrap();
 
-    assert_eq!(gaussians.len(), gaussians_read.len());
+    assert_eq!(PlyGaussians::read_from_file(&path).unwrap(), gaussians);
+    assert_eq!(gaussians.len(), 2);
+    assert!(!gaussians.is_empty());
 
-    for (a, b) in gaussians.iter().zip(gaussians_read.iter()) {
-        assert::ply_gaussian_pod(a, b);
+    let from_vec = PlyGaussians::try_from(gaussians.gaussians.clone()).unwrap();
+    let mut from_iter: PlyGaussians = given::gaussians().iter().collect();
+
+    assert_eq!(from_vec, gaussians);
+    assert_eq!(
+        PlyGaussians::try_from_iter(gaussians.gaussians.clone()).unwrap(),
+        gaussians
+    );
+    assert_eq!(from_iter, gaussians);
+
+    for (ply, gaussian) in from_iter.iter_mut().zip(gaussians.iter_gaussian()) {
+        assert::ply_gaussian_pod(ply, &gaussian.to_ply());
     }
 }
 
 #[test]
-fn test_ply_gaussians_buffer_round_trip_should_be_equal() {
-    let gaussians = given::ply_gaussians();
-
-    let mut buffer = Vec::new();
-    gaussians.write_to(&mut buffer).unwrap();
-    let gaussians_read = PlyGaussians::read_from(&mut buffer.as_slice()).unwrap();
-
-    assert_eq!(gaussians.len(), gaussians_read.len());
-
-    for (a, b) in gaussians.iter().zip(gaussians_read.iter()) {
-        assert::ply_gaussian_pod(a, b);
+fn test_ply_collection_conversions_reject_invalid_sh_lengths() {
+    for degree in 0..=4 {
+        let original = degree_gaussians(degree);
+        assert_eq!(
+            PlyGaussians::try_from_iter(original.gaussians.clone()).unwrap(),
+            original
+        );
     }
-}
 
-#[test]
-fn test_ply_gaussians_from_vec_from_iter_and_iter_iter_mut_iter_gaussian_should_be_equal() {
-    let original = given::gaussians();
-    let original_ply = given::ply_gaussians();
-    let original_vec = original_ply.0.clone();
+    let empty = PlyGaussians::try_from(Vec::new()).unwrap();
 
-    let from_vec = PlyGaussians::from(original_vec.clone());
-    let from_iter: PlyGaussians = original.iter().collect();
-    let mut from_iter_mut = from_iter.clone();
+    assert_eq!(empty.sh_degree, 3);
+    assert_eq!(PlyGaussians::try_from_iter(Vec::new()).unwrap(), empty);
 
-    for (original, vec, iter, iter_mut, iter_gaussian) in itertools::izip!(
-        original_vec.iter(),
-        from_vec.iter(),
-        from_iter.iter(),
-        from_iter_mut.iter_mut(),
-        from_iter.iter_gaussian(),
-    ) {
-        assert::ply_gaussian_pod(original, vec);
-        assert::ply_gaussian_pod(original, iter);
-        assert::ply_gaussian_pod(original, iter_mut);
-        assert::ply_gaussian_pod(original, &iter_gaussian.to_ply());
+    let valid = degree_gaussians(2).gaussians.remove(0);
+    let mut invalid = valid.clone();
+    invalid.sh.pop();
+
+    let mut unsupported = valid.clone();
+    unsupported.sh = vec![0.0; 3 * ((5_usize + 1).pow(2) - 1)];
+
+    let mixed = vec![valid, degree_gaussians(1).gaussians.remove(0)];
+
+    assert_matches!(
+        PlyGaussians::try_from(vec![invalid.clone()]),
+        Err(PlyGaussiansFromIterError::UnsupportedShCount { count }) if count == invalid.sh.len()
+    );
+    assert_matches!(
+        PlyGaussians::try_from_iter(vec![unsupported.clone()]),
+        Err(PlyGaussiansFromIterError::UnsupportedShCount { count }) if count == unsupported.sh.len()
+    );
+
+    for records in [vec![invalid], vec![unsupported], mixed.clone()] {
+        assert_eq!(
+            PlyGaussians::new(records, 2).unwrap_err().kind(),
+            std::io::ErrorKind::InvalidData
+        );
     }
+
+    assert_matches!(
+        PlyGaussians::try_from(mixed.clone()),
+        Err(PlyGaussiansFromIterError::ShCountMismatch {
+            actual_count: 9,
+            expected_count: 24
+        })
+    );
+    assert_matches!(
+        PlyGaussians::try_from_iter(mixed),
+        Err(PlyGaussiansFromIterError::ShCountMismatch {
+            actual_count: 9,
+            expected_count: 24
+        })
+    );
 }

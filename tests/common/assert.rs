@@ -1,12 +1,17 @@
-use wgpu_3dgs_core::{Gaussian, PlyGaussianPod};
+use wgpu_3dgs_core::{Gaussian, PlyGaussian};
 
-pub fn ply_gaussian_pod(a: &PlyGaussianPod, b: &PlyGaussianPod) {
+pub fn ply_gaussian_pod(a: &PlyGaussian, b: &PlyGaussian) {
     const EPSILON: f32 = 1e-4;
+
+    assert_eq!(a.sh.len(), b.sh.len());
+    assert!(a.color.abs_diff_eq(b.color, EPSILON));
+    assert!((a.alpha - b.alpha).abs() < EPSILON);
 
     assert!(
         a.rot
+            .to_array()
             .into_iter()
-            .zip(b.rot.into_iter())
+            .zip(b.rot.to_array())
             .all(|(x, y)| (x - y).abs() < EPSILON),
         "rotation assertion failed\n left: {:?}\nright: {:?}",
         a.rot,
@@ -15,8 +20,9 @@ pub fn ply_gaussian_pod(a: &PlyGaussianPod, b: &PlyGaussianPod) {
 
     assert!(
         a.pos
+            .to_array()
             .into_iter()
-            .zip(b.pos.into_iter())
+            .zip(b.pos.to_array())
             .all(|(x, y)| (x - y).abs() < EPSILON),
         "position assertion failed\n left: {:?}\nright: {:?}",
         a.pos,
@@ -25,8 +31,9 @@ pub fn ply_gaussian_pod(a: &PlyGaussianPod, b: &PlyGaussianPod) {
 
     assert!(
         a.normal
+            .to_array()
             .into_iter()
-            .zip(b.normal.into_iter())
+            .zip(b.normal.to_array())
             .all(|(x, y)| (x - y).abs() < EPSILON),
         "normal assertion failed\n left: {:?}\nright: {:?}",
         a.normal,
@@ -34,8 +41,8 @@ pub fn ply_gaussian_pod(a: &PlyGaussianPod, b: &PlyGaussianPod) {
     );
 
     assert!(
-        a.sh.into_iter()
-            .zip(b.sh.into_iter())
+        a.sh.iter()
+            .zip(b.sh.iter())
             .all(|(x, y)| (x - y).abs() < EPSILON),
         "sh assertion failed\n left: {:?}\nright: {:?}",
         a.sh,
@@ -44,8 +51,9 @@ pub fn ply_gaussian_pod(a: &PlyGaussianPod, b: &PlyGaussianPod) {
 
     assert!(
         a.scale
+            .to_array()
             .into_iter()
-            .zip(b.scale.into_iter())
+            .zip(b.scale.to_array())
             .all(|(x, y)| (x - y).abs() < EPSILON),
         "scale assertion failed\n left: {:?}\nright: {:?}",
         a.scale,

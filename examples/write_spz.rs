@@ -20,6 +20,7 @@ fn main() {
     let model_path = std::env::args()
         .nth(1)
         .unwrap_or_else(|| "target/output.spz".to_string());
+
     let batch_size = std::env::args().nth(2).map(|size| {
         size.parse::<NonZeroUsize>()
             .expect("batch_size must be a non-zero integer")
@@ -71,6 +72,7 @@ fn main() {
         let file = std::fs::File::create(&model_path).expect("create SPZ file");
         let mut writer =
             gs::SpzBatchWriter::new(BufWriter::new(file), &gaussians).expect("SPZ writer");
+
         while !writer.progress().done {
             let progress = writer.step(batch_size).expect("write SPZ batch");
             println!(
@@ -82,6 +84,7 @@ fn main() {
                 progress.total_units,
             );
         }
+
         writer
             .finish()
             .expect("finish SPZ writing")

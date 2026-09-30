@@ -24,9 +24,10 @@ fn test_ply_stream_should_deliver_each_gaussian_before_completion() {
     assert_eq!(stream.total_gaussians(), original.len());
 
     let mut out = Vec::new();
-    assert_eq!(stream.next().unwrap().unwrap(), original.0[0]);
+    assert_eq!(stream.next().unwrap().unwrap(), original.gaussians[0]);
     assert_eq!(stream.next_batch(one(), &mut out).unwrap(), 1);
-    assert_eq!(out, original.0[1..]);
+
+    assert_eq!(out, original.gaussians[1..]);
     assert!(GaussianStream::progress(&stream).done);
     assert_eq!(stream.next_batch(one(), &mut out).unwrap(), 0);
     assert!(stream.next().is_none());
@@ -40,12 +41,15 @@ fn test_ply_stream_when_reading_batches_and_single_items_should_share_progress()
 
     let mut stream = PlyGaussianStream::new(bytes.as_slice()).unwrap();
     let mut out = Vec::new();
+
     assert_eq!(stream.next_batch(one(), &mut out).unwrap(), 1);
-    assert_eq!(out, original.0[..1]);
+    assert_eq!(out, original.gaussians[..1]);
     assert!(!GaussianStream::progress(&stream).done);
-    assert_eq!(stream.next().unwrap().unwrap(), original.0[1]);
+
+    assert_eq!(stream.next().unwrap().unwrap(), original.gaussians[1]);
     assert_eq!(stream.next_batch(one(), &mut out).unwrap(), 0);
-    assert_eq!(out, original.0[..1]);
+
+    assert_eq!(out, original.gaussians[..1]);
     assert!(GaussianStream::progress(&stream).done);
     assert!(stream.next().is_none());
 }
@@ -89,16 +93,17 @@ fn test_ply_batch_writer_from_iter_should_pull_only_declared_count_in_steps() {
     let original = given::ply_gaussians();
     let polled = Cell::new(0);
     let gaussians = original
-        .0
+        .gaussians
         .iter()
-        .copied()
+        .cloned()
         .map(|gaussian| {
             polled.set(polled.get() + 1);
             Ok(gaussian)
         })
         .chain(std::iter::once_with(|| panic!("extra item was pulled")));
 
-    let mut writer = PlyBatchWriter::from_iter(Vec::new(), original.len(), gaussians).unwrap();
+    let mut writer = PlyBatchWriter::from_iter(Vec::new(), original.len(), 3, gaussians).unwrap();
+
     assert_eq!(polled.get(), 0);
     assert_eq!(writer.progress().total_units, original.len());
     assert_eq!(writer.step(one()).unwrap().completed_units, 1);
@@ -109,8 +114,10 @@ fn test_ply_batch_writer_from_iter_should_pull_only_declared_count_in_steps() {
             .unwrap()
             .done
     );
+
     assert_eq!(polled.get(), original.len());
     assert!(writer.step(one()).unwrap().done);
+
     let bytes = writer.finish().unwrap();
     assert_eq!(
         PlyGaussians::read_from(&mut bytes.as_slice()).unwrap(),
@@ -124,7 +131,8 @@ fn test_ply_batch_writer_from_iter_when_input_is_short_should_return_error() {
     let mut writer = PlyBatchWriter::from_iter(
         Vec::new(),
         original.len(),
-        std::iter::once(Ok(original.0[0])),
+        3,
+        std::iter::once(Ok(original.gaussians[0].clone())),
     )
     .unwrap();
 
@@ -146,10 +154,10 @@ fn test_ply_batch_writer_from_iter_when_input_is_short_should_return_error() {
 #[test]
 fn test_ply_batch_writer_from_iter_when_item_fails_should_propagate_error() {
     let original = given::ply_gaussians();
-    let gaussians = std::iter::once(Ok(original.0[0])).chain(std::iter::once(Err(
+    let gaussians = std::iter::once(Ok(original.gaussians[0].clone())).chain(std::iter::once(Err(
         std::io::Error::new(ErrorKind::InvalidData, "bad Gaussian"),
     )));
-    let mut writer = PlyBatchWriter::from_iter(Vec::new(), original.len(), gaussians).unwrap();
+    let mut writer = PlyBatchWriter::from_iter(Vec::new(), original.len(), 3, gaussians).unwrap();
 
     assert_eq!(
         writer
@@ -168,12 +176,19 @@ fn test_ply_batch_writer_from_iter_should_accept_a_ply_stream() {
     let mut input = Vec::new();
     original.write_to(&mut input).unwrap();
     let stream = PlyGaussianStream::new(input.as_slice()).unwrap();
-    let mut writer =
-        PlyBatchWriter::from_iter(Vec::new(), stream.total_gaussians(), stream).unwrap();
+
+    let mut writer = PlyBatchWriter::from_iter(
+        Vec::new(),
+        stream.total_gaussians(),
+        stream.header().sh_degree,
+        stream,
+    )
+    .unwrap();
 
     while !writer.progress().done {
         writer.step(one()).unwrap();
     }
+
     let output = writer.finish().unwrap();
     assert_eq!(
         PlyGaussians::read_from(&mut output.as_slice()).unwrap(),
@@ -246,12 +261,13 @@ fn test_spz_batch_when_gzip_trailer_is_truncated_should_return_error() {
 
 #[test]
 fn test_ply_batch_when_empty_should_be_already_done() {
-    let original = PlyGaussians(Vec::new());
+    let original = PlyGaussians::try_from(Vec::new()).unwrap();
     let bytes = PlyBatchWriter::new(Vec::new(), &original)
         .unwrap()
         .finish()
         .unwrap();
     let reader = PlyBatchReader::new(bytes.as_slice()).unwrap();
+
     assert!(BatchRead::progress(&reader).done);
     assert_eq!(reader.finish().unwrap(), original);
 }
@@ -261,14 +277,17 @@ fn test_ply_batch_writer_from_iter_when_count_is_zero_should_not_poll_iterator()
     let writer = PlyBatchWriter::from_iter(
         Vec::new(),
         0,
+        3,
         std::iter::once_with(|| panic!("iterator was polled")),
     )
     .unwrap();
+
     assert!(writer.progress().done);
+
     let bytes = writer.finish().unwrap();
     assert_eq!(
         PlyGaussians::read_from(&mut bytes.as_slice()).unwrap(),
-        PlyGaussians(Vec::new())
+        PlyGaussians::try_from(Vec::new()).unwrap()
     );
 }
 
@@ -432,7 +451,7 @@ fn test_gaussians_stream_when_ply_record_is_truncated_should_keep_previous_gauss
 
 #[test]
 fn test_gaussians_batch_when_model_is_empty_should_be_already_done() {
-    let original = Gaussians::from(PlyGaussians(Vec::new()));
+    let original = Gaussians::from(PlyGaussians::try_from(Vec::new()).unwrap());
     let writer = GaussiansBatchWriter::new(Vec::new(), &original).unwrap();
     assert!(writer.progress().done);
     let bytes = writer.finish().unwrap();

@@ -20,6 +20,7 @@ async fn main() {
     let model_path = std::env::args()
         .nth(1)
         .unwrap_or_else(|| "examples/model.ply".to_string());
+
     let batch_size = std::env::args().nth(2).map(|size| {
         size.parse::<NonZeroUsize>()
             .expect("batch_size must be a non-zero integer")
@@ -47,6 +48,7 @@ async fn main() {
     let gaussians = if let Some(batch_size) = batch_size {
         let file = std::fs::File::open(&model_path).expect("open PLY file");
         let mut reader = gs::PlyBatchReader::new(BufReader::new(file)).expect("PLY reader");
+
         while !reader.progress().done {
             let progress = reader.step(batch_size).expect("read PLY batch");
             println!(
@@ -58,6 +60,7 @@ async fn main() {
                 progress.total_units,
             );
         }
+
         reader.finish().expect("finish PLY reading")
     } else {
         gs::PlyGaussians::read_from_file(&model_path).expect("gaussians")

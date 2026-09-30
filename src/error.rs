@@ -2,6 +2,19 @@ use thiserror::Error;
 
 use crate::{SpzGaussianPosition, SpzGaussianRotation, SpzGaussianSh, SpzGaussianShDegree};
 
+/// The error type for [`PlyGaussians::try_from_iter`](crate::PlyGaussians::try_from_iter)
+/// and [`PlyGaussians::try_from`](crate::PlyGaussians::try_from).
+#[derive(Debug, Error)]
+pub enum PlyGaussiansFromIterError {
+    #[error("unsupported PLY Gaussian SH coefficient count: {count}")]
+    UnsupportedShCount { count: usize },
+    #[error("PLY Gaussian SH count mismatch: {actual_count} != {expected_count}")]
+    ShCountMismatch {
+        actual_count: usize,
+        expected_count: usize,
+    },
+}
+
 /// The error type for [`SpzGaussians::from_iter`](crate::SpzGaussians::from_iter).
 #[derive(Debug, Error)]
 pub enum SpzGaussiansFromIterError {
