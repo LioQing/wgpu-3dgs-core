@@ -85,11 +85,39 @@ pub fn gaussians() -> Vec<Gaussian> {
 }
 
 pub fn ply_gaussians() -> PlyGaussians {
-    gaussians().iter().collect()
+    PlyGaussians::from_gaussians(gaussians()).unwrap()
 }
 
 pub fn spz_gaussians() -> SpzGaussians {
-    gaussians().iter().collect()
+    SpzGaussians::from_gaussians(gaussians()).unwrap()
+}
+
+pub fn gaussian_for_sh_degree<D: wgpu_3dgs_core::ShDegree>(seed: u32) -> Gaussian<D> {
+    let mut gaussian = gaussian_with_seed(seed).convert_sh_degree::<D>();
+
+    for (i, sh) in gaussian.sh.as_mut().iter_mut().enumerate() {
+        let base = seed as f32 + i as f32 * 0.3;
+        *sh = Vec3::new(base + 0.1, base + 0.2, base + 0.3) % Vec3::splat(2.0) - Vec3::ONE;
+    }
+
+    gaussian
+}
+
+/// Explicitly convert fixture data to the requested runtime degree.
+pub fn runtime_gaussians(degree: u8) -> Vec<wgpu_3dgs_core::AnyGaussian> {
+    use wgpu_3dgs_core::*;
+
+    gaussians()
+        .into_iter()
+        .map(|g| match degree {
+            0 => AnyGaussian::Zero(g.convert_sh_degree()),
+            1 => AnyGaussian::One(g.convert_sh_degree()),
+            2 => AnyGaussian::Two(g.convert_sh_degree()),
+            3 => AnyGaussian::Three(g),
+            4 => AnyGaussian::Four(g.convert_sh_degree()),
+            _ => panic!("unsupported fixture degree"),
+        })
+        .collect()
 }
 
 pub fn gaussian() -> Gaussian {

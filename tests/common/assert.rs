@@ -1,4 +1,4 @@
-use wgpu_3dgs_core::{Gaussian, PlyGaussian};
+use wgpu_3dgs_core::{PlyGaussian, ShDegree4, ToAnyGaussian};
 
 pub fn ply_gaussian_pod(a: &PlyGaussian, b: &PlyGaussian) {
     const EPSILON: f32 = 1e-4;
@@ -71,8 +71,8 @@ pub struct GaussianOptions {
 }
 
 pub fn gaussian(
-    a: &Gaussian,
-    b: &Gaussian,
+    a: &impl ToAnyGaussian,
+    b: &impl ToAnyGaussian,
     &GaussianOptions {
         pos_epsilon,
         rot_epsilon,
@@ -81,6 +81,14 @@ pub fn gaussian(
         scale_epsilon,
     }: &GaussianOptions,
 ) {
+    let a = a.to_any_gaussian();
+    let b = b.to_any_gaussian();
+
+    assert_eq!(a.sh_degree(), b.sh_degree());
+
+    let a = a.convert_sh_degree::<ShDegree4>();
+    let b = b.convert_sh_degree::<ShDegree4>();
+
     assert!(
         a.rot.abs_diff_eq(b.rot, rot_epsilon),
         "rotation assertion failed\n left: {:?}\nright: {:?}",
@@ -102,7 +110,7 @@ pub fn gaussian(
         b.color
     );
 
-    for i in 0..15 {
+    for i in 0..24 {
         assert!(
             a.sh[i].abs_diff_eq(b.sh[i], sh_epsilon),
             "sh[{}] assertion failed\n left: {:?}\nright: {:?}",

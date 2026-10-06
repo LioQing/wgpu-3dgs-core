@@ -6,23 +6,30 @@ use std::{
 use glam::{Quat, Vec3};
 
 use crate::{
-    BatchProgress, BatchRead, BatchWrite, Gaussian, GaussianStream, IterGaussian,
-    PlyGaussiansFromIterError, ReadIterGaussian, WriteIterGaussian, source_format,
+    AnyGaussian, BatchProgress, BatchRead, BatchWrite, Gaussian, GaussianShDegree, GaussianStream,
+    IterGaussian, PlyGaussiansFromIterError, ReadIterGaussian, ShDegree, ToAnyGaussian,
+    WriteIterGaussian, source_format,
 };
 
 fn sh_count(degree: u8) -> usize {
-    (degree as usize + 1).pow(2) - 1
+    GaussianShDegree::new(degree)
+        .expect("validated PLY degree")
+        .num_coefficients()
 }
 
-fn degree_from_len(len: usize) -> Option<u8> {
-    (0..=4).find(|&degree| sh_count(degree) * 3 == len)
+fn sh_degree_from_len(len: usize) -> Option<u8> {
+    if !len.is_multiple_of(3) {
+        return None;
+    }
+
+    GaussianShDegree::from_coefficient_count(len / 3).map(|d| d.get())
 }
 
 fn invalid_data(message: impl Into<String>) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message.into())
 }
 
-fn validate_degree(degree: u8) -> io::Result<()> {
+fn validate_sh_degree(degree: u8) -> io::Result<()> {
     if degree > 4 {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -40,10 +47,11 @@ pub struct PlyGaussian {
     pub pos: Vec3,
     pub normal: Vec3,
     pub color: Vec3,
+    /// Changing this to an invalid count will cause [`IterGaussian::iter_gaussian`] to panic.
     pub sh: Vec<f32>,
     pub alpha: f32,
     pub scale: Vec3,
-    /// Rotation in xyzw order; PLY stores it in wxyz order.
+    /// Rotation in xyzw order. PLY stores it in wxyz order.
     pub rot: Quat,
 }
 
@@ -164,14 +172,14 @@ impl PlyGaussian {
     }
 }
 
-impl From<Gaussian> for PlyGaussian {
-    fn from(gaussian: Gaussian) -> Self {
+impl<D: ShDegree> From<Gaussian<D>> for PlyGaussian {
+    fn from(gaussian: Gaussian<D>) -> Self {
         gaussian.to_ply()
     }
 }
 
-impl From<&Gaussian> for PlyGaussian {
-    fn from(gaussian: &Gaussian) -> Self {
+impl<D: ShDegree> From<&Gaussian<D>> for PlyGaussian {
+    fn from(gaussian: &Gaussian<D>) -> Self {
         gaussian.to_ply()
     }
 }
@@ -201,16 +209,21 @@ pub struct PlyGaussians {
 
 impl PlyGaussians {
     /// Construct a collection, checking that all records have the declared SH degree.
-    pub fn new(gaussians: Vec<PlyGaussian>, sh_degree: u8) -> io::Result<Self> {
-        validate_degree(sh_degree)?;
+    pub fn new(
+        gaussians: Vec<PlyGaussian>,
+        sh_degree: u8,
+    ) -> Result<Self, PlyGaussiansFromIterError> {
+        let degree = GaussianShDegree::new(sh_degree)
+            .ok_or(PlyGaussiansFromIterError::UnsupportedShDegree { degree: sh_degree })?;
+        let expected_count = degree.num_coefficients() * 3;
 
-        if gaussians
-            .iter()
-            .any(|g| g.sh.len() != sh_count(sh_degree) * 3)
-        {
-            return Err(invalid_data(
-                "PLY Gaussian SH count does not match the degree",
-            ));
+        for gaussian in &gaussians {
+            if gaussian.sh.len() != expected_count {
+                return Err(PlyGaussiansFromIterError::ShCountMismatch {
+                    actual_count: gaussian.sh.len(),
+                    expected_count,
+                });
+            }
         }
 
         Ok(Self {
@@ -219,12 +232,36 @@ impl PlyGaussians {
         })
     }
 
-    /// Collect PLY records, inferring their shared SH degree from the first record.
-    /// Empty collections default to degree 3.
-    pub fn try_from_iter(
+    /// Collect PLY records with an explicit shared SH degree, including empty input.
+    ///
+    /// Each record's coefficient count must match the declared degree.
+    /// Use [`Self::from_gaussians`] to convert native values with degree inference.
+    pub fn from_iter(
         iter: impl IntoIterator<Item = PlyGaussian>,
+        sh_degree: u8,
     ) -> Result<Self, PlyGaussiansFromIterError> {
-        Self::try_from(iter.into_iter().collect::<Vec<_>>())
+        Self::new(iter.into_iter().collect(), sh_degree)
+    }
+
+    /// Convert native Gaussians, inferring their shared storage degree.
+    ///
+    /// Empty typed input retains its static degree. Empty runtime input defaults to
+    /// degree 3. Use [`Self::from_iter`] to preserve an explicit degree instead.
+    /// Mixed storage degrees are rejected.
+    pub fn from_gaussians<T: ToAnyGaussian>(
+        gaussians: impl IntoIterator<Item = T>,
+    ) -> Result<Self, PlyGaussiansFromIterError> {
+        let mut gaussians = gaussians
+            .into_iter()
+            .map(|g| g.to_any_gaussian())
+            .peekable();
+
+        let degree = gaussians
+            .peek()
+            .map(|g| g.sh_degree().get())
+            .unwrap_or(T::SH_DEGREE.unwrap_or(3));
+
+        Self::from_iter(gaussians.map(|g| g.to_ply()), degree)
     }
 
     /// The number of Gaussians.
@@ -286,7 +323,7 @@ impl PlyGaussians {
             }
         }
 
-        let sh_degree = degree_from_len(rest)
+        let sh_degree = sh_degree_from_len(rest)
             .ok_or_else(|| invalid_data(format!("unsupported PLY SH coefficient count: {rest}")))?;
 
         for name in [
@@ -320,39 +357,44 @@ impl PlyGaussians {
         Ok(PlyHeader { header, sh_degree })
     }
 
-    /// Read the PLY Gaussians into [`PlyGaussian`].
+    /// Read a complete PLY Gaussian collection, preserving the header's SH degree.
     ///
-    /// `header` may be parsed by calling [`PlyGaussians::read_header`].
-    pub fn read_gaussians(
-        reader: &mut impl BufRead,
-        header: PlyHeader,
-    ) -> io::Result<impl Iterator<Item = io::Result<PlyGaussian>> + '_> {
+    /// `reader` must be positioned after the header parsed by [`Self::read_header`].
+    /// For incremental delivery, use [`PlyGaussianStream::from_header`] instead.
+    pub fn read_gaussians(reader: &mut impl BufRead, header: PlyHeader) -> io::Result<Self> {
         let count = header.count();
+        let sh_degree = header.sh_degree;
 
         log::info!(
             "Reading PLY format with {count} Gaussians (SH degree {})",
             header.sh_degree
         );
 
-        Ok((0..count).map(move |_| PlyGaussian::read_from(reader, &header)))
+        let gaussians =
+            PlyGaussianStream::from_header(reader, header).collect::<io::Result<Vec<_>>>()?;
+
+        Self::new(gaussians, sh_degree)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
     }
 }
 
 impl IterGaussian for PlyGaussians {
-    fn iter_gaussian(&self) -> impl ExactSizeIterator<Item = Gaussian> + '_ {
-        self.iter().map(Gaussian::from_ply)
+    type Gaussian = AnyGaussian;
+
+    fn sh_degree(&self) -> GaussianShDegree {
+        GaussianShDegree::new(self.sh_degree).expect("validated PLY degree")
+    }
+
+    fn iter_gaussian(&self) -> impl ExactSizeIterator<Item = AnyGaussian> + '_ {
+        self.iter()
+            .map(|g| AnyGaussian::from_ply(g).expect("validated PLY coefficients"))
     }
 }
 
 impl ReadIterGaussian for PlyGaussians {
     fn read_from(reader: &mut impl BufRead) -> io::Result<Self> {
-        let mut reader = PlyBatchReader::new(reader)?;
-
-        while !BatchRead::progress(&reader).done {
-            reader.step(NonZeroUsize::new(4096).unwrap())?;
-        }
-
-        reader.finish()
+        let header = Self::read_header(reader)?;
+        Self::read_gaussians(reader, header)
     }
 }
 
@@ -376,7 +418,7 @@ impl TryFrom<Vec<PlyGaussian>> for PlyGaussians {
     fn try_from(gaussians: Vec<PlyGaussian>) -> Result<Self, Self::Error> {
         let sh_degree = match gaussians.first() {
             Some(gaussian) => {
-                degree_from_len(gaussian.sh.len()).ok_or(Self::Error::UnsupportedShCount {
+                sh_degree_from_len(gaussian.sh.len()).ok_or(Self::Error::UnsupportedShCount {
                     count: gaussian.sh.len(),
                 })?
             }
@@ -398,18 +440,6 @@ impl TryFrom<Vec<PlyGaussian>> for PlyGaussians {
     }
 }
 
-impl<G: AsRef<Gaussian>> FromIterator<G> for PlyGaussians {
-    fn from_iter<T: IntoIterator<Item = G>>(iter: T) -> Self {
-        Self::new(
-            iter.into_iter()
-                .map(|g| g.as_ref().to_ply())
-                .collect::<Vec<_>>(),
-            3,
-        )
-        .expect("Gaussian always produces degree 3 PLY")
-    }
-}
-
 /// PLY stream that delivers records before the whole file has been read.
 pub struct PlyGaussianStream<R: BufRead> {
     reader: R,
@@ -420,17 +450,27 @@ pub struct PlyGaussianStream<R: BufRead> {
 }
 
 impl<R: BufRead> PlyGaussianStream<R> {
+    /// Parse the header and prepare to stream PLY records.
     pub fn new(mut reader: R) -> io::Result<Self> {
         let header = PlyGaussians::read_header(&mut reader)?;
+        Ok(Self::from_header(reader, header))
+    }
+
+    /// Prepare to stream records after a previously parsed header.
+    ///
+    /// `header` must come from [`PlyGaussians::read_header`] without modification,
+    /// and `reader` must be positioned at the first vertex record. This constructor
+    /// does not read any records.
+    pub fn from_header(reader: R, header: PlyHeader) -> Self {
         let total = header.count();
 
-        Ok(Self {
+        Self {
             reader,
             header,
             read: 0,
             total,
             failed: false,
-        })
+        }
     }
 
     /// Get the header parsed from PLY.
@@ -511,11 +551,12 @@ impl<R: BufRead> BatchRead for PlyBatchReader<R> {
             return Err(source_format::batch::incomplete());
         }
         PlyGaussians::new(self.gaussians, self.stream.header().sh_degree)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
     }
 }
 
 /// PLY writer that consumes an iterator incrementally. The degree and count must
-/// be supplied before writing the header; each record is checked before writing.
+/// be supplied before writing the header. Each record is checked before writing.
 pub struct PlyBatchWriter<W: Write, I: Iterator<Item = io::Result<PlyGaussian>>> {
     writer: W,
     gaussians: I,
@@ -543,7 +584,7 @@ impl<'a, W: Write> PlyBatchWriter<W, PlyGaussiansBatchIter<'a>> {
 impl<W: Write, I: Iterator<Item = io::Result<PlyGaussian>>> PlyBatchWriter<W, I> {
     /// Write a header and prepare to consume `count` records with the given SH degree.
     pub fn from_iter(mut writer: W, count: usize, sh_degree: u8, gaussians: I) -> io::Result<Self> {
-        validate_degree(sh_degree)?;
+        validate_sh_degree(sh_degree)?;
 
         Self::write_header(&mut writer, count, sh_degree)?;
 
