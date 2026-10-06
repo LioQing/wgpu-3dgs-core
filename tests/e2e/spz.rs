@@ -4,9 +4,9 @@ use std::io::ErrorKind;
 use wgpu_3dgs_core::{
     Gaussian, IterGaussian, ReadIterGaussian, SpzGaussian, SpzGaussianPosition, SpzGaussianRef,
     SpzGaussianRotation, SpzGaussianSh, SpzGaussianShDegree, SpzGaussianShRef, SpzGaussians,
-    SpzGaussiansCollectError, SpzGaussiansFromGaussianSliceOptions, SpzGaussiansFromIterError,
-    SpzGaussiansHeader, SpzGaussiansHeaderPod, SpzGaussiansPositions, SpzGaussiansRotations,
-    SpzGaussiansShs, SpzPhase, WriteIterGaussian,
+    SpzGaussiansCollectError, SpzGaussiansFromGaussianSliceOptions, SpzGaussiansFromGaussiansError,
+    SpzGaussiansFromIterError, SpzGaussiansHeader, SpzGaussiansHeaderPod, SpzGaussiansPositions,
+    SpzGaussiansRotations, SpzGaussiansShs, SpzPhase, WriteIterGaussian,
 };
 
 use crate::common::{assert, given};
@@ -78,8 +78,8 @@ fn test_spz_color_round_trip_should_preserve_all_byte_values() {
         spz.color = [value; 3];
         spz.alpha = value;
 
-        let gaussian = Gaussian::from_spz(spz.as_ref(), &header);
-        let round_trip = gaussian.to_spz(&header, &Default::default());
+        let gaussian = wgpu_3dgs_core::AnyGaussian::from_spz(spz.as_ref(), &header).unwrap();
+        let round_trip = gaussian.to_spz(&header, &Default::default()).unwrap();
 
         assert_eq!(round_trip.color, spz.color);
         assert_eq!(round_trip.alpha, spz.alpha);
@@ -129,7 +129,7 @@ fn test_spz_decompressed_write_and_reads_should_preserve_field_layout() {
     for version in SpzGaussiansHeader::SUPPORTED_VERSIONS {
         for degree in SpzGaussiansHeader::SUPPORTED_SH_DEGREES {
             let original = SpzGaussians::from_gaussians_with_options(
-                given::gaussians(),
+                given::runtime_gaussians(degree),
                 &SpzGaussiansFromGaussianSliceOptions {
                     version,
                     sh_degree: SpzGaussianShDegree::new(degree).unwrap(),
@@ -241,9 +241,11 @@ fn test_spz_decompressed_reads_when_header_or_fields_are_truncated_should_return
 fn test_spz_gaussians_buffer_round_trip_with_options_should_preserve_count(
     options: &SpzGaussiansFromGaussianSliceOptions,
 ) {
-    let gaussians = given::gaussians();
-    let from_options =
-        SpzGaussians::from_gaussians_with_options(gaussians.as_slice(), options).unwrap();
+    let from_options = SpzGaussians::from_gaussians_with_options(
+        given::runtime_gaussians(options.sh_degree.get()),
+        options,
+    )
+    .unwrap();
 
     let mut buffer = Vec::new();
     from_options.write_to(&mut buffer).unwrap();
@@ -295,7 +297,7 @@ fn test_spz_gaussians_from_iter_and_iter_iter_gaussian_should_be_equal() {
     let gaussians = given::gaussians();
     let original_spz = given::spz_gaussians(); // `spz_gaussians` uses the same as `gaussians`
 
-    let from_iter = gaussians.iter().collect::<SpzGaussians>();
+    let from_iter = SpzGaussians::from_gaussians(gaussians.iter()).unwrap();
 
     assert_eq!(original_spz, from_iter);
 
@@ -307,7 +309,7 @@ fn test_spz_gaussians_from_iter_and_iter_iter_gaussian_should_be_equal() {
         assert_eq!(original_ref, iter_ref);
         assert::gaussian(
             &slice_gaussian,
-            &Gaussian::from_spz(iter_ref, &from_iter.header),
+            &wgpu_3dgs_core::AnyGaussian::from_spz(iter_ref, &from_iter.header).unwrap(),
             &ASSERT_GAUSSIAN_OPTIONS,
         );
     }
@@ -318,8 +320,11 @@ fn test_spz_gaussians_from_gaussians_with_options_and_iter_should_be_equal(
     mut assertion: impl FnMut(SpzGaussianRef, &Gaussian, &SpzGaussiansHeader),
 ) {
     let gaussians = given::gaussians();
-    let from_options =
-        SpzGaussians::from_gaussians_with_options(gaussians.as_slice(), options).unwrap();
+    let from_options = SpzGaussians::from_gaussians_with_options(
+        given::runtime_gaussians(options.sh_degree.get()),
+        options,
+    )
+    .unwrap();
 
     for (a, b) in from_options.iter().zip(gaussians.iter()) {
         assertion(a, b, &from_options.header);
@@ -336,7 +341,10 @@ fn test_spz_gaussians_from_gaussians_with_options_and_iter_when_versions_should_
                 ..Default::default()
             },
             |spz_gaussian_ref, gaussian, header| {
-                let gaussian_from_spz = Gaussian::from_spz(spz_gaussian_ref, header);
+                let gaussian_from_spz =
+                    wgpu_3dgs_core::AnyGaussian::from_spz(spz_gaussian_ref, header)
+                        .unwrap()
+                        .convert_sh_degree::<wgpu_3dgs_core::ShDegree3>();
                 assert::gaussian(&gaussian_from_spz, gaussian, &ASSERT_GAUSSIAN_OPTIONS);
             },
         );
@@ -353,7 +361,10 @@ fn test_spz_gaussians_from_gaussians_with_options_and_iter_when_sh_degrees_shoul
                 ..Default::default()
             },
             |spz_gaussian_ref, gaussian, header| {
-                let gaussian_from_spz = Gaussian::from_spz(spz_gaussian_ref, header);
+                let gaussian_from_spz =
+                    wgpu_3dgs_core::AnyGaussian::from_spz(spz_gaussian_ref, header)
+                        .unwrap()
+                        .convert_sh_degree::<wgpu_3dgs_core::ShDegree3>();
                 assert::gaussian(
                     &gaussian_from_spz,
                     &Gaussian {
@@ -386,7 +397,10 @@ fn test_spz_gaussians_from_gaussians_and_with_options_iter_when_fractional_bits_
                 ..Default::default()
             },
             |spz_gaussian_ref, gaussian, header| {
-                let gaussian_from_spz = Gaussian::from_spz(spz_gaussian_ref, header);
+                let gaussian_from_spz =
+                    wgpu_3dgs_core::AnyGaussian::from_spz(spz_gaussian_ref, header)
+                        .unwrap()
+                        .convert_sh_degree::<wgpu_3dgs_core::ShDegree3>();
                 assert::gaussian(&gaussian_from_spz, gaussian, &ASSERT_GAUSSIAN_OPTIONS);
             },
         );
@@ -411,7 +425,10 @@ fn test_spz_gaussians_from_gaussians_with_options_and_iter_when_sh_quantize_bits
                 ..Default::default()
             },
             |spz_gaussian_ref, gaussian, header| {
-                let gaussian_from_spz = Gaussian::from_spz(spz_gaussian_ref, header);
+                let gaussian_from_spz =
+                    wgpu_3dgs_core::AnyGaussian::from_spz(spz_gaussian_ref, header)
+                        .unwrap()
+                        .convert_sh_degree::<wgpu_3dgs_core::ShDegree3>();
                 assert::gaussian(&gaussian_from_spz, gaussian, &ASSERT_GAUSSIAN_OPTIONS);
             },
         );
@@ -431,7 +448,7 @@ fn test_spz_gaussians_from_gaussians_with_options_when_header_version_is_invalid
 
     assert_matches!(
         result,
-        Err(e)
+        Err(SpzGaussiansFromGaussiansError::Header(e))
         if e.kind() == std::io::ErrorKind::InvalidData &&
             e.to_string() == "Unsupported SPZ version: 999, expected one of 1..=3"
     );
@@ -468,9 +485,11 @@ fn test_spz_gaussians_from_empty_iter_should_use_header_variants() {
                 header.uses_quat_smallest_three()
             );
 
-            let from_gaussians =
-                SpzGaussians::from_gaussians_with_options(Vec::<Gaussian>::new(), &options)
-                    .unwrap();
+            let from_gaussians = SpzGaussians::from_gaussians_with_options(
+                Vec::<wgpu_3dgs_core::AnyGaussian>::new(),
+                &options,
+            )
+            .unwrap();
             assert_eq!(from_gaussians, spz);
 
             let mut decompressed = Vec::new();
@@ -489,7 +508,7 @@ fn test_spz_gaussians_from_empty_iter_should_use_header_variants() {
         }
     }
 
-    let collected: SpzGaussians = std::iter::empty::<Gaussian>().collect();
+    let collected = SpzGaussians::from_gaussians(std::iter::empty::<Gaussian>()).unwrap();
     assert!(collected.is_empty());
     assert_eq!(collected.shs.degree(), SpzGaussianShDegree::default());
 }

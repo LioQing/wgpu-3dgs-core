@@ -6,17 +6,33 @@ Please also check out the [`wgpu-3dgs-viewer` changelog](https://github.com/LioQ
 
 ### Added
 
+- 🔢 Add native and GPU support for SH degrees 0 to 4. SPZ remains limited to degrees 0 to 3. [#45](https://github.com/LioQing/wgpu-3dgs-core/pull/45)
+- 🔄 Add `InternalGaussians::from_gaussians` and `PlyGaussians::from_gaussians` for inferred-degree conversion, and `convert_sh_degree` for truncation or zero-extension. [#45](https://github.com/LioQing/wgpu-3dgs-core/pull/45)
+- 📥 Add `PlyGaussianStream::from_header` and typed streaming through `GaussiansStream::into_typed`. [#45](https://github.com/LioQing/wgpu-3dgs-core/pull/45)
+- 🛠️ Add borrowed iteration through `InternalGaussians::iter` and `iter_mut`. [#45](https://github.com/LioQing/wgpu-3dgs-core/pull/45)
+- 🔄 Add `Gaussians::into_internal`, `into_ply`, `into_spz`, and `into_spz_with_options` for source conversion. [#45](https://github.com/LioQing/wgpu-3dgs-core/pull/45)
+- 🖥️ Add `GaussiansBuffer::try_*` methods for degree-checked runtime uploads and updates. [#45](https://github.com/LioQing/wgpu-3dgs-core/pull/45)
 - 🔄 Add `BatchRead`, `BatchWrite`, and `BatchProgress` for bounded-step PLY and SPZ reads and writes, including `GaussiansBatchReader` and `GaussiansBatchWriter` for unified models. [#34](https://github.com/LioQing/wgpu-3dgs-core/pull/34) [#36](https://github.com/LioQing/wgpu-3dgs-core/pull/36)
 - 📥 Add `GaussianStream`, `PlyGaussianStream`, and `GaussiansStream` to consume PLY Gaussians before the whole file is loaded, using `Iterator::next` or `next_batch` for caller-owned batches, SPZ does not support streaming Gaussian delivery. [#34](https://github.com/LioQing/wgpu-3dgs-core/pull/34) [#36](https://github.com/LioQing/wgpu-3dgs-core/pull/36)
 - 🔢 Add support for PLY SH degrees 0 to 4, preserving the degree and coefficients in whole-model, batch, and streaming reads and writes. [#44](https://github.com/LioQing/wgpu-3dgs-core/pull/44)
 
 ### Changed
 
+- 🐛 Fix overflow in Gaussian buffer update-range checks. [#45](https://github.com/LioQing/wgpu-3dgs-core/pull/45)
+- 🛡️ Reject SH quantization bit counts above 8 when encoding a Gaussian to SPZ. [#45](https://github.com/LioQing/wgpu-3dgs-core/pull/45)
 - 🧩 Update `GaussianPodWithSh...Cov3d...Configs` to `PackedGaussian<Sh..., Cov...>` so it is more ergonomic now. The old names remain available but are deprecated, and are planned to be removed in version 0.10. [#38](https://github.com/LioQing/wgpu-3dgs-core/pull/38)
 - 🐛 Fix `SpzGaussians::from_iter` panicking on empty input for zero-point headers, and reject unsupported SPZ SH degrees in headers. [#40](https://github.com/LioQing/wgpu-3dgs-core/pull/40)
 
 ### Breaking Changes
 
+- Change `PlyGaussians::read_gaussians` to return a complete collection, retaining the SH degree for empty files. [#45](https://github.com/LioQing/wgpu-3dgs-core/pull/45)
+- Rename `PlyGaussians::try_from_iter` to `from_iter(records, degree)`. `PlyGaussians::new` now returns `PlyGaussiansFromIterError` instead of `std::io::Error`. [#45](https://github.com/LioQing/wgpu-3dgs-core/pull/45)
+- Make `Gaussian` and SH encodings generic over storage degree, defaulting to `ShDegree3`. Add `GaussianShConfig::Degree` and `GaussianPod::ShDegree`. [#45](https://github.com/LioQing/wgpu-3dgs-core/pull/45)
+- Add item-type and degree metadata to `IterGaussian`. Unified iteration and streaming yield `AnyGaussian`, and `Gaussians::Internal` stores `InternalGaussians`. [#45](https://github.com/LioQing/wgpu-3dgs-core/pull/45)
+- Make `Gaussian::from_ply`, `from_spz`, `to_spz`, and unified collection helpers return `Result`. Degrees must match, and `ShNone` requires degree-zero data. [#45](https://github.com/LioQing/wgpu-3dgs-core/pull/45)
+- Make SPZ native constructors accept `ToAnyGaussian` and return `Result` with `SpzGaussiansFromGaussiansError`. Replace native `FromIterator` implementations for PLY and SPZ with `from_gaussians`. [#45](https://github.com/LioQing/wgpu-3dgs-core/pull/45)
+- Make source iteration panic on unsupported PLY SH counts or mismatched SPZ header/SH degrees. [#45](https://github.com/LioQing/wgpu-3dgs-core/pull/45)
+- Require storage-degree flags alongside encoding flags when compiling shaders. `GaussianPod::features()` and `wesl_features()` include both. [#45](https://github.com/LioQing/wgpu-3dgs-core/pull/45)
 - Update `Gaussian::color` to use `Vec4` with floating-point linear RGB and opacity instead of `U8Vec4`. [#35](https://github.com/LioQing/wgpu-3dgs-core/pull/35)
 - Update `SpzGaussians::read_from` to validate the gzip trailer and rejects extra decompressed SPZ data, `SpzGaussians::write_to` to reject field lengths or variants that disagree with the header instead of writing an invalid file. [#34](https://github.com/LioQing/wgpu-3dgs-core/pull/34)
 - Replace `PlyGaussianPod` with `PlyGaussian`, using `Vec3`, `Quat`, and `Vec<f32>` fields instead of fixed-size arrays, and validate more strictly when reading from PLY. The new type is no longer `Copy`, `Pod`, or `Zeroable`. [#44](https://github.com/LioQing/wgpu-3dgs-core/pull/44)

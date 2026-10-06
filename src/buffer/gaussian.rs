@@ -5,8 +5,9 @@ use wgpu::util::DeviceExt;
 use crate::{
     BufferWrapper, CovHalf, CovRotScale, CovSingle, DownloadBufferError, Gaussian,
     GaussianCov3dConfig, GaussianShConfig, GaussiansBufferTryFromBufferError,
-    GaussiansBufferUpdateError, GaussiansBufferUpdateRangeError, IterGaussian, ShHalf, ShNone,
-    ShNorm8, ShSingle,
+    GaussiansBufferUpdateError, GaussiansBufferUpdateRangeError, IterGaussian, ShDegree, ShDegree0,
+    ShDegree1, ShDegree2, ShDegree3, ShDegree4, ShDegreeMismatchError, ShHalf, ShNone, ShNorm8,
+    ShSingle, ToAnyGaussian,
 };
 
 /// The Gaussians storage buffer.
@@ -17,7 +18,10 @@ pub struct GaussiansBuffer<G: GaussianPod>(wgpu::Buffer, std::marker::PhantomDat
 
 impl<G: GaussianPod> GaussiansBuffer<G> {
     /// Create a new Gaussians buffer.
-    pub fn new(device: &wgpu::Device, gaussians: &impl IterGaussian) -> Self {
+    pub fn new(
+        device: &wgpu::Device,
+        gaussians: &impl IterGaussian<Gaussian = Gaussian<G::ShDegree>>,
+    ) -> Self {
         Self::new_with_pods(
             device,
             gaussians
@@ -31,7 +35,7 @@ impl<G: GaussianPod> GaussiansBuffer<G> {
     /// Create a new Gaussians buffer with the specified size with [`wgpu::BufferUsages`].
     pub fn new_with_usage(
         device: &wgpu::Device,
-        gaussians: &impl IterGaussian,
+        gaussians: &impl IterGaussian<Gaussian = Gaussian<G::ShDegree>>,
         usage: wgpu::BufferUsages,
     ) -> Self {
         Self::new_with_pods_and_usage(
@@ -48,6 +52,44 @@ impl<G: GaussianPod> GaussiansBuffer<G> {
     /// Create a new Gaussians buffer with [`GaussianPod`].
     pub fn new_with_pods(device: &wgpu::Device, gaussians: &[G]) -> Self {
         Self::new_with_pods_and_usage(device, gaussians, Self::DEFAULT_USAGES)
+    }
+
+    /// Upload a runtime-degree source, rejecting a mismatch before allocating a buffer.
+    pub fn try_new(
+        device: &wgpu::Device,
+        gaussians: &impl IterGaussian,
+    ) -> Result<Self, ShDegreeMismatchError> {
+        Self::try_new_with_usage(device, gaussians, Self::DEFAULT_USAGES)
+    }
+
+    pub fn try_new_with_usage(
+        device: &wgpu::Device,
+        gaussians: &impl IterGaussian,
+        usage: wgpu::BufferUsages,
+    ) -> Result<Self, ShDegreeMismatchError> {
+        let pods = Self::collect_matching_pods(gaussians)?;
+
+        Ok(Self::new_with_pods_and_usage(device, &pods, usage))
+    }
+
+    fn collect_matching_pods(
+        gaussians: &impl IterGaussian,
+    ) -> Result<Vec<G>, ShDegreeMismatchError> {
+        if gaussians.sh_degree().get() != G::ShDegree::DEGREE {
+            return Err(ShDegreeMismatchError {
+                actual_degree: gaussians.sh_degree().get(),
+                expected_degree: G::ShDegree::DEGREE,
+            });
+        }
+
+        gaussians
+            .iter_gaussian()
+            .map(|g| {
+                g.to_any_gaussian()
+                    .try_typed::<G::ShDegree>()
+                    .map(|g| G::from_gaussian(&g))
+            })
+            .collect()
     }
 
     /// Create a new Gaussians buffer with [`GaussianPod`] and the specified size and
@@ -103,7 +145,7 @@ impl<G: GaussianPod> GaussiansBuffer<G> {
     pub fn update(
         &self,
         queue: &wgpu::Queue,
-        gaussians: &impl IterGaussian,
+        gaussians: &impl IterGaussian<Gaussian = Gaussian<G::ShDegree>>,
     ) -> Result<(), GaussiansBufferUpdateError> {
         self.update_with_pod(
             queue,
@@ -135,6 +177,17 @@ impl<G: GaussianPod> GaussiansBuffer<G> {
         Ok(())
     }
 
+    /// Update from runtime-degree data. All degree checks precede the GPU write.
+    pub fn try_update(
+        &self,
+        queue: &wgpu::Queue,
+        gaussians: &impl IterGaussian,
+    ) -> Result<(), GaussiansBufferUpdateError> {
+        let pods = Self::collect_matching_pods(gaussians)?;
+
+        self.update_with_pod(queue, &pods)
+    }
+
     /// Update a range of the buffer.
     ///
     /// `gaussians` should fit in the buffer starting from `start`.
@@ -142,7 +195,7 @@ impl<G: GaussianPod> GaussiansBuffer<G> {
         &self,
         queue: &wgpu::Queue,
         start: usize,
-        gaussians: &[Gaussian],
+        gaussians: &[Gaussian<G::ShDegree>],
     ) -> Result<(), GaussiansBufferUpdateRangeError> {
         self.update_range_with_pod(
             queue,
@@ -164,7 +217,7 @@ impl<G: GaussianPod> GaussiansBuffer<G> {
         start: usize,
         pods: &[G],
     ) -> Result<(), GaussiansBufferUpdateRangeError> {
-        if start + pods.len() > self.len() {
+        if start > self.len() || pods.len() > self.len() - start {
             return Err(GaussiansBufferUpdateRangeError::CountMismatch {
                 count: pods.len(),
                 start,
@@ -181,12 +234,24 @@ impl<G: GaussianPod> GaussiansBuffer<G> {
         Ok(())
     }
 
+    /// Update a range from a runtime-degree collection without implicit conversion.
+    pub fn try_update_range(
+        &self,
+        queue: &wgpu::Queue,
+        start: usize,
+        gaussians: &impl IterGaussian,
+    ) -> Result<(), GaussiansBufferUpdateRangeError> {
+        let pods = Self::collect_matching_pods(gaussians)?;
+
+        self.update_range_with_pod(queue, start, &pods)
+    }
+
     /// Download the buffer data into a [`Vec`] of [`Gaussian`].
     pub async fn download_gaussians(
         &self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-    ) -> Result<Vec<Gaussian>, DownloadBufferError> {
+    ) -> Result<Vec<Gaussian<G::ShDegree>>, DownloadBufferError> {
         self.download::<G>(device, queue)
             .await
             .map(|pods| pods.into_iter().map(Into::into).collect::<Vec<_>>())
@@ -232,8 +297,8 @@ impl<G: GaussianPod> TryFrom<wgpu::Buffer> for GaussiansBuffer<G> {
 /// Use [`PackedGaussian`] with an SH and covariance config to select a layout, e.g.
 /// `PackedGaussian<ShHalf, CovHalf>`.
 pub trait GaussianPod:
-    for<'a> From<&'a Gaussian>
-    + Into<Gaussian>
+    for<'a> From<&'a Gaussian<Self::ShDegree>>
+    + Into<Gaussian<Self::ShDegree>>
     + Send
     + Sync
     + std::fmt::Debug
@@ -243,30 +308,33 @@ pub trait GaussianPod:
     + bytemuck::NoUninit
     + bytemuck::AnyBitPattern
 {
+    /// Compile-time SH storage degree.
+    type ShDegree: ShDegree;
+
     /// The SH configuration.
-    type ShConfig: GaussianShConfig;
+    type ShConfig: GaussianShConfig<Degree = Self::ShDegree>;
 
     /// The covariance 3D configuration.
     type Cov3dConfig: GaussianCov3dConfig;
 
     /// Convert from POD to Gaussian.
-    fn into_gaussian(self) -> Gaussian {
+    fn into_gaussian(self) -> Gaussian<Self::ShDegree> {
         self.into()
     }
 
     /// Create a new Gaussian POD from the Gaussian.
-    fn from_gaussian(gaussian: &Gaussian) -> Self {
+    fn from_gaussian(gaussian: &Gaussian<Self::ShDegree>) -> Self {
         Self::from(gaussian)
     }
 
     /// Create the features for [`Wesl`](wesl::Wesl) compilation.
     ///
     /// You may want to use [`GaussianPod::wesl_features`] most of the time instead.
-    fn features() -> [(&'static str, bool); 7] {
-        [
-            ShSingle::FEATURE,
-            ShHalf::FEATURE,
-            ShNorm8::FEATURE,
+    fn features() -> [(&'static str, bool); 12] {
+        let encodings = [
+            <ShSingle as GaussianShConfig>::FEATURE,
+            <ShHalf as GaussianShConfig>::FEATURE,
+            <ShNorm8 as GaussianShConfig>::FEATURE,
             ShNone::FEATURE,
             CovRotScale::FEATURE,
             CovSingle::FEATURE,
@@ -277,6 +345,23 @@ pub trait GaussianPod:
                 name,
                 name == Self::ShConfig::FEATURE || name == Self::Cov3dConfig::FEATURE,
             )
+        });
+
+        let degrees = [
+            ShDegree0::FEATURE,
+            ShDegree1::FEATURE,
+            ShDegree2::FEATURE,
+            ShDegree3::FEATURE,
+            ShDegree4::FEATURE,
+        ]
+        .map(|name| (name, name == Self::ShDegree::FEATURE));
+
+        std::array::from_fn(|i| {
+            if i < encodings.len() {
+                encodings[i]
+            } else {
+                degrees[i - encodings.len()]
+            }
         })
     }
 
@@ -341,13 +426,13 @@ where
 {
 }
 
-impl<Sh, Cov> From<&Gaussian> for PackedGaussian<Sh, Cov>
+impl<Sh, Cov> From<&Gaussian<Sh::Degree>> for PackedGaussian<Sh, Cov>
 where
     Sh: GaussianShConfig,
     Cov: GaussianCov3dConfig,
     (Sh, Cov): GaussianPodLayout,
 {
-    fn from(gaussian: &Gaussian) -> Self {
+    fn from(gaussian: &Gaussian<Sh::Degree>) -> Self {
         Self {
             pos: gaussian.pos,
             color: (gaussian.color * 255.0)
@@ -361,7 +446,7 @@ where
     }
 }
 
-impl<Sh, Cov> From<PackedGaussian<Sh, Cov>> for Gaussian
+impl<Sh, Cov> From<PackedGaussian<Sh, Cov>> for Gaussian<Sh::Degree>
 where
     Sh: GaussianShConfig,
     Cov: GaussianCov3dConfig,
@@ -388,6 +473,8 @@ where
     (Sh, Cov): GaussianPodLayout,
     <(Sh, Cov) as GaussianPodLayout>::Padding: Send + Sync,
 {
+    type ShDegree = Sh::Degree;
+
     type ShConfig = Sh;
     type Cov3dConfig = Cov;
 }
@@ -435,6 +522,66 @@ gaussian_pod_layout!(sh = None, cov3d = RotScale, padding_size = 1);
 gaussian_pod_layout!(sh = None, cov3d = Single, padding_size = 2);
 gaussian_pod_layout!(sh = None, cov3d = Half, padding_size = 1);
 
+macro_rules! sh_degree_pod_layout {
+    ($sh:ty, $cov:ty) => {
+        impl sealed::Sealed for ($sh, $cov) {}
+
+        impl GaussianPodLayout for ($sh, $cov) {
+            type Padding = [f32; (16
+                - (16
+                    + std::mem::size_of::<<$sh as GaussianShConfig>::Field>()
+                    + std::mem::size_of::<<$cov as GaussianCov3dConfig>::Field>())
+                    % 16)
+                % 16
+                / 4];
+        }
+
+        const _: () = {
+            type G = PackedGaussian<$sh, $cov>;
+
+            assert!(std::mem::offset_of!(G, pos) == 0);
+            assert!(std::mem::offset_of!(G, color) == 12);
+            assert!(std::mem::offset_of!(G, sh) == 16);
+            assert!(
+                std::mem::offset_of!(G, cov3d)
+                    == 16 + std::mem::size_of::<<$sh as GaussianShConfig>::Field>()
+            );
+            assert!(
+                std::mem::offset_of!(G, padding)
+                    == std::mem::offset_of!(G, cov3d)
+                        + std::mem::size_of::<<$cov as GaussianCov3dConfig>::Field>()
+            );
+            assert!(
+                std::mem::size_of::<G>()
+                    == std::mem::offset_of!(G, padding)
+                        + std::mem::size_of::<<($sh, $cov) as GaussianPodLayout>::Padding>()
+            );
+            assert!(std::mem::size_of::<G>() % 16 == 0);
+        };
+    };
+}
+
+macro_rules! sh_degree_layouts {
+    ($degree:ty) => {
+        sh_degree_pod_layout!(ShSingle<$degree>, CovRotScale);
+        sh_degree_pod_layout!(ShSingle<$degree>, CovSingle);
+        sh_degree_pod_layout!(ShSingle<$degree>, CovHalf);
+
+        sh_degree_pod_layout!(ShHalf<$degree>, CovRotScale);
+        sh_degree_pod_layout!(ShHalf<$degree>, CovSingle);
+        sh_degree_pod_layout!(ShHalf<$degree>, CovHalf);
+
+        sh_degree_pod_layout!(ShNorm8<$degree>, CovRotScale);
+        sh_degree_pod_layout!(ShNorm8<$degree>, CovSingle);
+        sh_degree_pod_layout!(ShNorm8<$degree>, CovHalf);
+    };
+}
+
+sh_degree_layouts!(ShDegree0);
+sh_degree_layouts!(ShDegree1);
+sh_degree_layouts!(ShDegree2);
+sh_degree_layouts!(ShDegree4);
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -446,13 +593,13 @@ mod tests {
                 #[test]
                 #[should_panic]
                 fn [<test_ $name _into_gaussian_should_panic>]() {
-                    let pod = <$pod_type>::from_gaussian(&Gaussian {
+                    let pod = <$pod_type>::from_gaussian(&Gaussian::<ShDegree3> {
                         rot: Quat::from_xyzw(0.0, 0.0, 0.0, 1.0),
                         pos: Vec3::new(1.0, 2.0, 3.0),
                         color: Vec4::new(255.0, 128.0, 64.0, 32.0) / 255.0,
                         sh: [Vec3::new(0.1, 0.2, 0.3); 15],
                         scale: Vec3::new(1.0, 2.0, 3.0),
-                    });
+                    }.convert_sh_degree());
 
                     pod.into_gaussian();
                 }
@@ -462,13 +609,13 @@ mod tests {
             paste::paste! {
                 #[test]
                 fn [<test_ $name _into_gaussian_should_equal_original_pod>]() {
-                    let pod = <$pod_type>::from_gaussian(&Gaussian {
+                    let pod = <$pod_type>::from_gaussian(&Gaussian::<ShDegree3> {
                         rot: Quat::from_xyzw(0.0, 0.0, 0.0, 1.0),
                         pos: Vec3::new(1.0, 2.0, 3.0),
                         color: Vec4::new(255.0, 128.0, 64.0, 32.0) / 255.0,
                         sh: [Vec3::new(0.1, 0.2, 0.3); 15],
                         scale: Vec3::new(1.0, 2.0, 3.0),
-                    });
+                    }.convert_sh_degree());
 
                     let gaussian = pod.into_gaussian();
 
@@ -495,13 +642,13 @@ mod tests {
             paste::paste! {
                 #[test]
                 fn [<test_ $name _from_gaussian_should_equal_original_gaussian>]() {
-                    let gaussian = Gaussian {
+                    let gaussian = Gaussian::<ShDegree3> {
                         rot: Quat::from_xyzw(0.0, 0.0, 0.0, 1.0),
                         pos: Vec3::new(1.0, 2.0, 3.0),
                         color: Vec4::new(255.0, 128.0, 64.0, 32.0) / 255.0,
                         sh: [Vec3::new(0.1, 0.2, 0.3); 15],
                         scale: Vec3::new(1.0, 2.0, 3.0),
-                    };
+                    }.convert_sh_degree::<<$pod_type as GaussianPod>::ShDegree>();
 
                     let pod = <$pod_type>::from_gaussian(&gaussian);
 
@@ -524,13 +671,13 @@ mod tests {
 
                 #[test]
                 fn [<test_ $name _color_should_be_clamped_and_quantized>]() {
-                    let gaussian = Gaussian {
+                    let gaussian = Gaussian::<ShDegree3> {
                         rot: Quat::IDENTITY,
                         pos: Vec3::ZERO,
                         color: Vec4::new(-0.1, 1.1, 0.5, 0.1234567),
                         sh: [Vec3::ZERO; 15],
                         scale: Vec3::ONE,
-                    };
+                    }.convert_sh_degree::<<$pod_type as GaussianPod>::ShDegree>();
 
                     let pod = <$pod_type>::from_gaussian(&gaussian);
 
@@ -544,6 +691,7 @@ mod tests {
                     for (name, enabled) in features {
                         if name == <$pod_type as GaussianPod>::ShConfig::FEATURE
                             || name == <$pod_type as GaussianPod>::Cov3dConfig::FEATURE
+                            || name == <$pod_type as GaussianPod>::ShDegree::FEATURE
                         {
                             assert!(enabled, "Feature {name} should be enabled");
                         } else {
@@ -588,14 +736,14 @@ mod tests {
         test_pod!(norm8_rotscale, PackedGaussian<ShNorm8, CovRotScale>, false);
         test_pod!(norm8_single, PackedGaussian<ShNorm8, CovSingle>, true);
         test_pod!(norm8_half, PackedGaussian<ShNorm8, CovHalf>, true);
-        test_pod!(none_rotscale, PackedGaussian<ShNone, CovRotScale>, true);
+        test_pod!(none_rotscale, PackedGaussian<ShNone, CovRotScale>, false);
         test_pod!(none_single, PackedGaussian<ShNone, CovSingle>, true);
         test_pod!(none_half, PackedGaussian<ShNone, CovHalf>, true);
     }
 
     #[test]
     #[allow(deprecated)] // Verify the old public name still resolves to the generic layout.
-    fn test_generic_pod_strides_match_existing_shader_layouts() {
+    fn test_generic_pod_strides_should_match_existing_shader_layouts() {
         assert_eq!(
             std::mem::size_of::<PackedGaussian<ShSingle, CovRotScale>>(),
             224

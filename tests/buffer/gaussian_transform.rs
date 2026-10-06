@@ -10,7 +10,7 @@ use crate::common::TestContext;
 
 #[test]
 fn test_gaussian_sh_degree_new_when_sh_deg_is_valid_should_return_some() {
-    for sh_deg in [0, 1, 2, 3] {
+    for sh_deg in [0, 1, 2, 3, 4] {
         let degree = GaussianShDegree::new(sh_deg);
         assert_matches!(degree, Some(d) if d.get() == sh_deg);
     }
@@ -18,7 +18,7 @@ fn test_gaussian_sh_degree_new_when_sh_deg_is_valid_should_return_some() {
 
 #[test]
 fn test_gaussian_sh_degree_new_when_sh_deg_is_invalid_should_return_none() {
-    for sh_deg in [4, 5, 6, 7, 8, 9, 10, 255] {
+    for sh_deg in [5, 6, 7, 8, 9, 10, 255] {
         let degree = GaussianShDegree::new(sh_deg);
         assert!(degree.is_none());
     }
@@ -26,7 +26,7 @@ fn test_gaussian_sh_degree_new_when_sh_deg_is_invalid_should_return_none() {
 
 #[test]
 fn test_gaussian_sh_degree_new_unchecked_should_always_succeed() {
-    for sh_deg in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 255] {
+    for sh_deg in [0, 1, 2, 3, 4] {
         let degree = unsafe { GaussianShDegree::new_unchecked(sh_deg) };
         assert_eq!(degree.get(), sh_deg);
     }
@@ -34,7 +34,7 @@ fn test_gaussian_sh_degree_new_unchecked_should_always_succeed() {
 
 #[test]
 fn test_gaussian_sh_degree_degree_should_return_correct_value() {
-    for sh_deg in [0, 1, 2, 3] {
+    for sh_deg in [0, 1, 2, 3, 4] {
         let degree = GaussianShDegree::new(sh_deg).unwrap();
         assert_eq!(degree.get(), sh_deg);
     }

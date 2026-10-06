@@ -36,7 +36,7 @@ pub trait BatchRead {
     /// Process at most `max_items` records in the current phase.
     ///
     /// Discard the reader after an I/O error. Header parsing and the underlying input may
-    /// still block; the caller must yield between steps for UI responsiveness.
+    /// still block, the caller must yield between steps for UI responsiveness.
     fn step(&mut self, max_items: NonZeroUsize) -> io::Result<BatchProgress>;
 
     /// Finish reading. Returns an error if the model is incomplete.
@@ -65,8 +65,8 @@ pub trait BatchWrite {
 ///
 /// Unlike [`BatchRead`], the caller owns the decoded data and may discard each batch after
 /// reading it. Only formats supporting early delivery implement this trait. [`Iterator::next`]
-/// yields one `io::Result` per Gaussian, or `None` at completion. An I/O error is yielded once;
-/// subsequent calls return `None` and `progress().done` remains false. Discard the stream then.
+/// yields one `io::Result` per Gaussian, or `None` at completion. An I/O error is yielded once.
+/// Subsequent calls return `None` and `progress().done` remains false. Discard the stream then.
 pub trait GaussianStream: Iterator<Item = io::Result<Self::Gaussian>> {
     /// A single Gaussian in the original source format.
     type Gaussian;

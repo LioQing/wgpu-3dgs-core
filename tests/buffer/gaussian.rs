@@ -14,7 +14,9 @@ use crate::{
 fn test_gaussians_buffer_new_should_return_correct_buffer() {
     fn body<G: GaussianPod>() {
         let ctx = TestContext::new();
-        let gaussians = (0..3).map(given::gaussian_with_seed).collect::<Vec<_>>();
+        let gaussians = (0..3)
+            .map(given::gaussian_for_sh_degree::<G::ShDegree>)
+            .collect::<Vec<_>>();
         let size = (std::mem::size_of::<G>() * gaussians.len()) as u64;
         let gaussians_buffer = GaussiansBuffer::<G>::new(&ctx.device, &gaussians);
 
@@ -28,7 +30,9 @@ fn test_gaussians_buffer_new_should_return_correct_buffer() {
 fn test_gaussians_buffer_new_with_usage_should_return_correct_buffer() {
     fn body<G: GaussianPod>() {
         let ctx = TestContext::new();
-        let gaussians = (0..3).map(given::gaussian_with_seed).collect::<Vec<_>>();
+        let gaussians = (0..3)
+            .map(given::gaussian_for_sh_degree::<G::ShDegree>)
+            .collect::<Vec<_>>();
         let gaussian_pods = gaussians
             .iter_gaussian()
             .map(|g| G::from(&g))
@@ -51,7 +55,9 @@ fn test_gaussians_buffer_new_with_usage_should_return_correct_buffer() {
 fn test_gaussians_buffer_new_with_pods_should_return_correct_buffer() {
     fn body<G: GaussianPod>() {
         let ctx = TestContext::new();
-        let gaussians = (0..3).map(given::gaussian_with_seed).collect::<Vec<_>>();
+        let gaussians = (0..3)
+            .map(given::gaussian_for_sh_degree::<G::ShDegree>)
+            .collect::<Vec<_>>();
         let gaussian_pods = gaussians.iter().map(|g| G::from(g)).collect::<Vec<_>>();
         let size = (std::mem::size_of::<G>() * gaussian_pods.len()) as u64;
         let gaussians_buffer = GaussiansBuffer::<G>::new_with_pods(&ctx.device, &gaussian_pods);
@@ -66,7 +72,9 @@ fn test_gaussians_buffer_new_with_pods_should_return_correct_buffer() {
 fn test_gaussians_buffer_new_with_pods_and_usage_should_return_correct_buffer() {
     fn body<G: GaussianPod>() {
         let ctx = TestContext::new();
-        let gaussians = (0..3).map(given::gaussian_with_seed).collect::<Vec<_>>();
+        let gaussians = (0..3)
+            .map(given::gaussian_for_sh_degree::<G::ShDegree>)
+            .collect::<Vec<_>>();
         let gaussian_pods = gaussians.iter().map(|g| G::from(g)).collect::<Vec<_>>();
         let usage = wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST;
         let gaussians_buffer =
@@ -118,7 +126,9 @@ fn test_gaussians_buffer_new_empty_with_usage_should_return_correct_buffer() {
 fn test_gaussians_buffer_len_should_return_correct_length() {
     fn body<G: GaussianPod>() {
         let ctx = TestContext::new();
-        let gaussians = (0..3).map(given::gaussian_with_seed).collect::<Vec<_>>();
+        let gaussians = (0..3)
+            .map(given::gaussian_for_sh_degree::<G::ShDegree>)
+            .collect::<Vec<_>>();
         let gaussians_buffer = GaussiansBuffer::<G>::new(&ctx.device, &gaussians);
 
         assert_eq!(gaussians_buffer.len(), gaussians.len());
@@ -131,7 +141,9 @@ fn test_gaussians_buffer_len_should_return_correct_length() {
 fn test_gaussians_buffer_is_empty_should_return_correct_value() {
     fn body<G: GaussianPod>() {
         let ctx = TestContext::new();
-        let gaussians = (0..3).map(given::gaussian_with_seed).collect::<Vec<_>>();
+        let gaussians = (0..3)
+            .map(given::gaussian_for_sh_degree::<G::ShDegree>)
+            .collect::<Vec<_>>();
         let gaussians_buffer = GaussiansBuffer::<G>::new(&ctx.device, &gaussians);
         let empty_gaussians_buffer = GaussiansBuffer::<G>::new_empty(&ctx.device, 0);
 
@@ -146,8 +158,12 @@ fn test_gaussians_buffer_is_empty_should_return_correct_value() {
 fn test_gaussians_buffer_update_should_update_buffer_correctly() {
     fn body<G: GaussianPod>() {
         let ctx = TestContext::new();
-        let gaussians = (0..3).map(given::gaussian_with_seed).collect::<Vec<_>>();
-        let new_gaussians = (3..6).map(given::gaussian_with_seed).collect::<Vec<_>>();
+        let gaussians = (0..3)
+            .map(given::gaussian_for_sh_degree::<G::ShDegree>)
+            .collect::<Vec<_>>();
+        let new_gaussians = (3..6)
+            .map(given::gaussian_for_sh_degree::<G::ShDegree>)
+            .collect::<Vec<_>>();
         let gaussian_pods = new_gaussians
             .iter_gaussian()
             .map(|g| G::from(&g))
@@ -176,8 +192,12 @@ fn test_gaussians_buffer_update_should_update_buffer_correctly() {
 fn test_gaussians_buffer_update_when_new_data_length_is_different_should_return_error() {
     fn body<G: GaussianPod>() {
         let ctx = TestContext::new();
-        let gaussians = (0..3).map(given::gaussian_with_seed).collect::<Vec<_>>();
-        let new_gaussians = (3..5).map(given::gaussian_with_seed).collect::<Vec<_>>();
+        let gaussians = (0..3)
+            .map(given::gaussian_for_sh_degree::<G::ShDegree>)
+            .collect::<Vec<_>>();
+        let new_gaussians = (3..5)
+            .map(given::gaussian_for_sh_degree::<G::ShDegree>)
+            .collect::<Vec<_>>();
         let gaussians_buffer = GaussiansBuffer::<G>::new_with_usage(
             &ctx.device,
             &gaussians,
@@ -204,8 +224,12 @@ fn test_gaussians_buffer_update_range_should_update_buffer_correctly() {
         const START_INDEX: usize = 2;
 
         let ctx = TestContext::new();
-        let gaussians = (0..10).map(given::gaussian_with_seed).collect::<Vec<_>>();
-        let new_partial_gaussians = (10..15).map(given::gaussian_with_seed).collect::<Vec<_>>();
+        let gaussians = (0..10)
+            .map(given::gaussian_for_sh_degree::<G::ShDegree>)
+            .collect::<Vec<_>>();
+        let new_partial_gaussians = (10..15)
+            .map(given::gaussian_for_sh_degree::<G::ShDegree>)
+            .collect::<Vec<_>>();
         let gaussian_pods = gaussians
             .iter_gaussian()
             .take(START_INDEX)
@@ -250,8 +274,12 @@ fn test_gaussians_buffer_update_range_when_new_data_overflows_buffer_should_retu
         const START_INDEX: usize = 8;
 
         let ctx = TestContext::new();
-        let gaussians = (0..10).map(given::gaussian_with_seed).collect::<Vec<_>>();
-        let new_partial_gaussians = (10..15).map(given::gaussian_with_seed).collect::<Vec<_>>();
+        let gaussians = (0..10)
+            .map(given::gaussian_for_sh_degree::<G::ShDegree>)
+            .collect::<Vec<_>>();
+        let new_partial_gaussians = (10..15)
+            .map(given::gaussian_for_sh_degree::<G::ShDegree>)
+            .collect::<Vec<_>>();
         let gaussians_buffer = GaussiansBuffer::<G>::new_with_usage(
             &ctx.device,
             &gaussians,
@@ -286,7 +314,9 @@ fn test_gaussians_buffer_update_range_when_new_data_overflows_buffer_should_retu
 fn test_gaussians_buffer_download_gaussians_should_download_buffer_successfully() {
     fn body<G: GaussianPod>() {
         let ctx = TestContext::new();
-        let gaussians = (0..3).map(given::gaussian_with_seed).collect::<Vec<_>>();
+        let gaussians = (0..3)
+            .map(given::gaussian_for_sh_degree::<G::ShDegree>)
+            .collect::<Vec<_>>();
         let gaussians_buffer = GaussiansBuffer::<G>::new_with_usage(
             &ctx.device,
             &gaussians,
@@ -300,7 +330,7 @@ fn test_gaussians_buffer_download_gaussians_should_download_buffer_successfully(
         let gaussian_pods_gaussians = gaussian_pods_downloaded
             .into_iter()
             .map(Into::into)
-            .collect::<Vec<Gaussian>>();
+            .collect::<Vec<Gaussian<G::ShDegree>>>();
         let gaussians_downloaded = gaussians_buffer
             .download_gaussians(&ctx.device, &ctx.queue)
             .block_on()
@@ -319,7 +349,9 @@ mod test_gaussians_buffer_download_gaussians_when_configs_unsupported_should_pan
 
     pub(crate) fn body<G: GaussianPod>() {
         let ctx = TestContext::new();
-        let gaussians = (0..3).map(given::gaussian_with_seed).collect::<Vec<_>>();
+        let gaussians = (0..3)
+            .map(given::gaussian_for_sh_degree::<G::ShDegree>)
+            .collect::<Vec<_>>();
         let gaussians_buffer = GaussiansBuffer::<G>::new_with_usage(
             &ctx.device,
             &gaussians,
@@ -381,8 +413,7 @@ fn test_gaussians_buffer_download_gaussians_when_sh_norm8_cov3d_half_should_pani
 }
 
 #[test]
-#[should_panic]
-fn test_gaussians_buffer_download_gaussians_when_sh_none_cov3d_rot_scale_should_panic() {
+fn test_gaussians_buffer_download_gaussians_when_sh_none_cov3d_rot_scale_should_succeed() {
     test_gaussians_buffer_download_gaussians_when_configs_unsupported_should_panic::body::<
         PackedGaussian<ShNone, CovRotScale>,
     >();
@@ -408,7 +439,9 @@ fn test_gaussians_buffer_download_gaussians_when_sh_none_cov3d_half_should_panic
 fn test_gaussians_buffer_wgpu_buffer_round_trip_should_be_equal() {
     fn body<G: GaussianPod>() {
         let ctx = TestContext::new();
-        let gaussians = (0..3).map(given::gaussian_with_seed).collect::<Vec<_>>();
+        let gaussians = (0..3)
+            .map(given::gaussian_for_sh_degree::<G::ShDegree>)
+            .collect::<Vec<_>>();
         let gaussians_buffer = GaussiansBuffer::<G>::new_with_usage(
             &ctx.device,
             &gaussians,
@@ -468,4 +501,143 @@ fn test_gaussians_buffer_try_from_wgpu_buffer_when_size_is_not_multiple_should_r
     }
 
     for_each_gaussian_pod!(G => body::<G>());
+}
+
+#[test]
+fn test_gaussians_buffer_should_support_typed_and_runtime_uploads_and_updates_for_all_degrees() {
+    fn body<G: GaussianPod>() {
+        let ctx = TestContext::new();
+        let original = (0..3)
+            .map(given::gaussian_for_sh_degree::<G::ShDegree>)
+            .collect::<Vec<_>>();
+        let replacement = (3..6)
+            .map(given::gaussian_for_sh_degree::<G::ShDegree>)
+            .collect::<Vec<_>>();
+        let ply = wgpu_3dgs_core::PlyGaussians::from_gaussians(&original).unwrap();
+        let usage = GaussiansBuffer::<G>::DEFAULT_USAGES | wgpu::BufferUsages::COPY_SRC;
+        let buffer = GaussiansBuffer::<G>::try_new_with_usage(&ctx.device, &ply, usage).unwrap();
+
+        // PLY conversion normalizes rotations and applies floating-point transforms.
+        let expected = ply
+            .iter()
+            .map(|g| G::from_gaussian(&Gaussian::<G::ShDegree>::from_ply(g).unwrap()))
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            buffer
+                .download::<G>(&ctx.device, &ctx.queue)
+                .block_on()
+                .unwrap(),
+            expected
+        );
+
+        buffer.update(&ctx.queue, &replacement).unwrap();
+        buffer.update_range(&ctx.queue, 1, &original[1..2]).unwrap();
+
+        let mut expected = replacement.iter().map(G::from_gaussian).collect::<Vec<_>>();
+        expected[1] = G::from_gaussian(&original[1]);
+
+        assert_eq!(
+            buffer
+                .download::<G>(&ctx.device, &ctx.queue)
+                .block_on()
+                .unwrap(),
+            expected
+        );
+
+        buffer.try_update(&ctx.queue, &ply).unwrap();
+        buffer
+            .try_update_range(&ctx.queue, 0, &replacement)
+            .unwrap();
+
+        let expected = replacement.iter().map(G::from_gaussian).collect::<Vec<_>>();
+
+        assert_eq!(
+            buffer
+                .download::<G>(&ctx.device, &ctx.queue)
+                .block_on()
+                .unwrap(),
+            expected
+        );
+        assert!(
+            buffer
+                .update_range_with_pod(&ctx.queue, usize::MAX, &[])
+                .is_err()
+        );
+
+        if <G::Cov3dConfig as wgpu_3dgs_core::GaussianCov3dConfig>::FEATURE == "cov3d_rot_scale" {
+            let restored = buffer
+                .download_gaussians(&ctx.device, &ctx.queue)
+                .block_on()
+                .unwrap();
+
+            assert_eq!(
+                restored.iter().map(G::from_gaussian).collect::<Vec<_>>(),
+                expected
+            );
+        }
+    }
+
+    crate::for_each_sh_degree_gaussian_pod!(G => body::<G>());
+}
+
+#[test]
+fn test_gaussians_buffer_when_runtime_degrees_mismatch_should_leave_buffer_unchanged() {
+    use wgpu_3dgs_core::{
+        GaussiansBufferUpdateError, GaussiansBufferUpdateRangeError, PlyGaussians, ShDegree1,
+        ShDegree4, ShDegreeMismatchError,
+    };
+
+    let ctx = TestContext::new();
+    type G = PackedGaussian<ShHalf<ShDegree4>, CovRotScale>;
+
+    let high = vec![given::gaussian_for_sh_degree::<ShDegree4>(0)];
+    let low = [high[0].convert_sh_degree::<ShDegree1>()];
+    let low_ply = PlyGaussians::from_gaussians(low).unwrap();
+    let empty = PlyGaussians::new(Vec::new(), 1).unwrap();
+
+    for source in [&low_ply, &empty] {
+        assert_matches!(
+            GaussiansBuffer::<G>::try_new(&ctx.device, source),
+            Err(ShDegreeMismatchError {
+                actual_degree: 1,
+                expected_degree: 4
+            })
+        );
+    }
+
+    let buffer = GaussiansBuffer::<G>::new_with_usage(
+        &ctx.device,
+        &high,
+        GaussiansBuffer::<G>::DEFAULT_USAGES | wgpu::BufferUsages::COPY_SRC,
+    );
+
+    assert_matches!(
+        buffer.try_update(&ctx.queue, &low_ply),
+        Err(GaussiansBufferUpdateError::InvalidDegree(
+            ShDegreeMismatchError {
+                actual_degree: 1,
+                expected_degree: 4,
+            }
+        ))
+    );
+    for source in [&low_ply, &empty] {
+        assert_matches!(
+            buffer.try_update_range(&ctx.queue, 0, source),
+            Err(GaussiansBufferUpdateRangeError::InvalidDegree(
+                ShDegreeMismatchError {
+                    actual_degree: 1,
+                    expected_degree: 4,
+                }
+            ))
+        );
+    }
+
+    assert_eq!(
+        buffer
+            .download::<G>(&ctx.device, &ctx.queue)
+            .block_on()
+            .unwrap(),
+        vec![G::from_gaussian(&high[0])]
+    );
 }

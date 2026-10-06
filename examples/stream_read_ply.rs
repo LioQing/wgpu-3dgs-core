@@ -11,10 +11,7 @@
 
 use std::{io::BufReader, num::NonZeroUsize};
 
-use glam::*;
 use wgpu_3dgs_core::{self as gs, BufferWrapper, GaussianStream};
-
-type GaussianPod = gs::PackedGaussian<gs::ShHalf, gs::CovHalf>;
 
 #[pollster::main]
 async fn main() {
@@ -33,7 +30,7 @@ async fn main() {
     println!("Reading gaussians from {}", model_path);
 
     let file = std::fs::File::open(&model_path).expect("open PLY file");
-    let mut stream = gs::PlyGaussianStream::new(BufReader::new(file)).expect("PLY stream");
+    let stream = gs::PlyGaussianStream::new(BufReader::new(file)).expect("PLY stream");
 
     let instance =
         wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
@@ -52,8 +49,31 @@ async fn main() {
         .await
         .expect("device");
 
-    let gaussians_buffer =
-        gs::GaussiansBuffer::<GaussianPod>::new_empty(&device, stream.total_gaussians());
+    macro_rules! upload_sh_degree {
+        ($degree:ty) => {
+            upload::<gs::PackedGaussian<gs::ShHalf<$degree>, gs::CovHalf>>(
+                &device, &queue, stream, batch_size,
+            )
+        };
+    }
+
+    match stream.header().sh_degree {
+        0 => upload_sh_degree!(gs::ShDegree0),
+        1 => upload_sh_degree!(gs::ShDegree1),
+        2 => upload_sh_degree!(gs::ShDegree2),
+        3 => upload_sh_degree!(gs::ShDegree3),
+        4 => upload_sh_degree!(gs::ShDegree4),
+        _ => unreachable!(),
+    }
+}
+
+fn upload<G: gs::GaussianPod>(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    mut stream: gs::PlyGaussianStream<impl std::io::BufRead>,
+    batch_size: NonZeroUsize,
+) {
+    let gaussians_buffer = gs::GaussiansBuffer::<G>::new_empty(device, stream.total_gaussians());
 
     let mut batch = Vec::new();
     let mut decoded = Vec::new();
@@ -68,10 +88,14 @@ async fn main() {
             .expect("read PLY batch");
 
         decoded.clear();
-        decoded.extend(batch.iter().map(gs::Gaussian::from_ply));
+        decoded.extend(
+            batch.iter().map(|ply| {
+                gs::Gaussian::<G::ShDegree>::from_ply(ply).expect("matching PLY degree")
+            }),
+        );
 
         gaussians_buffer
-            .update_range(&queue, start, &decoded)
+            .update_range(queue, start, &decoded)
             .expect("upload PLY batch");
 
         let progress = stream.progress();
