@@ -1,3 +1,12 @@
+// Compile-time storage degree. Exactly one degree feature must be enabled.
+@if(sh_degree_0) const gaussian_sh_degree = 0u;
+@if(sh_degree_1) const gaussian_sh_degree = 1u;
+@if(sh_degree_2) const gaussian_sh_degree = 2u;
+@if(sh_degree_3) const gaussian_sh_degree = 3u;
+@if(sh_degree_4) const gaussian_sh_degree = 4u;
+
+const gaussian_sh_count = (gaussian_sh_degree + 1u) * (gaussian_sh_degree + 1u) - 1u;
+
 // Gaussian buffer structure.
 //
 // Corresponds to `GaussianPod`.
@@ -5,12 +14,12 @@ struct Gaussian {
     pos: vec3<f32>,
     color: u32,
 
-    @if(sh_single)
-        sh: array<f32, (3 * 15)>,
-    @if(sh_half)
-        sh: array<u32, ((3 * 15 + 1) / 2)>,
-    @if(sh_norm8)
-        sh: array<u32, ((3 * 15 + 3) / 4)>,
+    @if(sh_single && !sh_degree_0)
+        sh: array<f32, (3u * gaussian_sh_count)>,
+    @if(sh_half && !sh_degree_0)
+        sh: array<u32, ((3u * gaussian_sh_count + 1u) / 2u)>,
+    @if(sh_norm8 && !sh_degree_0)
+        sh: array<u32, ((3u * gaussian_sh_count + 3u) / 4u)>,
 
     @if(cov3d_rot_scale)
         cov3d: array<f32, 7>,
@@ -26,7 +35,11 @@ fn gaussian_unpack_color(gaussian: Gaussian) -> vec4<f32> {
 }
 
 // Unpack the SH coefficients from `Gaussian.sh`.
-@if(sh_single) fn gaussian_unpack_sh(gaussian: Gaussian, sh_index: u32) -> vec3<f32> {
+@if(sh_single && !sh_degree_0) fn gaussian_unpack_sh(gaussian: Gaussian, sh_index: u32) -> vec3<f32> {
+    if sh_index >= gaussian_sh_count {
+        return vec3<f32>(0.0);
+    }
+
     return vec3<f32>(
         gaussian.sh[sh_index * 3],
         gaussian.sh[sh_index * 3 + 1],
@@ -35,7 +48,11 @@ fn gaussian_unpack_color(gaussian: Gaussian) -> vec4<f32> {
 }
 
 // Unpack the SH coefficients from `Gaussian.sh`.
-@if(sh_half) fn gaussian_unpack_sh(gaussian: Gaussian, sh_index: u32) -> vec3<f32> {
+@if(sh_half && !sh_degree_0) fn gaussian_unpack_sh(gaussian: Gaussian, sh_index: u32) -> vec3<f32> {
+    if sh_index >= gaussian_sh_count {
+        return vec3<f32>(0.0);
+    }
+
     let i = sh_index * 3;
     let xi = i / 2;
     let yi = (i + 1) / 2;
@@ -55,7 +72,11 @@ fn gaussian_unpack_color(gaussian: Gaussian) -> vec4<f32> {
 }
 
 // Unpack the SH coefficients from `Gaussian.sh`.
-@if(sh_norm8) fn gaussian_unpack_sh(gaussian: Gaussian, sh_index: u32) -> vec3<f32> {
+@if(sh_norm8 && !sh_degree_0) fn gaussian_unpack_sh(gaussian: Gaussian, sh_index: u32) -> vec3<f32> {
+    if sh_index >= gaussian_sh_count {
+        return vec3<f32>(0.0);
+    }
+
     let i = sh_index * 3;
     let xi = i / 4;
     let xj = i % 4;
@@ -72,7 +93,7 @@ fn gaussian_unpack_color(gaussian: Gaussian) -> vec4<f32> {
 }
 
 // Unpack the SH coefficients from `Gaussian.sh`.
-@if(sh_none) fn gaussian_unpack_sh(gaussian: Gaussian, sh_index: u32) -> vec3<f32> {
+@if(sh_degree_0) fn gaussian_unpack_sh(gaussian: Gaussian, sh_index: u32) -> vec3<f32> {
     return vec3<f32>(0.0);
 }
 
@@ -146,4 +167,9 @@ fn gaussian_unpack_color(gaussian: Gaussian) -> vec4<f32> {
         z.x,
         z.y,
     );
+}
+
+// Clamp the requested display degree to the available storage degree.
+fn gaussian_effective_sh_degree(requested_degree: u32) -> u32 {
+    return min(requested_degree, gaussian_sh_degree);
 }

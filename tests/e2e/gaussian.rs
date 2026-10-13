@@ -10,7 +10,8 @@ fn test_gaussians_collect_gaussians_from_and_iter_gaussian_when_source_is_intern
     let gaussians = original
         .clone()
         .into_iter()
-        .collect_gaussians(GaussiansSource::Internal);
+        .collect_gaussians(GaussiansSource::Internal)
+        .unwrap();
     let from = Gaussians::from(original.clone());
 
     let iter = gaussians.iter_gaussian();
@@ -19,8 +20,8 @@ fn test_gaussians_collect_gaussians_from_and_iter_gaussian_when_source_is_intern
     assert_eq!(iter.len(), original.len());
     assert_eq!(from_iter.len(), original.len());
 
-    let iterated: Vec<Gaussian> = iter.collect();
-    let from_iterated: Vec<Gaussian> = from_iter.collect();
+    let iterated: Vec<Gaussian> = iter.map(|g| g.try_typed().unwrap()).collect();
+    let from_iterated: Vec<Gaussian> = from_iter.map(|g| g.try_typed().unwrap()).collect();
 
     assert_eq!(original.len(), iterated.len());
     assert_eq!(original.len(), from_iterated.len());
@@ -38,7 +39,8 @@ fn test_gaussians_collect_gaussians_from_and_iter_gaussian_when_source_is_ply_sh
     let gaussians = original
         .clone()
         .into_iter()
-        .collect_gaussians(GaussiansSource::Ply);
+        .collect_gaussians(GaussiansSource::Ply)
+        .unwrap();
     let from = Gaussians::from(original_ply.clone());
 
     let iter = gaussians.iter_gaussian();
@@ -47,8 +49,8 @@ fn test_gaussians_collect_gaussians_from_and_iter_gaussian_when_source_is_ply_sh
     assert_eq!(iter.len(), original.len());
     assert_eq!(from_iter.len(), original.len());
 
-    let iterated: Vec<Gaussian> = iter.collect();
-    let from_iterated: Vec<Gaussian> = from_iter.collect();
+    let iterated: Vec<Gaussian> = iter.map(|g| g.try_typed().unwrap()).collect();
+    let from_iterated: Vec<Gaussian> = from_iter.map(|g| g.try_typed().unwrap()).collect();
 
     assert_eq!(original.len(), iterated.len());
     assert_eq!(original.len(), from_iterated.len());
@@ -74,7 +76,8 @@ fn test_gaussians_collect_gaussians_from_and_iter_gaussian_when_source_is_spz_sh
     let gaussians = original
         .clone()
         .into_iter()
-        .collect_gaussians(GaussiansSource::Spz);
+        .collect_gaussians(GaussiansSource::Spz)
+        .unwrap();
     let from = Gaussians::from(original_spz.clone());
 
     let iter = gaussians.iter_gaussian();
@@ -83,8 +86,8 @@ fn test_gaussians_collect_gaussians_from_and_iter_gaussian_when_source_is_spz_sh
     assert_eq!(iter.len(), original.len());
     assert_eq!(from_iter.len(), original.len());
 
-    let iterated: Vec<Gaussian> = iter.collect();
-    let from_iterated: Vec<Gaussian> = from_iter.collect();
+    let iterated: Vec<Gaussian> = iter.map(|g| g.try_typed().unwrap()).collect();
+    let from_iterated: Vec<Gaussian> = from_iter.map(|g| g.try_typed().unwrap()).collect();
 
     assert_eq!(original.len(), iterated.len());
     assert_eq!(original.len(), from_iterated.len());
@@ -114,7 +117,11 @@ fn test_gaussians_collect_gaussians_and_source_should_be_equal() {
     ] {
         println!("Source: {source:?}");
 
-        let gaussians = original.clone().into_iter().collect_gaussians(source);
+        let gaussians = original
+            .clone()
+            .into_iter()
+            .collect_gaussians(source)
+            .unwrap();
 
         assert_eq!(gaussians.source(), source);
     }
@@ -129,7 +136,11 @@ fn test_gaussians_len_and_is_empty_should_be_correct() {
         GaussiansSource::Ply,
         GaussiansSource::Spz,
     ] {
-        let gaussians = original.clone().into_iter().collect_gaussians(source);
+        let gaussians = original
+            .clone()
+            .into_iter()
+            .collect_gaussians(source)
+            .unwrap();
 
         assert_eq!(gaussians.len(), original.len());
         assert_eq!(gaussians.is_empty(), original.is_empty());

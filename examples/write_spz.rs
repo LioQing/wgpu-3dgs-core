@@ -26,7 +26,7 @@ fn main() {
             .expect("batch_size must be a non-zero integer")
     });
 
-    let gaussians = [
+    let gaussians: [gs::Gaussian; 3] = [
         gs::Gaussian {
             rot: Quat::from_axis_angle((Vec3::X + Vec3::Y / 2.0 + Vec3::Z).normalize(), 0.5),
             pos: Vec3::ZERO,

@@ -89,7 +89,7 @@ fn test_gaussian_transform_wesl_functions_should_return_correct_values() {
     let ctx = TestContext::new();
 
     let display_mode = GaussianDisplayMode::Ellipse;
-    let sh_deg = GaussianShDegree::new(2).expect("new");
+    let sh_deg = GaussianShDegree::new(4).expect("new");
     let no_sh0 = true;
     let max_std_dev = GaussianMaxStdDev::new(3.0).unwrap();
     let transform = GaussianTransformPod::new(1.0, display_mode, sh_deg, no_sh0, max_std_dev);

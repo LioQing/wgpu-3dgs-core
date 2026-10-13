@@ -9,9 +9,10 @@ use flate2::{read::GzDecoder, write::GzEncoder};
 use itertools::Itertools;
 
 use crate::{
-    BatchProgress, BatchRead, BatchWrite, Gaussian, GaussianToSpzOptions, IterGaussian,
-    ReadIterGaussian, SpzGaussiansFromIterError, SpzPhaseFromStrError, WriteIterGaussian,
-    source_format,
+    AnyGaussian, BatchProgress, BatchRead, BatchWrite, GaussianShDegree, GaussianToSpzError,
+    GaussianToSpzOptions, IterGaussian, ReadIterGaussian, ShDegreeMismatchError,
+    SpzGaussiansFromGaussiansError, SpzGaussiansFromIterError, SpzPhaseFromStrError, ToAnyGaussian,
+    WriteIterGaussian, source_format,
 };
 
 macro_rules! gaussian_field {
@@ -698,6 +699,8 @@ impl SpzGaussiansShs {
 /// A collection of Gaussians in SPZ format.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SpzGaussians {
+    /// Changing this to a new header with [`SpzGaussiansHeader::sh_degree`] not matching
+    /// [`SpzGaussians::shs`] will cause [`IterGaussian::iter_gaussian`] to panic.
     pub header: SpzGaussiansHeader,
 
     pub positions: SpzGaussiansPositions,
@@ -713,6 +716,8 @@ pub struct SpzGaussians {
     /// `(r, g, b)` each as 8-bit unsigned integer.
     pub colors: Vec<[u8; 3]>,
 
+    /// Changing this to a new variant not matching [`SpzGaussiansHeader::sh_degree`] will cause
+    /// [`IterGaussian::iter_gaussian`] to panic.
     pub shs: SpzGaussiansShs,
 }
 
@@ -833,20 +838,42 @@ impl SpzGaussians {
         Ok(())
     }
 
-    /// Convert from a slice of [`Gaussian`]s.
-    pub fn from_gaussians(gaussians: impl IntoIterator<Item = impl AsRef<Gaussian>>) -> Self {
+    /// Convert from an iterator of [`ToAnyGaussian`]s.
+    pub fn from_gaussians<T: ToAnyGaussian>(
+        gaussians: impl IntoIterator<Item = T>,
+    ) -> Result<Self, SpzGaussiansFromGaussiansError> {
+        let mut gaussians = gaussians.into_iter().peekable();
+        let degree = gaussians
+            .peek()
+            .map(|g| g.to_any_gaussian().sh_degree().get())
+            .unwrap_or(T::SH_DEGREE.unwrap_or(3));
+        let sh_degree = SpzGaussianShDegree::new(degree)
+            .ok_or(SpzGaussiansFromGaussiansError::UnsupportedShDegree { degree })?;
+
         Self::from_gaussians_with_options(
             gaussians,
-            &SpzGaussiansFromGaussianSliceOptions::default(),
+            &SpzGaussiansFromGaussianSliceOptions {
+                sh_degree,
+                ..Default::default()
+            },
         )
-        .expect("valid default options")
     }
 
-    /// Convert from a slice of [`Gaussian`]s with options.
-    pub fn from_gaussians_with_options(
-        gaussians: impl IntoIterator<Item = impl AsRef<Gaussian>>,
+    /// Convert from an iterator of [`ToAnyGaussian`]s with options.
+    pub fn from_gaussians_with_options<T: ToAnyGaussian>(
+        gaussians: impl IntoIterator<Item = T>,
         options: &SpzGaussiansFromGaussianSliceOptions,
-    ) -> Result<Self, std::io::Error> {
+    ) -> Result<Self, SpzGaussiansFromGaussiansError> {
+        if let Some(actual_degree) = T::SH_DEGREE
+            && actual_degree != options.sh_degree.get()
+        {
+            return Err(ShDegreeMismatchError {
+                actual_degree,
+                expected_degree: options.sh_degree.get(),
+            }
+            .into());
+        }
+
         let mut header = SpzGaussiansHeader::new(
             options.version,
             0,
@@ -858,14 +885,14 @@ impl SpzGaussians {
         let gaussians = gaussians
             .into_iter()
             .map(|g| {
-                g.as_ref().to_spz(
+                g.to_any_gaussian().to_spz(
                     &header,
                     &GaussianToSpzOptions {
                         sh_quantize_bits: options.sh_quantize_bits,
                     },
                 )
             })
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, GaussianToSpzError>>()?;
 
         header.set_num_points(gaussians.len() as u32);
 
@@ -991,8 +1018,15 @@ impl SpzGaussians {
 }
 
 impl IterGaussian for SpzGaussians {
-    fn iter_gaussian(&self) -> impl ExactSizeIterator<Item = Gaussian> + '_ {
-        self.iter().map(|spz| Gaussian::from_spz(spz, &self.header))
+    type Gaussian = AnyGaussian;
+
+    fn sh_degree(&self) -> GaussianShDegree {
+        GaussianShDegree::new(self.header.sh_degree().get()).unwrap()
+    }
+
+    fn iter_gaussian(&self) -> impl ExactSizeIterator<Item = AnyGaussian> + '_ {
+        self.iter()
+            .map(|spz| AnyGaussian::from_spz(spz, &self.header).expect("validated SPZ degree"))
     }
 }
 
@@ -1343,12 +1377,6 @@ impl<W: Write> BatchWrite for SpzBatchWriter<'_, W> {
             return Err(source_format::batch::incomplete());
         }
         self.encoder.finish()
-    }
-}
-
-impl<G: AsRef<Gaussian>> FromIterator<G> for SpzGaussians {
-    fn from_iter<T: IntoIterator<Item = G>>(iter: T) -> Self {
-        Self::from_gaussians(iter)
     }
 }
 

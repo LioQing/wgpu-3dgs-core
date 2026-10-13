@@ -1,18 +1,16 @@
+use bytemuck::Zeroable;
 use glam::*;
 use half::f16;
 
+use crate::{ShDegree, ShDegree0, ShDegree3};
+
 /// The spherical harmonics configuration of Gaussian.
 ///
-/// Currently, there are four configurations:
-/// - Single precision [`ShSingle`]
-///     - Format: 15 * [`Vec3`]
-/// - Half precision [`ShHalf`]
-///     - Format: (15 * 3 + 1) * [`struct@f16`]
-/// - 8 bit normalized [`ShNorm8`]
-///     - Format: (15 * 3 + 3) * [`prim@i8`]
-/// - None [`ShNone`]
-///    - Cannot be converted back to SH
+/// Select an encoding and a storage degree, e.g. `ShHalf<ShDegree4>`.
+/// Packed half and normalized encodings are padded to complete 32-bit words.
 pub trait GaussianShConfig {
+    type Degree: ShDegree;
+
     /// The feature name of the configuration.
     ///
     /// Must match the [`wesl::Feature`] name in the shader.
@@ -22,122 +20,123 @@ pub trait GaussianShConfig {
     type Field: bytemuck::Pod + bytemuck::Zeroable;
 
     /// Create from [`Gaussian::sh`](crate::Gaussian::sh).
-    fn from_sh(sh: &[Vec3; 15]) -> Self::Field;
+    fn from_sh(sh: &<Self::Degree as ShDegree>::Coefficients) -> Self::Field;
 
     /// Convert the field to [`Gaussian::sh`](crate::Gaussian::sh).
-    fn to_sh(field: &Self::Field) -> [Vec3; 15];
+    fn to_sh(field: &Self::Field) -> <Self::Degree as ShDegree>::Coefficients;
 }
 
 /// Single-precision SH coefficients.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ShSingle;
+pub struct ShSingle<D: ShDegree = ShDegree3>(std::marker::PhantomData<D>);
 
-impl GaussianShConfig for ShSingle {
+impl<D: ShDegree> GaussianShConfig for ShSingle<D> {
+    type Degree = D;
+
     const FEATURE: &'static str = "sh_single";
 
-    type Field = [Vec3; 15];
+    type Field = D::Coefficients;
 
-    fn from_sh(sh: &[Vec3; 15]) -> Self::Field {
+    fn from_sh(sh: &D::Coefficients) -> Self::Field {
         *sh
     }
 
-    fn to_sh(field: &Self::Field) -> [Vec3; 15] {
+    fn to_sh(field: &Self::Field) -> D::Coefficients {
         *field
     }
 }
 
 /// Half-precision SH coefficients.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ShHalf;
+pub struct ShHalf<D: ShDegree = ShDegree3>(std::marker::PhantomData<D>);
 
-impl GaussianShConfig for ShHalf {
+impl<D: ShDegree> GaussianShConfig for ShHalf<D> {
+    type Degree = D;
+
     const FEATURE: &'static str = "sh_half";
 
-    type Field = [f16; 3 * 15 + 1];
+    type Field = D::Half;
 
-    fn from_sh(sh: &[Vec3; 15]) -> Self::Field {
-        sh.iter()
-            .flat_map(|sh| sh.to_array())
-            .map(f16::from_f32)
-            .chain(std::iter::once(f16::from_f32(0.0)))
-            .collect::<Vec<_>>()
-            .try_into()
-            .expect("SH half")
+    fn from_sh(sh: &D::Coefficients) -> Self::Field {
+        let mut field = Self::Field::zeroed();
+
+        for (src, dst) in sh
+            .as_ref()
+            .iter()
+            .flat_map(|v| v.to_array())
+            .zip(field.as_mut())
+        {
+            *dst = f16::from_f32(src);
+        }
+
+        field
     }
 
-    fn to_sh(field: &Self::Field) -> [Vec3; 15] {
-        field
-            .as_chunks::<3>()
-            .0
-            .iter()
-            .map(|chunk| {
-                Vec3::new(
-                    f16::to_f32(chunk[0]),
-                    f16::to_f32(chunk[1]),
-                    f16::to_f32(chunk[2]),
-                )
-            })
-            .collect::<Vec<_>>()
-            .try_into()
-            .expect("SH half")
+    fn to_sh(field: &Self::Field) -> D::Coefficients {
+        let mut sh = D::Coefficients::zeroed();
+
+        for (src, dst) in field.as_ref().as_chunks::<3>().0.iter().zip(sh.as_mut()) {
+            *dst = Vec3::new(src[0].to_f32(), src[1].to_f32(), src[2].to_f32());
+        }
+
+        sh
     }
 }
 
 /// The 8 bit signed normalized SH configuration of Gaussian.
 ///
-/// This is by the fact that SH coefficients are within \[-1, 1\].
+/// Values outside \[-1, 1\] are clamped by this lossy encoding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ShNorm8;
+pub struct ShNorm8<D: ShDegree = ShDegree3>(std::marker::PhantomData<D>);
 
-impl GaussianShConfig for ShNorm8 {
+impl<D: ShDegree> GaussianShConfig for ShNorm8<D> {
+    type Degree = D;
+
     const FEATURE: &'static str = "sh_norm8";
 
-    type Field = [i8; 3 * 15 + 3];
+    type Field = D::Norm8;
 
-    fn from_sh(sh: &[Vec3; 15]) -> Self::Field {
-        sh.iter()
-            .flat_map(|sh| sh.to_array())
-            .map(|v| (v * 127.0).clamp(-127.0, 127.0) as i8)
-            .chain(std::iter::repeat_n(0, 3))
-            .collect::<Vec<_>>()
-            .try_into()
-            .expect("SH norm8")
+    fn from_sh(sh: &D::Coefficients) -> Self::Field {
+        let mut field = Self::Field::zeroed();
+
+        for (src, dst) in sh
+            .as_ref()
+            .iter()
+            .flat_map(|v| v.to_array())
+            .zip(field.as_mut())
+        {
+            *dst = (src * 127.0).clamp(-127.0, 127.0) as i8;
+        }
+
+        field
     }
 
-    fn to_sh(field: &Self::Field) -> [Vec3; 15] {
-        field
-            .as_chunks::<3>()
-            .0
-            .iter()
-            .take(15)
-            .map(|chunk| {
-                Vec3::new(
-                    ((chunk[0] as f32) / 127.0).max(-1.0),
-                    ((chunk[1] as f32) / 127.0).max(-1.0),
-                    ((chunk[2] as f32) / 127.0).max(-1.0),
-                )
-            })
-            .collect::<Vec<_>>()
-            .try_into()
-            .expect("SH norm8")
+    fn to_sh(field: &Self::Field) -> D::Coefficients {
+        let mut sh = D::Coefficients::zeroed();
+
+        for (src, dst) in field.as_ref().as_chunks::<3>().0.iter().zip(sh.as_mut()) {
+            *dst = Vec3::from_array([src[0], src[1], src[2]].map(|v| (v as f32 / 127.0).max(-1.0)));
+        }
+
+        sh
     }
 }
 
-/// The none SH configuration of Gaussian.
-///
-/// Calling [`GaussianShConfig::to_sh`] will panic on this config.
+/// A degree-zero layout, with no non-DC SH payload.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ShNone;
 
 impl GaussianShConfig for ShNone {
+    type Degree = ShDegree0;
+
     const FEATURE: &'static str = "sh_none";
 
     type Field = ();
 
-    fn from_sh(_sh: &[Vec3; 15]) -> Self::Field {}
+    fn from_sh(_sh: &[Vec3; 0]) -> Self::Field {}
 
-    fn to_sh(_field: &Self::Field) -> [Vec3; 15] {
-        panic!("Cannot convert from SH None configuration")
+    fn to_sh(_field: &Self::Field) -> [Vec3; 0] {
+        []
     }
 }
 
@@ -271,12 +270,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn legacy_names_remain_usable_as_types_and_values() {
+    fn test_legacy_names_should_remain_usable_as_types_and_values() {
         fn same_type<T>(_: T, _: T) {}
 
-        same_type(ShSingle, GaussianShSingleConfig);
-        same_type(ShHalf, GaussianShHalfConfig);
-        same_type(ShNorm8, GaussianShNorm8Config);
+        same_type(
+            ShSingle::<ShDegree3>(std::marker::PhantomData),
+            GaussianShSingleConfig(std::marker::PhantomData),
+        );
+        same_type(
+            ShHalf::<ShDegree3>(std::marker::PhantomData),
+            GaussianShHalfConfig(std::marker::PhantomData),
+        );
+        same_type(
+            ShNorm8::<ShDegree3>(std::marker::PhantomData),
+            GaussianShNorm8Config(std::marker::PhantomData),
+        );
         same_type(ShNone, GaussianShNoneConfig);
         same_type(CovRotScale, GaussianCov3dRotScaleConfig);
         same_type(CovSingle, GaussianCov3dSingleConfig);

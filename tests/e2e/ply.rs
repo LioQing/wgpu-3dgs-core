@@ -9,7 +9,7 @@ use wgpu_3dgs_core::{
 
 use crate::common::{assert, given};
 
-fn degree_gaussians(degree: u8) -> PlyGaussians {
+fn sh_degree_gaussians(degree: u8) -> PlyGaussians {
     let count = (degree as usize + 1).pow(2) - 1;
     let mut gaussian = given::gaussian().to_ply();
     gaussian.sh = (0..count * 3).map(|i| i as f32 * 0.125 - 1.0).collect();
@@ -101,7 +101,9 @@ fn test_ply_color_round_trip_should_preserve_float_precision() {
             ..given::gaussian().to_ply()
         };
 
-        let round_trip = Gaussian::from_ply(&ply).to_ply();
+        let round_trip = Gaussian::<wgpu_3dgs_core::ShDegree3>::from_ply(&ply)
+            .unwrap()
+            .to_ply();
 
         assert!(round_trip.color.abs_diff_eq(color, 1e-6));
         assert!((round_trip.alpha - ply.alpha).abs() < 1e-6);
@@ -109,7 +111,7 @@ fn test_ply_color_round_trip_should_preserve_float_precision() {
 }
 
 #[test]
-fn test_ply_gaussian_from_gaussian() {
+fn test_ply_gaussian_from_gaussian_should_equal_to_ply() {
     let gaussian = given::gaussian();
 
     assert::ply_gaussian_pod(&gaussian.to_ply(), &PlyGaussian::from(&gaussian));
@@ -117,9 +119,9 @@ fn test_ply_gaussian_from_gaussian() {
 }
 
 #[test]
-fn test_ply_degrees_round_trip_and_convert_to_degree_three() {
+fn test_ply_round_trip_should_preserve_all_native_degrees() {
     for degree in 0..=4 {
-        let original = degree_gaussians(degree);
+        let original = sh_degree_gaussians(degree);
         assert_eq!(
             PlyGaussians::try_from(original.gaussians.clone())
                 .unwrap()
@@ -136,39 +138,24 @@ fn test_ply_degrees_round_trip_and_convert_to_degree_three() {
         assert_eq!(header.sh_degree, degree);
         assert_eq!(header.count(), 1);
 
-        let actual = PlyGaussians::read_gaussians(&mut input, header)
-            .unwrap()
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap();
+        let actual = PlyGaussians::read_gaussians(&mut input, header).unwrap();
 
-        assert_eq!(actual, original.gaussians);
+        assert_eq!(actual, original);
         assert!(input.is_empty());
         assert_eq!(
             PlyGaussians::read_from(&mut bytes.as_slice()).unwrap(),
             original
         );
 
-        let converted = Gaussian::from_ply(&actual[0]);
-        let count = ((degree as usize + 1).pow(2) - 1).min(15);
+        let converted = wgpu_3dgs_core::AnyGaussian::from_ply(&actual.gaussians[0]).unwrap();
 
-        for i in 0..15 {
-            let expected = if i < count {
-                Vec3::new(
-                    actual[0].sh[i],
-                    actual[0].sh[i + actual[0].sh.len() / 3],
-                    actual[0].sh[i + 2 * actual[0].sh.len() / 3],
-                )
-            } else {
-                Vec3::ZERO
-            };
-
-            assert_eq!(converted.sh[i], expected);
-        }
+        assert_eq!(converted.sh_degree().get(), degree);
+        assert::ply_gaussian_pod(&converted.to_ply(), &actual.gaussians[0]);
     }
 }
 
 #[test]
-fn test_empty_degree_four_ply_preserves_header() {
+fn test_ply_round_trip_when_degree_four_model_is_empty_should_preserve_header() {
     let original = PlyGaussians::new(Vec::new(), 4).unwrap();
     let mut bytes = Vec::new();
     original.write_to(&mut bytes).unwrap();
@@ -180,9 +167,72 @@ fn test_empty_degree_four_ply_preserves_header() {
 }
 
 #[test]
-fn test_ply_reordered_ascii_and_binary_should_preserve_all_degrees() {
+fn test_ply_read_gaussians_when_model_is_empty_should_preserve_header_degree() {
+    for degree in 0..=4 {
+        let original = PlyGaussians::new(Vec::new(), degree).unwrap();
+        let mut bytes = Vec::new();
+        original.write_to(&mut bytes).unwrap();
+
+        let mut input = bytes.as_slice();
+        let header = PlyGaussians::read_header(&mut input).unwrap();
+
+        assert_eq!(
+            PlyGaussians::read_gaussians(&mut input, header).unwrap(),
+            original
+        );
+        assert!(input.is_empty());
+    }
+}
+
+#[test]
+fn test_ply_stream_from_header_should_preserve_metadata_and_deliver_records() {
+    for degree in 0..=4 {
+        for count in [0, 3] {
+            let record = sh_degree_gaussians(degree).gaussians.remove(0);
+            let original = PlyGaussians::new(vec![record; count], degree).unwrap();
+            let mut bytes = Vec::new();
+            original.write_to(&mut bytes).unwrap();
+            bytes.extend_from_slice(b"trailing data");
+
+            let mut input = bytes.as_slice();
+            let header = PlyGaussians::read_header(&mut input).unwrap();
+            let remaining = input;
+
+            let mut body = remaining;
+            assert_eq!(
+                PlyGaussians::read_gaussians(&mut body, header.clone()).unwrap(),
+                original
+            );
+            assert_eq!(body, b"trailing data");
+
+            // Preparing a stream must not consume any body data.
+            let stream = PlyGaussianStream::from_header(&mut input, header.clone());
+            assert_eq!(stream.header().sh_degree, degree);
+            assert_eq!(stream.total_gaussians(), count);
+            assert_eq!(stream.progress().completed_units, 0);
+            assert_eq!(stream.progress().done, count == 0);
+            drop(stream);
+            assert_eq!(input, remaining);
+
+            let mut stream = PlyGaussianStream::from_header(&mut input, header);
+            let mut records = Vec::new();
+            for expected in &original.gaussians {
+                records.push(stream.next().unwrap().unwrap());
+                assert_eq!(records.last().unwrap(), expected);
+                assert_eq!(stream.progress().completed_units, records.len());
+            }
+            assert!(stream.progress().done);
+            assert!(stream.next().is_none());
+            drop(stream);
+            assert_eq!(input, b"trailing data");
+        }
+    }
+}
+
+#[test]
+fn test_ply_read_when_ascii_or_binary_properties_are_reordered_should_preserve_all_degrees() {
     for degree in [1, 2, 3, 4] {
-        let original = degree_gaussians(degree);
+        let original = sh_degree_gaussians(degree);
 
         for encoding in [
             ply_rs::ply::Encoding::Ascii,
@@ -200,9 +250,9 @@ fn test_ply_reordered_ascii_and_binary_should_preserve_all_degrees() {
 }
 
 #[test]
-fn test_ply_stream_and_batch_writer_preserve_variable_degree() {
+fn test_ply_stream_and_batch_writer_should_preserve_variable_degree() {
     for degree in [1, 2, 4] {
-        let original = degree_gaussians(degree);
+        let original = sh_degree_gaussians(degree);
         let mut input = Vec::new();
         original.write_to(&mut input).unwrap();
 
@@ -233,7 +283,7 @@ fn test_ply_stream_and_batch_writer_preserve_variable_degree() {
 }
 
 #[test]
-fn test_ply_rejects_missing_vertex_and_malformed_sh() {
+fn test_ply_read_header_when_vertex_is_missing_or_sh_is_malformed_should_return_error() {
     let missing_vertex =
         b"ply\nformat ascii 1.0\nelement fragment 1\nproperty float x\nend_header\n";
     let error = PlyGaussians::read_header(&mut missing_vertex.as_slice()).unwrap_err();
@@ -243,7 +293,7 @@ fn test_ply_rejects_missing_vertex_and_malformed_sh() {
         "Gaussian vertex element not found in PLY header"
     );
 
-    let original = degree_gaussians(1);
+    let original = sh_degree_gaussians(1);
     let bytes = reordered_buffer(&original.gaussians[0], 1, ply_rs::ply::Encoding::Ascii);
     let text = String::from_utf8(bytes).unwrap();
 
@@ -267,7 +317,7 @@ fn test_ply_rejects_missing_vertex_and_malformed_sh() {
 
 #[test]
 fn test_ply_read_when_missing_value_or_truncated_record_should_error() {
-    let original = degree_gaussians(2);
+    let original = sh_degree_gaussians(2);
     let bytes = reordered_buffer(&original.gaussians[0], 2, ply_rs::ply::Encoding::Ascii);
     let mut text = String::from_utf8(bytes).unwrap();
     text.pop();
@@ -279,18 +329,33 @@ fn test_ply_read_when_missing_value_or_truncated_record_should_error() {
 
     assert_matches!(result, Err(e) if e.kind() == std::io::ErrorKind::InvalidData);
 
+    let mut input = text.as_bytes();
+    let header = PlyGaussians::read_header(&mut input).unwrap();
+    assert_matches!(PlyGaussians::read_gaussians(&mut input, header), Err(e) if e.kind() == std::io::ErrorKind::InvalidData);
+
     let mut bytes = Vec::new();
     original.write_to(&mut bytes).unwrap();
     bytes.pop();
 
     assert_matches!(PlyGaussians::read_from(&mut bytes.as_slice()), Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof);
+
+    let mut input = bytes.as_slice();
+    let header = PlyGaussians::read_header(&mut input).unwrap();
+    assert_matches!(PlyGaussians::read_gaussians(&mut input, header.clone()), Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof);
+
+    let mut input = bytes.as_slice();
+    let header = PlyGaussians::read_header(&mut input).unwrap();
+    let mut stream = PlyGaussianStream::from_header(input, header);
+    assert_matches!(stream.next(), Some(Err(e)) if e.kind() == std::io::ErrorKind::UnexpectedEof);
+    assert!(stream.next().is_none());
+    assert!(!stream.progress().done);
 }
 
 #[test]
-fn test_ply_writer_rejects_mismatched_sh_and_invalid_degree() {
+fn test_ply_writer_when_sh_mismatches_or_degree_is_invalid_should_return_error() {
     assert!(PlyGaussians::new(vec![], 5).is_err());
 
-    let mut original = degree_gaussians(4);
+    let mut original = sh_degree_gaussians(4);
     original.gaussians[0].sh.pop();
     let mut bytes = Vec::new();
 
@@ -301,7 +366,7 @@ fn test_ply_writer_rejects_mismatched_sh_and_invalid_degree() {
 }
 
 #[test]
-fn test_ply_file_round_trip_and_collection_constructors() {
+fn test_ply_file_round_trip_and_collection_constructors_should_preserve_gaussians() {
     let gaussians = given::ply_gaussians();
     let path = given::temp_file_path(".ply");
 
@@ -312,11 +377,11 @@ fn test_ply_file_round_trip_and_collection_constructors() {
     assert!(!gaussians.is_empty());
 
     let from_vec = PlyGaussians::try_from(gaussians.gaussians.clone()).unwrap();
-    let mut from_iter: PlyGaussians = given::gaussians().iter().collect();
+    let mut from_iter = PlyGaussians::from_gaussians(given::gaussians()).unwrap();
 
     assert_eq!(from_vec, gaussians);
     assert_eq!(
-        PlyGaussians::try_from_iter(gaussians.gaussians.clone()).unwrap(),
+        PlyGaussians::from_iter(gaussians.gaussians.clone(), gaussians.sh_degree).unwrap(),
         gaussians
     );
     assert_eq!(from_iter, gaussians);
@@ -327,11 +392,39 @@ fn test_ply_file_round_trip_and_collection_constructors() {
 }
 
 #[test]
-fn test_ply_collection_conversions_reject_invalid_sh_lengths() {
+fn test_ply_from_iter_should_require_matching_explicit_degree_including_empty_input() {
     for degree in 0..=4 {
-        let original = degree_gaussians(degree);
+        let empty = PlyGaussians::from_iter(std::iter::empty(), degree).unwrap();
+        assert!(empty.is_empty());
+        assert_eq!(empty.sh_degree, degree);
+
+        let original = sh_degree_gaussians(degree);
         assert_eq!(
-            PlyGaussians::try_from_iter(original.gaussians.clone()).unwrap(),
+            PlyGaussians::from_iter(original.gaussians.clone().into_iter(), degree).unwrap(),
+            original
+        );
+    }
+
+    assert_matches!(
+        PlyGaussians::from_iter(Vec::new(), 5),
+        Err(PlyGaussiansFromIterError::UnsupportedShDegree { degree: 5 })
+    );
+    let records = sh_degree_gaussians(1).gaussians;
+    assert_matches!(
+        PlyGaussians::from_iter(records, 2),
+        Err(PlyGaussiansFromIterError::ShCountMismatch {
+            actual_count: 9,
+            expected_count: 24,
+        })
+    );
+}
+
+#[test]
+fn test_ply_collection_conversions_when_sh_lengths_are_invalid_should_return_error() {
+    for degree in 0..=4 {
+        let original = sh_degree_gaussians(degree);
+        assert_eq!(
+            PlyGaussians::from_iter(original.gaussians.clone(), degree).unwrap(),
             original
         );
     }
@@ -339,30 +432,37 @@ fn test_ply_collection_conversions_reject_invalid_sh_lengths() {
     let empty = PlyGaussians::try_from(Vec::new()).unwrap();
 
     assert_eq!(empty.sh_degree, 3);
-    assert_eq!(PlyGaussians::try_from_iter(Vec::new()).unwrap(), empty);
+    assert_eq!(PlyGaussians::from_iter(Vec::new(), 3).unwrap(), empty);
 
-    let valid = degree_gaussians(2).gaussians.remove(0);
+    let valid = sh_degree_gaussians(2).gaussians.remove(0);
     let mut invalid = valid.clone();
     invalid.sh.pop();
 
     let mut unsupported = valid.clone();
     unsupported.sh = vec![0.0; 3 * ((5_usize + 1).pow(2) - 1)];
 
-    let mixed = vec![valid, degree_gaussians(1).gaussians.remove(0)];
+    let mixed = vec![valid, sh_degree_gaussians(1).gaussians.remove(0)];
 
     assert_matches!(
         PlyGaussians::try_from(vec![invalid.clone()]),
         Err(PlyGaussiansFromIterError::UnsupportedShCount { count }) if count == invalid.sh.len()
     );
     assert_matches!(
-        PlyGaussians::try_from_iter(vec![unsupported.clone()]),
-        Err(PlyGaussiansFromIterError::UnsupportedShCount { count }) if count == unsupported.sh.len()
+        PlyGaussians::from_iter(vec![unsupported.clone()], 2),
+        Err(PlyGaussiansFromIterError::ShCountMismatch {
+            actual_count,
+            expected_count: 24,
+        }) if actual_count == unsupported.sh.len()
     );
 
     for records in [vec![invalid], vec![unsupported], mixed.clone()] {
-        assert_eq!(
-            PlyGaussians::new(records, 2).unwrap_err().kind(),
-            std::io::ErrorKind::InvalidData
+        let actual_count = records.iter().find(|g| g.sh.len() != 24).unwrap().sh.len();
+        assert_matches!(
+            PlyGaussians::new(records, 2),
+            Err(PlyGaussiansFromIterError::ShCountMismatch {
+                actual_count: count,
+                expected_count: 24,
+            }) if count == actual_count
         );
     }
 
@@ -374,7 +474,7 @@ fn test_ply_collection_conversions_reject_invalid_sh_lengths() {
         })
     );
     assert_matches!(
-        PlyGaussians::try_from_iter(mixed),
+        PlyGaussians::from_iter(mixed, 2),
         Err(PlyGaussiansFromIterError::ShCountMismatch {
             actual_count: 9,
             expected_count: 24

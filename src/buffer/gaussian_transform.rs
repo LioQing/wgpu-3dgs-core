@@ -21,10 +21,10 @@ pub struct GaussianShDegree(u8);
 impl GaussianShDegree {
     /// Create a new Gaussian SH degree.
     ///
-    /// Returns [`None`] if the degree is not in the range of \[0, 3\].
+    /// Returns [`None`] if the degree is not in the range of \[0, 4\].
     pub const fn new(sh_deg: u8) -> Option<Self> {
         match sh_deg {
-            0..=3 => Some(Self(sh_deg)),
+            0..=4 => Some(Self(sh_deg)),
             _ => None,
         }
     }
@@ -33,7 +33,7 @@ impl GaussianShDegree {
     ///
     /// # Safety
     ///
-    /// The degree must be in the range of \[0, 3\].
+    /// The degree must be in the range of \[0, 4\].
     pub const unsafe fn new_unchecked(sh_deg: u8) -> Self {
         Self(sh_deg)
     }
@@ -41,6 +41,23 @@ impl GaussianShDegree {
     /// Get the degree.
     pub const fn get(&self) -> u8 {
         self.0
+    }
+
+    /// Number of RGB coefficient vectors, excluding SH0.
+    pub const fn num_coefficients(&self) -> usize {
+        (self.0 as usize + 1) * (self.0 as usize + 1) - 1
+    }
+
+    /// Infer a supported degree from its non-DC coefficient count.
+    pub const fn from_coefficient_count(count: usize) -> Option<Self> {
+        match count {
+            0 => Self::new(0),
+            3 => Self::new(1),
+            8 => Self::new(2),
+            15 => Self::new(3),
+            24 => Self::new(4),
+            _ => None,
+        }
     }
 }
 

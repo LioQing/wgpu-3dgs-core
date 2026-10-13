@@ -2,10 +2,12 @@ use thiserror::Error;
 
 use crate::{SpzGaussianPosition, SpzGaussianRotation, SpzGaussianSh, SpzGaussianShDegree};
 
-/// The error type for [`PlyGaussians::try_from_iter`](crate::PlyGaussians::try_from_iter)
-/// and [`PlyGaussians::try_from`](crate::PlyGaussians::try_from).
+/// The error type for constructing [`PlyGaussians`](crate::PlyGaussians)
+/// and converting PLY records to native Gaussians.
 #[derive(Debug, Error)]
 pub enum PlyGaussiansFromIterError {
+    #[error("unsupported PLY Gaussian SH degree: {degree}")]
+    UnsupportedShDegree { degree: u8 },
     #[error("unsupported PLY Gaussian SH coefficient count: {count}")]
     UnsupportedShCount { count: usize },
     #[error("PLY Gaussian SH count mismatch: {actual_count} != {expected_count}")]
@@ -13,6 +15,49 @@ pub enum PlyGaussiansFromIterError {
         actual_count: usize,
         expected_count: usize,
     },
+}
+
+/// The error type for operations requiring matching SH storage degrees.
+#[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
+#[error("SH degree mismatch: {actual_degree} != {expected_degree}")]
+pub struct ShDegreeMismatchError {
+    pub actual_degree: u8,
+    pub expected_degree: u8,
+}
+
+/// The error type for [`Gaussian::to_spz`](crate::Gaussian::to_spz)
+/// and [`AnyGaussian::to_spz`](crate::AnyGaussian::to_spz).
+#[derive(Debug, Error)]
+pub enum GaussianToSpzError {
+    #[error("{0}")]
+    ShDegreeMismatch(#[from] ShDegreeMismatchError),
+    #[error("SH quantization bits must be in 0..=8: degree {degree} uses {bits}")]
+    InvalidShQuantizeBits { degree: u8, bits: u32 },
+}
+
+/// The error type for converting native Gaussians to [`SpzGaussians`](crate::SpzGaussians).
+#[derive(Debug, Error)]
+pub enum SpzGaussiansFromGaussiansError {
+    #[error("unsupported SPZ SH degree: {degree}")]
+    UnsupportedShDegree { degree: u8 },
+    #[error("{0}")]
+    ShDegreeMismatch(#[from] ShDegreeMismatchError),
+    #[error("{0}")]
+    Header(#[from] std::io::Error),
+    #[error("{0}")]
+    Gaussian(#[from] GaussianToSpzError),
+}
+
+/// The error type for [`Gaussians::from_gaussians_iter`](crate::Gaussians::from_gaussians_iter)
+/// and [`Gaussians::from_gaussians_iter_with_sh_degree`](crate::Gaussians::from_gaussians_iter_with_sh_degree).
+#[derive(Debug, Error)]
+pub enum GaussiansFromIterError {
+    #[error("{0}")]
+    ShDegreeMismatch(#[from] ShDegreeMismatchError),
+    #[error("{0}")]
+    Ply(#[from] PlyGaussiansFromIterError),
+    #[error("{0}")]
+    Spz(#[from] SpzGaussiansFromGaussiansError),
 }
 
 /// The error type for [`SpzGaussians::from_iter`](crate::SpzGaussians::from_iter).
@@ -87,6 +132,8 @@ pub enum DownloadBufferError {
 /// The error type for [`GaussiansBuffer`](crate::GaussiansBuffer) update functions.
 #[derive(Debug, Error)]
 pub enum GaussiansBufferUpdateError {
+    #[error("{0}")]
+    InvalidDegree(#[from] ShDegreeMismatchError),
     #[error("Gaussians count mismatch: {count} != {expected_count}")]
     CountMismatch { count: usize, expected_count: usize },
 }
@@ -94,6 +141,8 @@ pub enum GaussiansBufferUpdateError {
 /// The error type for [`GaussiansBuffer`](crate::GaussiansBuffer) update range functions.
 #[derive(Debug, Error)]
 pub enum GaussiansBufferUpdateRangeError {
+    #[error("{0}")]
+    InvalidDegree(#[from] ShDegreeMismatchError),
     #[error("Gaussians count mismatch: {count} + {start} > {expected_count}")]
     CountMismatch {
         count: usize,

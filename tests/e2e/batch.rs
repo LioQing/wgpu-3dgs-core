@@ -201,7 +201,7 @@ fn test_spz_batch_when_versions_and_sh_degrees_vary_should_round_trip() {
     for version in 1..=3 {
         for degree in 0..=3 {
             let original = SpzGaussians::from_gaussians_with_options(
-                given::gaussians(),
+                given::runtime_gaussians(degree),
                 &SpzGaussiansFromGaussianSliceOptions {
                     version,
                     sh_degree: SpzGaussianShDegree::new(degree).unwrap(),
@@ -403,7 +403,7 @@ fn test_gaussians_stream_when_source_is_ply_should_deliver_unified_gaussians_in_
 
     let mut stream = GaussiansStream::new(bytes.as_slice(), GaussiansSource::Ply).unwrap();
     assert_eq!(stream.total_gaussians(), original.len());
-    let mut out = vec![given::gaussians()[0]];
+    let mut out = vec![wgpu_3dgs_core::AnyGaussian::Three(given::gaussians()[0])];
     for (index, expected) in original.iter_gaussian().enumerate() {
         assert_eq!(stream.next_batch(one(), &mut out).unwrap(), 1);
         assert_eq!(out[index + 1], expected);

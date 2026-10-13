@@ -10,10 +10,7 @@
 
 use std::{io::BufReader, num::NonZeroUsize};
 
-use glam::*;
-use wgpu_3dgs_core::{self as gs, BatchRead, BufferWrapper, ReadIterGaussian};
-
-type GaussianPod = gs::PackedGaussian<gs::ShHalf, gs::CovHalf>;
+use wgpu_3dgs_core::{self as gs, BatchRead, IterGaussian, ReadIterGaussian};
 
 #[pollster::main]
 async fn main() {
@@ -68,11 +65,19 @@ async fn main() {
 
     println!("Header: {:?}", gaussians.header);
 
-    let gaussians_buffer = gs::GaussiansBuffer::<GaussianPod>::new(&device, &gaussians);
+    let gaussians = gaussians
+        .iter_gaussian()
+        .map(|g| g.convert_sh_degree::<gs::ShDegree3>())
+        .collect::<Vec<_>>();
+
+    let gaussians_buffer: wgpu::Buffer = gs::GaussiansBuffer::<
+        gs::PackedGaussian<gs::ShHalf, gs::CovHalf>,
+    >::new(&device, &gaussians)
+    .into();
 
     println!(
-        "Loaded {} gaussians ({:.3} KB) into GPU buffer.",
-        gaussians_buffer.len(),
-        gaussians_buffer.buffer().size() as f32 / 1024.0,
+        "Loaded {} gaussians ({:.3} KB) with SH converted to degree 3 into GPU buffer.",
+        gaussians.len(),
+        gaussians_buffer.size() as f32 / 1024.0,
     );
 }
