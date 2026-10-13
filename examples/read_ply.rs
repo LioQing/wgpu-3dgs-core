@@ -63,33 +63,19 @@ async fn main() {
         gs::PlyGaussians::read_from_file(&model_path).expect("gaussians")
     };
 
-    let gaussians_buffer = upload(&device, &gaussians);
+    let gaussians = gaussians
+        .iter_gaussian()
+        .map(|g| g.convert_sh_degree::<gs::ShDegree3>())
+        .collect::<Vec<_>>();
+
+    let gaussians_buffer: wgpu::Buffer = gs::GaussiansBuffer::<
+        gs::PackedGaussian<gs::ShHalf<gs::ShDegree3>, gs::CovHalf>,
+    >::new(&device, &gaussians)
+    .into();
 
     println!(
-        "Loaded {} gaussians ({:.3} KB) into GPU buffer.",
+        "Loaded {} gaussians ({:.3} KB) with SH converted to degree 3 into GPU buffer.",
         gaussians.len(),
         gaussians_buffer.size() as f32 / 1024.0,
     );
-}
-
-/// Dispatch a runtime model once, then upload its matching compact layout.
-fn upload(device: &wgpu::Device, gaussians: &impl IterGaussian) -> wgpu::Buffer {
-    macro_rules! upload_sh_degree {
-        ($degree:ty) => {
-            gs::GaussiansBuffer::<gs::PackedGaussian<gs::ShHalf<$degree>, gs::CovHalf>>::try_new(
-                device, gaussians,
-            )
-            .expect("matching storage degree")
-            .into()
-        };
-    }
-
-    match gaussians.sh_degree().get() {
-        0 => upload_sh_degree!(gs::ShDegree0),
-        1 => upload_sh_degree!(gs::ShDegree1),
-        2 => upload_sh_degree!(gs::ShDegree2),
-        3 => upload_sh_degree!(gs::ShDegree3),
-        4 => upload_sh_degree!(gs::ShDegree4),
-        _ => unreachable!(),
-    }
 }
