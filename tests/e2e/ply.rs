@@ -89,6 +89,352 @@ fn reordered_buffer(ply: &PlyGaussian, degree: u8, encoding: ply_rs::ply::Encodi
     buffer
 }
 
+fn record_values(ply: &PlyGaussian) -> Vec<f32> {
+    ply.pos
+        .to_array()
+        .into_iter()
+        .chain(ply.normal.to_array())
+        .chain(ply.color.to_array())
+        .chain(ply.sh.iter().copied())
+        .chain([ply.alpha])
+        .chain(ply.scale.to_array())
+        .chain([ply.rot.w, ply.rot.x, ply.rot.y, ply.rot.z])
+        .collect()
+}
+
+/// Encode test records with a selectable property layout and normal components.
+///
+/// `custom` reverses known properties and interleaves unknown properties of every
+/// scalar type. Bits 0, 1, and 2 of `normals` include nx, ny, and nz, respectively.
+fn layout_buffer(
+    original: &PlyGaussians,
+    encoding: ply_rs::ply::Encoding,
+    custom: bool,
+    normals: u8,
+) -> Vec<u8> {
+    use ply_rs::ply::Encoding;
+
+    let rest = ((original.sh_degree as usize + 1).pow(2) - 1) * 3;
+    let names = [
+        "x", "y", "z", "nx", "ny", "nz", "f_dc_0", "f_dc_1", "f_dc_2",
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .chain((0..rest).map(|i| format!("f_rest_{i}")))
+    .chain(
+        [
+            "opacity", "scale_0", "scale_1", "scale_2", "rot_0", "rot_1", "rot_2", "rot_3",
+        ]
+        .map(str::to_string),
+    );
+
+    let mut properties: Vec<_> = names
+        .enumerate()
+        .filter(|(index, _)| !(3..6).contains(index) || normals & (1 << (index - 3)) != 0)
+        .map(|(index, name)| (name, "float", Some(index)))
+        .collect();
+
+    let extras = [
+        ("char", vec![(-7i8) as u8], "-7"),
+        ("uchar", vec![250], "250"),
+        ("short", (-1234i16).to_le_bytes().to_vec(), "-1234"),
+        ("ushort", 60000u16.to_le_bytes().to_vec(), "60000"),
+        ("int", (-123456i32).to_le_bytes().to_vec(), "-123456"),
+        ("uint", 4000000000u32.to_le_bytes().to_vec(), "4000000000"),
+        ("float", 123.25f32.to_le_bytes().to_vec(), "123.25"),
+        ("double", (-987.125f64).to_le_bytes().to_vec(), "-987.125"),
+    ];
+
+    if custom {
+        properties.reverse();
+        for (index, (ty, _, _)) in extras.iter().enumerate() {
+            properties.insert(index * 2, (format!("extra_{ty}"), ty, None));
+        }
+    }
+
+    let mut bytes = Vec::new();
+    writeln!(
+        bytes,
+        "ply\nformat {encoding} 1.0\nelement vertex {}",
+        original.len()
+    )
+    .unwrap();
+    for (name, ty, _) in &properties {
+        writeln!(bytes, "property {ty} {name}").unwrap();
+    }
+    writeln!(bytes, "end_header").unwrap();
+
+    for gaussian in original.iter() {
+        let values = record_values(gaussian);
+        for (_, ty, index) in &properties {
+            if let Some(index) = index {
+                match encoding {
+                    Encoding::Ascii => write!(bytes, "{} \t", values[*index]).unwrap(),
+                    Encoding::BinaryLittleEndian => bytes.extend(values[*index].to_le_bytes()),
+                    Encoding::BinaryBigEndian => bytes.extend(values[*index].to_be_bytes()),
+                }
+            } else {
+                let (_, value, token) = extras
+                    .iter()
+                    .find(|(extra_ty, _, _)| extra_ty == ty)
+                    .unwrap();
+                match encoding {
+                    Encoding::Ascii => write!(bytes, "{token}\t").unwrap(),
+                    Encoding::BinaryLittleEndian => bytes.extend(value),
+                    Encoding::BinaryBigEndian => bytes.extend(value.iter().rev()),
+                }
+            }
+        }
+        if encoding == Encoding::Ascii {
+            bytes.extend_from_slice(b"\r\n");
+        }
+    }
+
+    bytes
+}
+
+#[test]
+fn test_ply_read_layouts_with_small_buffers_should_preserve_records_and_trailing_data() {
+    use ply_rs::ply::Encoding;
+    use std::{io::BufReader, num::NonZeroUsize};
+
+    for degree in 0..=4 {
+        for (custom, normals) in [(false, 7), (true, 7), (true, 0), (true, 1)] {
+            let first = sh_degree_gaussians(degree).gaussians.remove(0);
+            let mut second = first.clone();
+            second.pos += Vec3::new(4.0, -2.0, 0.5);
+            second.color += Vec3::splat(0.25);
+            second.alpha = -0.75;
+            second.sh.iter_mut().for_each(|value| *value += 0.5);
+
+            let mut original = PlyGaussians::new(vec![first, second], degree).unwrap();
+            for gaussian in original.iter_mut() {
+                gaussian.normal = Vec3::new(
+                    if normals & 1 != 0 { 0.25 } else { 0.0 },
+                    if normals & 2 != 0 { -0.5 } else { 0.0 },
+                    if normals & 4 != 0 { 0.75 } else { 0.0 },
+                );
+            }
+
+            for encoding in [
+                Encoding::Ascii,
+                Encoding::BinaryLittleEndian,
+                Encoding::BinaryBigEndian,
+            ] {
+                let mut bytes = layout_buffer(&original, encoding, custom, normals);
+                bytes.extend_from_slice(b"trailing data");
+
+                // A slice exercises the direct fill_buf path for custom layouts.
+                let mut input = bytes.as_slice();
+                assert_eq!(PlyGaussians::read_from(&mut input).unwrap(), original);
+                assert_eq!(input, b"trailing data");
+
+                for capacity in [1, 7, 256, 4096] {
+                    let mut input = BufReader::with_capacity(capacity, bytes.as_slice());
+                    assert_eq!(PlyGaussians::read_from(&mut input).unwrap(), original);
+                    let mut trailing = String::new();
+                    std::io::Read::read_to_string(&mut input, &mut trailing).unwrap();
+                    assert_eq!(trailing, "trailing data");
+                }
+
+                let mut input = bytes.as_slice();
+                let mut stream = PlyGaussianStream::new(&mut input).unwrap();
+                let mut out = Vec::new();
+                assert_eq!(
+                    stream
+                        .next_batch(NonZeroUsize::new(1).unwrap(), &mut out)
+                        .unwrap(),
+                    1
+                );
+                assert_eq!(stream.progress().completed_units, 1);
+                assert!(!stream.progress().done);
+                assert_eq!(
+                    stream
+                        .next_batch(NonZeroUsize::new(3).unwrap(), &mut out)
+                        .unwrap(),
+                    1
+                );
+                assert!(stream.progress().done);
+                assert!(stream.next().is_none());
+                assert_eq!(out, original.gaussians);
+                drop(stream);
+                assert_eq!(input, b"trailing data");
+
+                let mut batch = PlyBatchReader::new(bytes.as_slice()).unwrap();
+                assert_eq!(
+                    batch
+                        .step(NonZeroUsize::new(1).unwrap())
+                        .unwrap()
+                        .completed_units,
+                    1
+                );
+                assert!(batch.step(NonZeroUsize::new(3).unwrap()).unwrap().done);
+                assert_eq!(batch.finish().unwrap(), original);
+            }
+        }
+    }
+}
+
+#[test]
+fn test_ply_binary_read_when_custom_or_canonical_should_preserve_float_bits() {
+    use ply_rs::ply::Encoding;
+
+    let mut original = sh_degree_gaussians(4);
+    original.gaussians[0].pos.x = -0.0;
+    original.gaussians[0].sh[..4].copy_from_slice(&[
+        f32::from_bits(0x7fc01234),
+        f32::INFINITY,
+        f32::NEG_INFINITY,
+        f32::from_bits(1),
+    ]);
+
+    for encoding in [Encoding::BinaryLittleEndian, Encoding::BinaryBigEndian] {
+        for custom in [false, true] {
+            let bytes = layout_buffer(&original, encoding, custom, 7);
+            let actual = PlyGaussians::read_from(&mut bytes.as_slice()).unwrap();
+            assert_eq!(
+                record_values(&actual.gaussians[0])
+                    .iter()
+                    .map(|v| v.to_bits())
+                    .collect::<Vec<_>>(),
+                record_values(&original.gaussians[0])
+                    .iter()
+                    .map(|v| v.to_bits())
+                    .collect::<Vec<_>>(),
+            );
+        }
+    }
+}
+
+#[test]
+fn test_ply_binary_read_when_standard_layout_has_extra_property_should_use_full_stride() {
+    for degree in 0..=4 {
+        let original = sh_degree_gaussians(degree);
+        let mut bytes = Vec::new();
+        original.write_to(&mut bytes).unwrap();
+        let marker = b"end_header\n";
+        let end = bytes
+            .windows(marker.len())
+            .position(|window| window == marker)
+            .unwrap();
+
+        let mut input = bytes[..end].to_vec();
+        input.extend_from_slice(b"property uchar extra\nend_header\n");
+        input.extend_from_slice(&bytes[end + marker.len()..]);
+        input.push(0xab);
+        input.extend_from_slice(b"trailing data");
+
+        let mut reader = input.as_slice();
+        assert_eq!(PlyGaussians::read_from(&mut reader).unwrap(), original);
+        assert_eq!(reader, b"trailing data");
+    }
+}
+
+#[test]
+fn test_ply_whole_model_read_when_count_overflows_allocation_should_return_error() {
+    let original = sh_degree_gaussians(0);
+    let bytes = layout_buffer(&original, ply_rs::ply::Encoding::Ascii, false, 7);
+    let text = String::from_utf8(bytes).unwrap();
+    let text = text.replace(
+        "element vertex 1",
+        &format!("element vertex {}", usize::MAX),
+    );
+
+    assert!(PlyGaussians::read_from(&mut text.as_bytes()).is_err());
+
+    // Stream construction still does not allocate storage for the declared model.
+    let stream = PlyGaussianStream::new(text.as_bytes()).unwrap();
+    assert_eq!(stream.total_gaussians(), usize::MAX);
+    assert_eq!(stream.progress().completed_units, 0);
+}
+
+#[test]
+fn test_ply_stream_when_record_is_truncated_should_fail_once_and_keep_completed_records() {
+    use ply_rs::ply::Encoding;
+    use std::{io::BufReader, num::NonZeroUsize};
+
+    for degree in 0..=4 {
+        let record = sh_degree_gaussians(degree).gaussians.remove(0);
+        let original = PlyGaussians::new(vec![record; 2], degree).unwrap();
+        for encoding in [
+            Encoding::Ascii,
+            Encoding::BinaryLittleEndian,
+            Encoding::BinaryBigEndian,
+        ] {
+            for custom in [false, true] {
+                let mut bytes = layout_buffer(&original, encoding, custom, 7);
+
+                if encoding == Encoding::Ascii {
+                    // Remove the last token as well as the line ending.
+                    let text = std::str::from_utf8(&bytes).unwrap();
+                    let end = text.trim_end().rfind(char::is_whitespace).unwrap();
+                    bytes.truncate(end);
+                } else {
+                    bytes.pop();
+                }
+
+                let reader = BufReader::with_capacity(7, bytes.as_slice());
+                let mut stream = PlyGaussianStream::new(reader).unwrap();
+                let mut out = Vec::new();
+                let error = stream
+                    .next_batch(NonZeroUsize::new(3).unwrap(), &mut out)
+                    .unwrap_err();
+
+                assert_eq!(
+                    error.kind(),
+                    if encoding == Encoding::Ascii {
+                        std::io::ErrorKind::InvalidData
+                    } else {
+                        std::io::ErrorKind::UnexpectedEof
+                    }
+                );
+                assert_eq!(out, original.gaussians[..1]);
+                assert_eq!(stream.progress().completed_units, 1);
+                assert!(!stream.progress().done);
+                assert!(stream.next().is_none());
+            }
+        }
+    }
+}
+
+#[test]
+fn test_ply_ascii_read_should_check_known_values_and_token_counts_but_skip_unknown_values() {
+    use ply_rs::ply::Encoding;
+
+    let original = sh_degree_gaussians(0);
+    let bytes = layout_buffer(&original, Encoding::Ascii, true, 7);
+    let text = String::from_utf8(bytes).unwrap();
+    let (header, body) = text.split_once("end_header\n").unwrap();
+    let mut tokens: Vec<_> = body.split_whitespace().collect();
+
+    // Unknown properties are skipped, including float properties.
+    tokens[0] = "ignored";
+    tokens[12] = "ignored_float";
+
+    let input = format!("{header}end_header\n{}", tokens.join(" "));
+    assert_eq!(
+        PlyGaussians::read_from(&mut input.as_bytes()).unwrap(),
+        original
+    );
+    tokens[1] = "invalid_float";
+
+    let input = format!("{header}end_header\n{}", tokens.join(" "));
+    assert_eq!(
+        PlyGaussians::read_from(&mut input.as_bytes())
+            .unwrap_err()
+            .kind(),
+        std::io::ErrorKind::InvalidData
+    );
+
+    let extra = format!("{} extra\n", text.trim_end());
+    assert_eq!(
+        PlyGaussians::read_from(&mut extra.as_bytes())
+            .unwrap_err()
+            .kind(),
+        std::io::ErrorKind::InvalidData
+    );
+}
+
 #[test]
 fn test_ply_color_round_trip_should_preserve_float_precision() {
     for color in [

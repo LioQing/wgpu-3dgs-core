@@ -126,6 +126,28 @@ fn test_ply_batch_writer_from_iter_should_pull_only_declared_count_in_steps() {
 }
 
 #[test]
+fn test_ply_batch_writer_from_iter_when_degree_is_invalid_should_fail_before_writing() {
+    for degree in 5..=u8::MAX {
+        let mut bytes = Vec::new();
+        let error = PlyBatchWriter::from_iter(
+            &mut bytes,
+            1,
+            degree,
+            std::iter::once_with(|| panic!("iterator was polled")),
+        )
+        .err()
+        .expect("unsupported SH degree was accepted");
+
+        assert_eq!(error.kind(), ErrorKind::InvalidInput);
+        assert_eq!(
+            error.to_string(),
+            format!("unsupported PLY SH degree: {degree}")
+        );
+        assert!(bytes.is_empty());
+    }
+}
+
+#[test]
 fn test_ply_batch_writer_from_iter_when_input_is_short_should_return_error() {
     let original = given::ply_gaussians();
     let mut writer = PlyBatchWriter::from_iter(
