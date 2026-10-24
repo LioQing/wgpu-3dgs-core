@@ -18,6 +18,7 @@ Please also check out the [`wgpu-3dgs-viewer` changelog](https://github.com/LioQ
 
 ### Changed
 
+- ⚡ Add direct binary PLY record reads for SH degrees 0 to 4, precompute custom property offsets, and reuse ASCII and binary read buffers. [#46](https://github.com/LioQing/wgpu-3dgs-core/pull/47)
 - 🐛 Fix overflow in Gaussian buffer update-range checks. [#45](https://github.com/LioQing/wgpu-3dgs-core/pull/45)
 - 🛡️ Reject SH quantization bit counts above 8 when encoding a Gaussian to SPZ. [#45](https://github.com/LioQing/wgpu-3dgs-core/pull/45)
 - 🧩 Update `GaussianPodWithSh...Cov3d...Configs` to `PackedGaussian<Sh..., Cov...>` so it is more ergonomic now. The old names remain available but are deprecated, and are planned to be removed in version 0.10. [#38](https://github.com/LioQing/wgpu-3dgs-core/pull/38)
