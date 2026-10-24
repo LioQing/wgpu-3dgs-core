@@ -2,11 +2,12 @@ use assert_matches::assert_matches;
 use glam::*;
 use std::io::ErrorKind;
 use wgpu_3dgs_core::{
-    Gaussian, IterGaussian, ReadIterGaussian, SpzGaussian, SpzGaussianPosition, SpzGaussianRef,
-    SpzGaussianRotation, SpzGaussianSh, SpzGaussianShDegree, SpzGaussianShRef, SpzGaussians,
-    SpzGaussiansCollectError, SpzGaussiansFromGaussianSliceOptions, SpzGaussiansFromGaussiansError,
-    SpzGaussiansFromIterError, SpzGaussiansHeader, SpzGaussiansHeaderPod, SpzGaussiansPositions,
-    SpzGaussiansRotations, SpzGaussiansShs, SpzPhase, WriteIterGaussian,
+    Gaussian, GaussianToSpzOptions, IterGaussian, ReadIterGaussian, SpzGaussian,
+    SpzGaussianPosition, SpzGaussianRef, SpzGaussianRotation, SpzGaussianSh, SpzGaussianShDegree,
+    SpzGaussianShRef, SpzGaussians, SpzGaussiansCollectError, SpzGaussiansFromGaussianSliceOptions,
+    SpzGaussiansFromGaussiansError, SpzGaussiansFromIterError, SpzGaussiansHeader,
+    SpzGaussiansHeaderPod, SpzGaussiansPositions, SpzGaussiansRotations, SpzGaussiansShs, SpzPhase,
+    WriteIterGaussian,
 };
 
 use crate::common::{assert, given};
@@ -19,6 +20,40 @@ const ASSERT_GAUSSIAN_OPTIONS: assert::GaussianOptions = assert::GaussianOptions
     sh_epsilon: 1e-1,
     scale_epsilon: 1.0,
 };
+
+#[test]
+fn test_gaussian_to_spz_options_when_degree_is_zero_should_return_none() {
+    let degree = SpzGaussianShDegree::new(0).unwrap();
+    let options = GaussianToSpzOptions::default();
+
+    assert_eq!(options.sh_bits(degree), None);
+    assert_eq!(options.sh_bucket_size(degree), None);
+}
+
+#[test]
+fn test_gaussian_to_spz_options_when_degree_is_nonzero_should_return_quantization_values() {
+    for (options, expected_bits, expected_bucket_sizes) in [
+        (GaussianToSpzOptions::default(), [5, 4, 4], [8, 16, 16]),
+        (
+            GaussianToSpzOptions {
+                sh_quantize_bits: [0, 6, 8],
+            },
+            [0, 6, 8],
+            [256, 4, 1],
+        ),
+    ] {
+        for degree in 1..=3 {
+            let index = degree as usize - 1;
+            let degree = SpzGaussianShDegree::new(degree).unwrap();
+
+            assert_eq!(options.sh_bits(degree), Some(expected_bits[index]));
+            assert_eq!(
+                options.sh_bucket_size(degree),
+                Some(expected_bucket_sizes[index])
+            );
+        }
+    }
+}
 
 #[test]
 fn test_spz_phase_name_should_round_trip_through_from_str() {

@@ -5,7 +5,7 @@ use crate::{
     GaussianShDegree, GaussianToSpzError, IterGaussian, PlyGaussian, PlyGaussiansFromIterError,
     ShDegree, ShDegree0, ShDegree1, ShDegree2, ShDegree3, ShDegree4, ShDegreeMismatchError,
     SpzGaussian, SpzGaussianPosition, SpzGaussianPositionRef, SpzGaussianRef, SpzGaussianRotation,
-    SpzGaussianRotationRef, SpzGaussianSh, SpzGaussiansHeader, ToAnyGaussian,
+    SpzGaussianRotationRef, SpzGaussianSh, SpzGaussianShDegree, SpzGaussiansHeader, ToAnyGaussian,
 };
 
 /// The Gaussian.
@@ -330,7 +330,7 @@ impl<D: ShDegree> Gaussian<D> {
 
                 for (src, dst) in self.sh.as_ref().iter().zip(sh.iter_mut()) {
                     let bucket_size = options
-                        .sh_bucket_size(deg)
+                        .sh_bucket_size(header.sh_degree())
                         .expect("header SH degree is valid");
                     *dst = src.to_array().map(|x| quantize_sh(x, bucket_size));
                 }
@@ -638,21 +638,25 @@ impl IterGaussian for InternalGaussians {
 /// Extra options for [`Gaussian::to_spz`].
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GaussianToSpzOptions {
-    /// The quantization bits for each SH degree.
+    /// The quantization bits for SH degrees 1 through 3, in order.
     pub sh_quantize_bits: [u32; 3],
 }
 
 impl GaussianToSpzOptions {
     /// Get the bits for the given SH degree.
-    pub fn sh_bits(&self, degree: u8) -> Option<u32> {
-        match degree {
-            1..=3 => Some(self.sh_quantize_bits[degree as usize - 1]),
+    ///
+    /// Returns [`None`] for degree 0, which has no entry in [`Self::sh_quantize_bits`].
+    pub fn sh_bits(&self, degree: SpzGaussianShDegree) -> Option<u32> {
+        match degree.get() {
+            degree @ 1..=3 => Some(self.sh_quantize_bits[degree as usize - 1]),
             _ => None,
         }
     }
 
     /// Get the quantization bucket size for the given SH degree.
-    pub fn sh_bucket_size(&self, degree: u8) -> Option<u32> {
+    ///
+    /// Returns [`None`] for degree 0, which has no entry in [`Self::sh_quantize_bits`].
+    pub fn sh_bucket_size(&self, degree: SpzGaussianShDegree) -> Option<u32> {
         self.sh_bits(degree).map(|bits| 1 << (8 - bits))
     }
 }
