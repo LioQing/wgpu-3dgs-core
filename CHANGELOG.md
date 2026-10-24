@@ -18,6 +18,7 @@ Please also check out the [`wgpu-3dgs-viewer` changelog](https://github.com/LioQ
 
 ### Changed
 
+- 🔢 Move `GaussianShDegree` to the shared SH degree module, preserving its crate-root re-export and behavior. [#49](https://github.com/LioQing/wgpu-3dgs-core/pull/49)
 - ⚡ Add direct binary PLY record reads for SH degrees 0 to 4, precompute custom property offsets, and reuse ASCII and binary read buffers. [#46](https://github.com/LioQing/wgpu-3dgs-core/pull/47)
 - 🐛 Fix overflow in Gaussian buffer update-range checks. [#45](https://github.com/LioQing/wgpu-3dgs-core/pull/45)
 - 🛡️ Reject SH quantization bit counts above 8 when encoding a Gaussian to SPZ. [#45](https://github.com/LioQing/wgpu-3dgs-core/pull/45)
@@ -26,6 +27,7 @@ Please also check out the [`wgpu-3dgs-viewer` changelog](https://github.com/LioQ
 
 ### Breaking Changes
 
+- Change `GaussianToSpzOptions::sh_bits` and `sh_bucket_size` to accept `SpzGaussianShDegree` instead of `u8`. Returns `None` for degree 0 and unchanged results for degrees 1 through 3. [#49](https://github.com/LioQing/wgpu-3dgs-core/pull/49)
 - Change `PlyGaussians::read_gaussians` to return a complete collection, retaining the SH degree for empty files. [#45](https://github.com/LioQing/wgpu-3dgs-core/pull/45)
 - Rename `PlyGaussians::try_from_iter` to `from_iter(records, degree)`. `PlyGaussians::new` now returns `PlyGaussiansFromIterError` instead of `std::io::Error`. [#45](https://github.com/LioQing/wgpu-3dgs-core/pull/45)
 - Make `Gaussian` and SH encodings generic over storage degree, defaulting to `ShDegree3`. Add `GaussianShConfig::Degree` and `GaussianPod::ShDegree`. [#45](https://github.com/LioQing/wgpu-3dgs-core/pull/45)
