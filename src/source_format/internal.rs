@@ -161,9 +161,13 @@ impl<D: ShDegree> Gaussian<D> {
 
                 let largest_index = (comp >> 30) as usize;
                 let mut sum_squares = 0.0f32;
-                let mut comps = std::array::from_fn(|i| {
+                let mut comps = [0.0; 4];
+
+                // Packing appends components in ascending order, so the least
+                // significant ten bits contain the last stored component.
+                for i in (0..4).rev() {
                     if i == largest_index {
-                        return 0.0;
+                        continue;
                     }
 
                     let mag = comp & C_MASK;
@@ -175,8 +179,8 @@ impl<D: ShDegree> Gaussian<D> {
                         * if neg_bit != 0 { -1.0 } else { 1.0 };
                     sum_squares += value * value;
 
-                    value
-                });
+                    comps[i] = value;
+                }
 
                 comps[largest_index] = (1.0 - sum_squares).max(0.0).sqrt();
 
@@ -310,11 +314,12 @@ impl<D: ShDegree> Gaussian<D> {
 
         let sh = match header.sh_degree().get() {
             0 => SpzGaussianSh::Zero,
-            deg @ 1..=3 => {
+            deg @ 1..=4 => {
                 let mut sh = match deg {
                     1 => SpzGaussianSh::One([[0; 3]; 3]),
                     2 => SpzGaussianSh::Two([[0; 3]; 8]),
                     3 => SpzGaussianSh::Three([[0; 3]; 15]),
+                    4 => SpzGaussianSh::Four([[0; 3]; 24]),
                     _ => unreachable!(),
                 };
 
@@ -338,7 +343,7 @@ impl<D: ShDegree> Gaussian<D> {
                 sh
             }
             _ => {
-                // SAFETY: SpzGaussianShDegree is guaranteed to be in [0, 3].
+                // SAFETY: SpzGaussianShDegree is guaranteed to be in [0, 4].
                 unreachable!()
             }
         };
@@ -460,6 +465,7 @@ impl AnyGaussian {
             1 => Gaussian::from_spz(spz, header).map(Self::One),
             2 => Gaussian::from_spz(spz, header).map(Self::Two),
             3 => Gaussian::from_spz(spz, header).map(Self::Three),
+            4 => Gaussian::from_spz(spz, header).map(Self::Four),
             _ => unreachable!("validated SPZ degree"),
         }
     }
@@ -639,6 +645,7 @@ impl IterGaussian for InternalGaussians {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GaussianToSpzOptions {
     /// The quantization bits for SH degrees 1 through 3, in order.
+    /// In-memory degree-4 conversion reuses the degree-3 setting. V4 file writing is unsupported.
     pub sh_quantize_bits: [u32; 3],
 }
 
@@ -648,7 +655,7 @@ impl GaussianToSpzOptions {
     /// Returns [`None`] for degree 0, which has no entry in [`Self::sh_quantize_bits`].
     pub fn sh_bits(&self, degree: SpzGaussianShDegree) -> Option<u32> {
         match degree.get() {
-            degree @ 1..=3 => Some(self.sh_quantize_bits[degree as usize - 1]),
+            degree @ 1..=4 => Some(self.sh_quantize_bits[degree.min(3) as usize - 1]),
             _ => None,
         }
     }

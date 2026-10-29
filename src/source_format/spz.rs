@@ -1,5 +1,5 @@
 use std::{
-    io::{Read, Write},
+    io::{self, Read, Take, Write},
     num::NonZeroUsize,
     ops::RangeInclusive,
 };
@@ -7,6 +7,7 @@ use std::{
 use bytemuck::Zeroable;
 use flate2::{read::GzDecoder, write::GzEncoder};
 use itertools::Itertools;
+use ruzstd::decoding::{FrameDecoder, StreamingDecoder};
 
 use crate::{
     AnyGaussian, BatchProgress, BatchRead, BatchWrite, GaussianShDegree, GaussianToSpzError,
@@ -167,6 +168,8 @@ macro_rules! gaussian_field {
                 [< SpzGaussians $name s>],
                 $crate::error::SpzGaussiansCollectError<[< SpzGaussian $name >]>
             > {
+                // Preserve the public by-value diagnostics, including inline SH4 fields.
+                #[allow(clippy::result_large_err)]
                 fn from_iter<I: IntoIterator<Item = [< SpzGaussian $name >]>>(iter: I) -> Self {
                     let mut iter = iter.into_iter();
                     let Some(first) = iter.next() else {
@@ -238,6 +241,7 @@ gaussian_field! {
         One([[u8; 3]; 3]),
         Two([[u8; 3]; 8]),
         Three([[u8; 3]; 15]),
+        Four([[u8; 3]; 24]),
     }
 }
 
@@ -249,6 +253,7 @@ impl SpzGaussianSh {
             SpzGaussianSh::One(_) => unsafe { SpzGaussianShDegree::new_unchecked(1) },
             SpzGaussianSh::Two(_) => unsafe { SpzGaussianShDegree::new_unchecked(2) },
             SpzGaussianSh::Three(_) => unsafe { SpzGaussianShDegree::new_unchecked(3) },
+            SpzGaussianSh::Four(_) => unsafe { SpzGaussianShDegree::new_unchecked(4) },
         }
     }
 
@@ -259,6 +264,7 @@ impl SpzGaussianSh {
             SpzGaussianSh::One(sh) => sh.iter(),
             SpzGaussianSh::Two(sh) => sh.iter(),
             SpzGaussianSh::Three(sh) => sh.iter(),
+            SpzGaussianSh::Four(sh) => sh.iter(),
         }
     }
 
@@ -269,6 +275,7 @@ impl SpzGaussianSh {
             SpzGaussianSh::One(sh) => sh.iter_mut(),
             SpzGaussianSh::Two(sh) => sh.iter_mut(),
             SpzGaussianSh::Three(sh) => sh.iter_mut(),
+            SpzGaussianSh::Four(sh) => sh.iter_mut(),
         }
     }
 }
@@ -281,6 +288,7 @@ impl SpzGaussianShRef<'_> {
             SpzGaussianShRef::One(_) => unsafe { SpzGaussianShDegree::new_unchecked(1) },
             SpzGaussianShRef::Two(_) => unsafe { SpzGaussianShDegree::new_unchecked(2) },
             SpzGaussianShRef::Three(_) => unsafe { SpzGaussianShDegree::new_unchecked(3) },
+            SpzGaussianShRef::Four(_) => unsafe { SpzGaussianShDegree::new_unchecked(4) },
         }
     }
 
@@ -291,6 +299,7 @@ impl SpzGaussianShRef<'_> {
             SpzGaussianShRef::One(sh) => sh.iter(),
             SpzGaussianShRef::Two(sh) => sh.iter(),
             SpzGaussianShRef::Three(sh) => sh.iter(),
+            SpzGaussianShRef::Four(sh) => sh.iter(),
         }
     }
 }
@@ -303,6 +312,7 @@ impl SpzGaussiansShs {
             SpzGaussiansShs::One(_) => unsafe { SpzGaussianShDegree::new_unchecked(1) },
             SpzGaussiansShs::Two(_) => unsafe { SpzGaussianShDegree::new_unchecked(2) },
             SpzGaussiansShs::Three(_) => unsafe { SpzGaussianShDegree::new_unchecked(3) },
+            SpzGaussiansShs::Four(_) => unsafe { SpzGaussianShDegree::new_unchecked(4) },
         }
     }
 }
@@ -315,10 +325,10 @@ pub struct SpzGaussianShDegree(u8);
 impl SpzGaussianShDegree {
     /// Create a new SPZ Gaussian SH degree.
     ///
-    /// Returns [`None`] if the degree is not in the range of [`SpzGaussiansHeader::SUPPORTED_SH_DEGREES`].
+    /// Returns [`None`] if the degree is not in the range of [`SpzGaussiansHeader::SUPPORTED_READ_SH_DEGREES`].
     pub const fn new(sh_deg: u8) -> Option<Self> {
         match sh_deg {
-            0..=3 => Some(Self(sh_deg)),
+            0..=4 => Some(Self(sh_deg)),
             _ => None,
         }
     }
@@ -327,7 +337,7 @@ impl SpzGaussianShDegree {
     ///
     /// # Safety
     ///
-    /// The degree must be in the range of [`SpzGaussiansHeader::SUPPORTED_SH_DEGREES`].
+    /// The degree must be in the range of [`SpzGaussiansHeader::SUPPORTED_READ_SH_DEGREES`].
     pub const unsafe fn new_unchecked(sh_deg: u8) -> Self {
         Self(sh_deg)
     }
@@ -344,6 +354,7 @@ impl SpzGaussianShDegree {
             1 => 3,
             2 => 8,
             3 => 15,
+            4 => 24,
             _ => unreachable!(),
         }
     }
@@ -391,6 +402,7 @@ impl SpzGaussian {
                 SpzGaussianSh::One(v) => SpzGaussianShRef::One(v),
                 SpzGaussianSh::Two(v) => SpzGaussianShRef::Two(v),
                 SpzGaussianSh::Three(v) => SpzGaussianShRef::Three(v),
+                SpzGaussianSh::Four(v) => SpzGaussianShRef::Four(v),
             },
         }
     }
@@ -431,12 +443,16 @@ impl SpzGaussianRef<'_> {
                 SpzGaussianShRef::One(v) => SpzGaussianSh::One(*v),
                 SpzGaussianShRef::Two(v) => SpzGaussianSh::Two(*v),
                 SpzGaussianShRef::Three(v) => SpzGaussianSh::Three(*v),
+                SpzGaussianShRef::Four(v) => SpzGaussianSh::Four(*v),
             },
         }
     }
 }
 
-/// Header of SPZ Gaussians file.
+/// Legacy 16-byte SPZ wire header, also used as common in-memory metadata.
+///
+/// For version 4 this is not the on-disk header. Use [`SpzGaussians::read_from`] to
+/// read a v4 container, whose 32-byte wire header is parsed separately.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct SpzGaussiansHeaderPod {
@@ -461,11 +477,17 @@ impl SpzGaussiansHeader {
     /// The magic number for SPZ Gaussians files.
     pub const MAGIC: u32 = 0x5053474e; // "NGSP"
 
-    /// The supported SPZ versions.
+    /// The SPZ versions supported by constructors and writers.
     pub const SUPPORTED_VERSIONS: RangeInclusive<u32> = 1..=3;
 
-    /// The supported SH degrees.
+    /// The SPZ versions supported by file readers.
+    pub const SUPPORTED_READ_VERSIONS: RangeInclusive<u32> = 1..=4;
+
+    /// The SH degrees supported by constructors and writers.
     pub const SUPPORTED_SH_DEGREES: RangeInclusive<u8> = 0..=3;
+
+    /// The SH degrees supported by readers (degree 4 requires a v4 container).
+    pub const SUPPORTED_READ_SH_DEGREES: RangeInclusive<u8> = 0..=4;
 
     /// Create a [`SpzGaussiansHeader`].
     ///
@@ -539,7 +561,9 @@ impl SpzGaussiansHeader {
         )
     }
 
-    /// Get the [`SpzGaussiansHeaderPod`].
+    /// Get common metadata as a [`SpzGaussiansHeaderPod`].
+    ///
+    /// This is a wire header only for versions 1 through 3.
     pub fn as_pod(&self) -> &SpzGaussiansHeaderPod {
         &self.0
     }
@@ -589,6 +613,16 @@ impl SpzGaussiansHeader {
     /// Check if quaternion smallest three encoding is used.
     pub fn uses_quat_smallest_three(&self) -> bool {
         self.version() >= 3
+    }
+
+    fn ensure_writable(&self) -> std::io::Result<()> {
+        if !Self::SUPPORTED_VERSIONS.contains(&self.version()) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "SPZ v4 writing and legacy-layout access are unsupported",
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -678,8 +712,13 @@ impl SpzGaussiansShs {
                 reader.read_exact(bytemuck::cast_slice_mut(&mut sh_coeffs))?;
                 Ok(SpzGaussiansShs::Three(sh_coeffs))
             }
+            4 => {
+                let mut sh_coeffs = vec![[[0u8; 3]; 24]; count];
+                reader.read_exact(bytemuck::cast_slice_mut(&mut sh_coeffs))?;
+                Ok(SpzGaussiansShs::Four(sh_coeffs))
+            }
             _ => {
-                // SAFETY: SpzGaussianShDegree guarantees the degree is in [0, 3].
+                // SAFETY: SpzGaussianShDegree guarantees the degree is in [0, 4].
                 unreachable!()
             }
         }
@@ -692,6 +731,7 @@ impl SpzGaussiansShs {
             SpzGaussiansShs::One(sh_coeffs) => writer.write_all(bytemuck::cast_slice(sh_coeffs)),
             SpzGaussiansShs::Two(sh_coeffs) => writer.write_all(bytemuck::cast_slice(sh_coeffs)),
             SpzGaussiansShs::Three(sh_coeffs) => writer.write_all(bytemuck::cast_slice(sh_coeffs)),
+            SpzGaussiansShs::Four(sh_coeffs) => writer.write_all(bytemuck::cast_slice(sh_coeffs)),
         }
     }
 }
@@ -743,6 +783,7 @@ impl SpzGaussians {
                 1 => SpzGaussiansShs::One(Vec::new()),
                 2 => SpzGaussiansShs::Two(Vec::new()),
                 3 => SpzGaussiansShs::Three(Vec::new()),
+                4 => SpzGaussiansShs::Four(Vec::new()),
                 _ => unreachable!(),
             },
         }
@@ -758,7 +799,7 @@ impl SpzGaussians {
         self.len() == 0
     }
 
-    /// Read a SPZ from a decompressed buffer.
+    /// Read a legacy (v1-3) SPZ from a decompressed buffer.
     ///
     /// `reader` should be decompressed SPZ buffer.
     pub fn read_decompressed(reader: &mut impl Read) -> Result<Self, std::io::Error> {
@@ -766,13 +807,23 @@ impl SpzGaussians {
         Self::read_gaussians(reader, header)
     }
 
-    /// Read a SPZ header.
+    /// Read a legacy (v1-3) SPZ header.
     ///
     /// `reader` should be decompressed SPZ buffer.
     pub fn read_header(reader: &mut impl Read) -> Result<SpzGaussiansHeader, std::io::Error> {
         let mut header_bytes = [0u8; std::mem::size_of::<SpzGaussiansHeaderPod>()];
         reader.read_exact(&mut header_bytes)?;
-        let header: SpzGaussiansHeaderPod = bytemuck::cast(header_bytes);
+
+        let header = SpzGaussiansHeaderPod {
+            magic: u32::from_le_bytes(header_bytes[0..4].try_into().unwrap()),
+            version: u32::from_le_bytes(header_bytes[4..8].try_into().unwrap()),
+            num_points: u32::from_le_bytes(header_bytes[8..12].try_into().unwrap()),
+            sh_degree: SpzGaussianShDegree(header_bytes[12]),
+            fractional_bits: header_bytes[13],
+            flags: header_bytes[14],
+            reserved: header_bytes[15],
+        };
+
         SpzGaussiansHeader::try_from_pod(header)
     }
 
@@ -785,6 +836,8 @@ impl SpzGaussians {
         reader: &mut impl Read,
         header: SpzGaussiansHeader,
     ) -> Result<Self, std::io::Error> {
+        header.ensure_writable()?;
+
         let count = header.num_points();
         let uses_float16 = header.uses_float16();
         let uses_quat_smallest_three = header.uses_quat_smallest_three();
@@ -815,10 +868,12 @@ impl SpzGaussians {
         })
     }
 
-    /// Write the Gaussians to a SPZ buffer.
+    /// Write the Gaussians to a legacy (v1-3) SPZ buffer.
     ///
     /// `writer` will receive the decompressed SPZ buffer.
     pub fn write_decompressed(&self, writer: &mut impl Write) -> Result<(), std::io::Error> {
+        self.header.ensure_writable()?;
+
         writer.write_all(bytemuck::cast_slice(std::slice::from_ref(
             self.header.as_pod(),
         )))?;
@@ -847,6 +902,11 @@ impl SpzGaussians {
             .peek()
             .map(|g| g.to_any_gaussian().sh_degree().get())
             .unwrap_or(T::SH_DEGREE.unwrap_or(3));
+
+        if !SpzGaussiansHeader::SUPPORTED_SH_DEGREES.contains(&degree) {
+            return Err(SpzGaussiansFromGaussiansError::UnsupportedShDegree { degree });
+        }
+
         let sh_degree = SpzGaussianShDegree::new(degree)
             .ok_or(SpzGaussiansFromGaussiansError::UnsupportedShDegree { degree })?;
 
@@ -904,6 +964,7 @@ impl SpzGaussians {
     ///
     /// An empty iterator produces empty fields with variants determined by the header,
     /// provided the header's point count is zero.
+    #[allow(clippy::result_large_err)] // Preserve existing by-value diagnostics for SH4.
     pub fn from_iter(
         header: SpzGaussiansHeader,
         iter: impl IntoIterator<Item = SpzGaussian>,
@@ -1153,12 +1214,307 @@ fn spz_progress(header: &SpzGaussiansHeader, phase: SpzPhase, completed: usize) 
     }
 }
 
-/// Bounded-work reader for a gzip-compressed SPZ model.
+fn invalid_data(message: impl Into<String>) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, message.into())
+}
+
+#[derive(Clone, Copy)]
+struct StreamInfo {
+    compressed_size: u64,
+    uncompressed_size: u64,
+}
+
+/// SPZ v4 container reader, following nianticlabs/spz v3.0.0.
+///
+/// The six logical attributes retain the legacy field order. Empty attributes
+/// have no TOC entry or frame. Decoding is sequential and needs no Seek support.
+struct V4Reader<R: Read> {
+    source: Option<R>,
+    decoder: Option<StreamingDecoder<Take<R>, FrameDecoder>>,
+    streams: Vec<StreamInfo>,
+    next_stream: usize,
+    remaining: u64,
+    finished: bool,
+}
+
+impl<R: Read> V4Reader<R> {
+    fn new(mut source: R) -> io::Result<(Self, SpzGaussiansHeader)> {
+        let mut bytes = [0; 32];
+        source.read_exact(&mut bytes)?;
+
+        let u32_at = |offset| u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap());
+
+        if u32_at(0) != SpzGaussiansHeader::MAGIC || u32_at(4) != 4 {
+            return Err(invalid_data("unsupported SPZ plaintext header version"));
+        }
+
+        let sh_degree = SpzGaussianShDegree::new(bytes[12])
+            .ok_or_else(|| invalid_data("unsupported SPZ v4 SH degree"))?;
+
+        // All metadata is normalized into the existing 16-byte in-memory type.
+        // It must never be serialized as a legacy header for version 4.
+        let header = SpzGaussiansHeader(SpzGaussiansHeaderPod {
+            magic: SpzGaussiansHeader::MAGIC,
+            version: 4,
+            num_points: u32_at(8),
+            sh_degree,
+            fractional_bits: bytes[13],
+            flags: bytes[14],
+            reserved: 0,
+        });
+
+        // Conversion uses a signed 32-bit shift when unpacking fixed-point data.
+        if header.fractional_bits() > 30 {
+            return Err(invalid_data("SPZ v4 fractional bits must not exceed 30"));
+        }
+
+        if bytes[14] & !0x3 != 0 || bytes[20..].iter().any(|&byte| byte != 0) {
+            return Err(invalid_data("unsupported SPZ v4 flags or reserved bytes"));
+        }
+
+        let toc_offset = u32_at(16);
+
+        if toc_offset < 32 {
+            return Err(invalid_data("SPZ v4 TOC overlaps the header"));
+        }
+
+        let extension_size = u64::from(toc_offset - 32);
+
+        if bytes[14] & 0x2 == 0 && extension_size != 0 {
+            return Err(invalid_data("SPZ v4 extension zone without extension flag"));
+        }
+
+        Self::skip_extensions(&mut source, extension_size)?;
+
+        let count = header.num_points();
+        let field_widths = [9, 1, 3, 3, 4, header.sh_num_coefficients() * 3];
+        let mut expected_sizes = Vec::new();
+        let mut total_size = 0usize;
+
+        for width in field_widths {
+            let size = count
+                .checked_mul(width)
+                .filter(|&size| size <= isize::MAX as usize)
+                .ok_or_else(|| invalid_data("SPZ v4 attribute size overflow"))?;
+
+            total_size = total_size
+                .checked_add(size)
+                .ok_or_else(|| invalid_data("SPZ v4 decoded size overflow"))?;
+
+            if size != 0 {
+                expected_sizes.push(size as u64);
+            }
+        }
+
+        if usize::from(bytes[15]) != expected_sizes.len() {
+            return Err(invalid_data(
+                "SPZ v4 stream count does not match attributes",
+            ));
+        }
+
+        let mut streams = Vec::with_capacity(expected_sizes.len());
+        let mut compressed_end = u64::from(toc_offset) + expected_sizes.len() as u64 * 16;
+
+        for expected in expected_sizes {
+            let mut entry = [0; 16];
+            source.read_exact(&mut entry)?;
+
+            let compressed_size = u64::from_le_bytes(entry[..8].try_into().unwrap());
+            let uncompressed_size = u64::from_le_bytes(entry[8..].try_into().unwrap());
+
+            if compressed_size == 0 || uncompressed_size != expected {
+                return Err(invalid_data("SPZ v4 TOC attribute size mismatch"));
+            }
+
+            compressed_end = compressed_end
+                .checked_add(compressed_size)
+                .ok_or_else(|| invalid_data("SPZ v4 compressed size overflow"))?;
+
+            streams.push(StreamInfo {
+                compressed_size,
+                uncompressed_size,
+            });
+        }
+
+        Ok((
+            Self {
+                source: Some(source),
+                decoder: None,
+                streams,
+                next_stream: 0,
+                remaining: 0,
+                finished: false,
+            },
+            header,
+        ))
+    }
+
+    fn skip_extensions(source: &mut R, size: u64) -> io::Result<()> {
+        let mut zone = source.take(size);
+        let mut buffer = [0; 8192];
+
+        while zone.limit() != 0 {
+            if zone.limit() < 8 {
+                return Err(invalid_data("truncated SPZ v4 extension record"));
+            }
+
+            let mut record = [0; 8];
+            zone.read_exact(&mut record)?;
+
+            let length = u64::from(u32::from_le_bytes(record[4..].try_into().unwrap()));
+
+            if length > zone.limit() {
+                return Err(invalid_data("SPZ v4 extension exceeds header zone"));
+            }
+
+            let mut remaining = length;
+
+            while remaining != 0 {
+                let count = remaining.min(buffer.len() as u64) as usize;
+                zone.read_exact(&mut buffer[..count])?;
+                remaining -= count as u64;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn finish_stream(&mut self) -> io::Result<()> {
+        let Some(mut decoder) = self.decoder.take() else {
+            return Ok(());
+        };
+
+        let mut extra = [0];
+
+        if decoder
+            .read(&mut extra)
+            .map_err(|err| invalid_data(err.to_string()))?
+            != 0
+        {
+            return Err(invalid_data("SPZ v4 attribute exceeds its declared size"));
+        }
+
+        if let Some(checksum) = decoder.decoder.get_checksum_from_data()
+            && Some(checksum) != decoder.decoder.get_calculated_checksum()
+        {
+            return Err(invalid_data("SPZ v4 ZSTD checksum mismatch"));
+        }
+
+        let input = decoder.into_inner();
+
+        if input.limit() != 0 {
+            return Err(invalid_data("SPZ v4 frame does not consume its TOC entry"));
+        }
+
+        self.source = Some(input.into_inner());
+
+        Ok(())
+    }
+}
+
+impl<R: Read> Read for V4Reader<R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        if buf.is_empty() || self.finished {
+            return Ok(0);
+        }
+
+        if self.remaining == 0 {
+            self.finish_stream()?;
+
+            let Some(info) = self.streams.get(self.next_stream).copied() else {
+                let mut extra = [0];
+
+                if self.source.as_mut().unwrap().read(&mut extra)? != 0 {
+                    return Err(invalid_data("extra SPZ v4 container data"));
+                }
+
+                self.finished = true;
+
+                return Ok(0);
+            };
+
+            let source = self.source.take().unwrap().take(info.compressed_size);
+            let decoder = StreamingDecoder::new_with_max_window_size(source, 128 * 1024 * 1024)
+                .map_err(|err| invalid_data(err.to_string()))?;
+            let content_size = decoder.decoder.content_size();
+
+            if content_size != 0 && content_size != info.uncompressed_size {
+                return Err(invalid_data("SPZ v4 ZSTD content size mismatch"));
+            }
+
+            self.decoder = Some(decoder);
+            self.remaining = info.uncompressed_size;
+            self.next_stream += 1;
+        }
+
+        let count = self.remaining.min(buf.len() as u64) as usize;
+        let read = self
+            .decoder
+            .as_mut()
+            .unwrap()
+            .read(&mut buf[..count])
+            .map_err(|err| invalid_data(err.to_string()))?;
+
+        if read == 0 {
+            return Err(invalid_data(
+                "SPZ v4 attribute shorter than its declared size",
+            ));
+        }
+
+        self.remaining -= read as u64;
+
+        Ok(read)
+    }
+}
+
+type SpzInput<R> = std::io::Chain<std::io::Cursor<[u8; 4]>, R>;
+
+enum SpzDecoder<R: Read> {
+    Gzip(Box<GzDecoder<SpzInput<R>>>),
+    V4(Box<V4Reader<SpzInput<R>>>),
+}
+
+impl<R: Read> SpzDecoder<R> {
+    fn new(mut reader: R) -> std::io::Result<(Self, SpzGaussiansHeader)> {
+        let mut prefix = [0; 4];
+        reader.read_exact(&mut prefix)?;
+
+        let input = std::io::Cursor::new(prefix).chain(reader);
+
+        if prefix == *b"NGSP" {
+            let (reader, header) = V4Reader::new(input)?;
+
+            Ok((Self::V4(Box::new(reader)), header))
+        } else if prefix[..2] == [0x1f, 0x8b] {
+            let mut decoder = GzDecoder::new(input);
+            let header = SpzGaussians::read_header(&mut decoder)?;
+
+            Ok((Self::Gzip(Box::new(decoder)), header))
+        } else {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "unrecognized SPZ container",
+            ))
+        }
+    }
+}
+
+impl<R: Read> Read for SpzDecoder<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        match self {
+            Self::Gzip(reader) => reader.read(buf),
+            Self::V4(reader) => reader.read(buf),
+        }
+    }
+}
+
+/// Bounded-work reader for a legacy gzip or v4 ZSTD SPZ model.
 ///
 /// SPZ stores field arrays rather than consecutive Gaussians, so individual Gaussians cannot
-/// be delivered early. After an I/O error, discard the reader.
+/// be delivered early. V4 extensions are validated and skipped, not interpreted or retained.
+/// V4 uses a 128 MiB ZSTD window limit. After an I/O error, discard the reader.
 pub struct SpzBatchReader<R: Read> {
-    decoder: GzDecoder<R>,
+    decoder: SpzDecoder<R>,
     gaussians: SpzGaussians,
     phase: SpzPhase,
     completed: usize,
@@ -1166,8 +1522,7 @@ pub struct SpzBatchReader<R: Read> {
 
 impl<R: Read> SpzBatchReader<R> {
     pub fn new(reader: R) -> std::io::Result<Self> {
-        let mut decoder = GzDecoder::new(reader);
-        let header = SpzGaussians::read_header(&mut decoder)?;
+        let (decoder, header) = SpzDecoder::new(reader)?;
         let mut phase = SpzPhase::Positions;
         let mut completed = 0;
 
@@ -1184,6 +1539,7 @@ impl<R: Read> SpzBatchReader<R> {
     pub fn header(&self) -> &SpzGaussiansHeader {
         &self.gaussians.header
     }
+
     pub fn phase(&self) -> SpzPhase {
         self.phase
     }
@@ -1210,7 +1566,9 @@ impl<R: Read> BatchRead for SpzBatchReader<R> {
             count: usize,
         ) -> std::io::Result<()> {
             let start = values.len();
+            values.try_reserve(count).map_err(std::io::Error::other)?;
             values.resize(start + count, T::zeroed());
+
             reader.read_exact(bytemuck::cast_slice_mut(&mut values[start..]))
         }
 
@@ -1231,6 +1589,7 @@ impl<R: Read> BatchRead for SpzBatchReader<R> {
                 SpzGaussiansShs::One(v) => read_extend(decoder, v, count)?,
                 SpzGaussiansShs::Two(v) => read_extend(decoder, v, count)?,
                 SpzGaussiansShs::Three(v) => read_extend(decoder, v, count)?,
+                SpzGaussiansShs::Four(v) => read_extend(decoder, v, count)?,
             },
             SpzPhase::Done => unreachable!(),
         }
@@ -1238,6 +1597,7 @@ impl<R: Read> BatchRead for SpzBatchReader<R> {
         self.completed += count;
         self.phase
             .advance_spz_phase(&mut self.completed, &self.gaussians.header);
+
         Ok(self.progress())
     }
 
@@ -1246,7 +1606,7 @@ impl<R: Read> BatchRead for SpzBatchReader<R> {
             return Err(source_format::batch::incomplete());
         }
 
-        // Force the decoder to consume the gzip trailer (and validate its checksum).
+        // Consume and validate the final gzip trailer or v4 frame and container boundary.
         let mut extra = [0u8; 1];
         if self.decoder.read(&mut extra)? != 0 {
             return Err(std::io::Error::new(
@@ -1269,7 +1629,10 @@ pub struct SpzBatchWriter<'a, W: Write> {
 
 impl<'a, W: Write> SpzBatchWriter<'a, W> {
     pub fn new(writer: W, gaussians: &'a SpzGaussians) -> std::io::Result<Self> {
+        gaussians.header.ensure_writable()?;
+
         let count = gaussians.len();
+
         if gaussians.positions.len() != count
             || gaussians.rotations.len() != count
             || gaussians.alphas.len() != count
@@ -1362,6 +1725,7 @@ impl<W: Write> BatchWrite for SpzBatchWriter<'_, W> {
                 SpzGaussiansShs::Three(v) => {
                     encoder.write_all(bytemuck::cast_slice(&v[start..end]))?
                 }
+                SpzGaussiansShs::Four(_) => unreachable!("v4 writing is unsupported"),
             },
             SpzPhase::Done => unreachable!(),
         }

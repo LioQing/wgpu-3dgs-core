@@ -67,7 +67,7 @@ impl Gaussians {
     ///
     /// Existing SPZ storage is returned unchanged. Other representations use default
     /// encoding options with the model's degree, encoding is lossy.
-    /// SH degree 4 is currently unsupported.
+    /// Encoding SH degree 4 is currently unsupported. Existing v4 SPZ storage is retained.
     pub fn into_spz(self) -> Result<SpzGaussians, SpzGaussiansFromGaussiansError> {
         if let Self::Spz(spz) = self {
             return Ok(spz);
@@ -75,6 +75,9 @@ impl Gaussians {
 
         let degree = self.sh_degree().get();
         let sh_degree = SpzGaussianShDegree::new(degree)
+            .filter(|degree| {
+                crate::SpzGaussiansHeader::SUPPORTED_SH_DEGREES.contains(&degree.get())
+            })
             .ok_or(SpzGaussiansFromGaussiansError::UnsupportedShDegree { degree })?;
 
         self.into_spz_with_options(&SpzGaussiansFromGaussianSliceOptions {
@@ -94,7 +97,7 @@ impl Gaussians {
     ) -> Result<SpzGaussians, SpzGaussiansFromGaussiansError> {
         let degree = self.sh_degree().get();
 
-        if SpzGaussianShDegree::new(degree).is_none() {
+        if !crate::SpzGaussiansHeader::SUPPORTED_SH_DEGREES.contains(&degree) {
             return Err(SpzGaussiansFromGaussiansError::UnsupportedShDegree { degree });
         }
 
@@ -150,11 +153,13 @@ impl Gaussians {
             .map(Gaussians::Ply)
             .map_err(Into::into),
             GaussiansSource::Spz => {
-                let sh_degree = crate::SpzGaussianShDegree::new(degree.get()).ok_or(
-                    SpzGaussiansFromGaussiansError::UnsupportedShDegree {
+                let sh_degree = crate::SpzGaussianShDegree::new(degree.get())
+                    .filter(|degree| {
+                        crate::SpzGaussiansHeader::SUPPORTED_SH_DEGREES.contains(&degree.get())
+                    })
+                    .ok_or(SpzGaussiansFromGaussiansError::UnsupportedShDegree {
                         degree: degree.get(),
-                    },
-                )?;
+                    })?;
 
                 SpzGaussians::from_gaussians_with_options(
                     iter,
