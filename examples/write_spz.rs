@@ -54,7 +54,7 @@ fn main() {
     let gaussians = gs::SpzGaussians::from_gaussians_with_options(
         gaussians.as_slice(),
         &gs::SpzGaussiansFromGaussianSliceOptions {
-            version: 2,
+            version: 4,
             ..Default::default()
         },
     )

@@ -1,13 +1,14 @@
 use std::{
     io::{self, Read, Take, Write},
     num::NonZeroUsize,
-    ops::RangeInclusive,
+    ops::{Range, RangeInclusive},
 };
 
 use bytemuck::Zeroable;
 use flate2::{read::GzDecoder, write::GzEncoder};
 use itertools::Itertools;
 use ruzstd::decoding::{FrameDecoder, StreamingDecoder};
+use structured_zstd::encoding::{CompressionLevel, StreamingEncoder};
 
 use crate::{
     AnyGaussian, BatchProgress, BatchRead, BatchWrite, GaussianShDegree, GaussianToSpzError,
@@ -451,8 +452,8 @@ impl SpzGaussianRef<'_> {
 
 /// Legacy 16-byte SPZ wire header, also used as common in-memory metadata.
 ///
-/// For version 4 this is not the on-disk header. Use [`SpzGaussians::read_from`] to
-/// read a v4 container, whose 32-byte wire header is parsed separately.
+/// For version 4 this is not the on-disk header. Use [`SpzGaussians::read_from`] and
+/// [`SpzGaussians::write_to`] for v4 containers, whose 32-byte wire header is handled separately.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct SpzGaussiansHeaderPod {
@@ -478,13 +479,13 @@ impl SpzGaussiansHeader {
     pub const MAGIC: u32 = 0x5053474e; // "NGSP"
 
     /// The SPZ versions supported by constructors and writers.
-    pub const SUPPORTED_VERSIONS: RangeInclusive<u32> = 1..=3;
+    pub const SUPPORTED_VERSIONS: RangeInclusive<u32> = 1..=4;
 
     /// The SPZ versions supported by file readers.
     pub const SUPPORTED_READ_VERSIONS: RangeInclusive<u32> = 1..=4;
 
-    /// The SH degrees supported by constructors and writers.
-    pub const SUPPORTED_SH_DEGREES: RangeInclusive<u8> = 0..=3;
+    /// The SH degrees supported by constructors and writers (degree 4 requires version 4).
+    pub const SUPPORTED_SH_DEGREES: RangeInclusive<u8> = 0..=4;
 
     /// The SH degrees supported by readers (degree 4 requires a v4 container).
     pub const SUPPORTED_READ_SH_DEGREES: RangeInclusive<u8> = 0..=4;
@@ -534,31 +535,37 @@ impl SpzGaussiansHeader {
             ));
         }
 
-        if !Self::SUPPORTED_SH_DEGREES.contains(&pod.sh_degree.get()) {
+        let supported_sh_degrees = if pod.version == 4 {
+            Self::SUPPORTED_SH_DEGREES
+        } else {
+            0..=3
+        };
+
+        if !supported_sh_degrees.contains(&pod.sh_degree.get()) {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 format!(
                     "Unsupported SPZ SH degree: {}, expected one of {:?}",
                     pod.sh_degree.get(),
-                    Self::SUPPORTED_SH_DEGREES
+                    supported_sh_degrees
                 ),
+            ));
+        }
+
+        if pod.version == 4
+            && (pod.fractional_bits > 30 || pod.flags & !0x3 != 0 || pod.reserved != 0)
+        {
+            return Err(invalid_data(
+                "invalid SPZ v4 fractional bits, flags or reserved byte",
             ));
         }
 
         Ok(Self(pod))
     }
 
-    /// Create a default [`SpzGaussiansHeader`] from number of points and SH degree.
+    /// Create a default version-3 [`SpzGaussiansHeader`] from number of points.
     pub fn default(num_points: u32) -> Result<Self, std::io::Error> {
-        Self::new(
-            Self::SUPPORTED_VERSIONS
-                .last()
-                .expect("at least one supported version"),
-            num_points,
-            SpzGaussianShDegree::default(),
-            12,
-            false,
-        )
+        Self::new(3, num_points, SpzGaussianShDegree::default(), 12, false)
     }
 
     /// Get common metadata as a [`SpzGaussiansHeaderPod`].
@@ -615,11 +622,11 @@ impl SpzGaussiansHeader {
         self.version() >= 3
     }
 
-    fn ensure_writable(&self) -> std::io::Result<()> {
-        if !Self::SUPPORTED_VERSIONS.contains(&self.version()) {
+    fn ensure_legacy_layout(&self) -> std::io::Result<()> {
+        if self.version() == 4 {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
-                "SPZ v4 writing and legacy-layout access are unsupported",
+                "SPZ v4 does not use the legacy decompressed layout",
             ));
         }
         Ok(())
@@ -824,7 +831,9 @@ impl SpzGaussians {
             reserved: header_bytes[15],
         };
 
-        SpzGaussiansHeader::try_from_pod(header)
+        let header = SpzGaussiansHeader::try_from_pod(header)?;
+        header.ensure_legacy_layout()?;
+        Ok(header)
     }
 
     /// Read the SPZ Gaussians.
@@ -836,7 +845,7 @@ impl SpzGaussians {
         reader: &mut impl Read,
         header: SpzGaussiansHeader,
     ) -> Result<Self, std::io::Error> {
-        header.ensure_writable()?;
+        header.ensure_legacy_layout()?;
 
         let count = header.num_points();
         let uses_float16 = header.uses_float16();
@@ -872,7 +881,7 @@ impl SpzGaussians {
     ///
     /// `writer` will receive the decompressed SPZ buffer.
     pub fn write_decompressed(&self, writer: &mut impl Write) -> Result<(), std::io::Error> {
-        self.header.ensure_writable()?;
+        self.header.ensure_legacy_layout()?;
 
         writer.write_all(bytemuck::cast_slice(std::slice::from_ref(
             self.header.as_pod(),
@@ -893,7 +902,9 @@ impl SpzGaussians {
         Ok(())
     }
 
-    /// Convert from an iterator of [`ToAnyGaussian`]s.
+    /// Convert from an iterator of [`ToAnyGaussian`]s using version 3 and SH degrees 0 to 3.
+    ///
+    /// Use [`Self::from_gaussians_with_options`] with version 4 for SH degree 4.
     pub fn from_gaussians<T: ToAnyGaussian>(
         gaussians: impl IntoIterator<Item = T>,
     ) -> Result<Self, SpzGaussiansFromGaussiansError> {
@@ -903,7 +914,7 @@ impl SpzGaussians {
             .map(|g| g.to_any_gaussian().sh_degree().get())
             .unwrap_or(T::SH_DEGREE.unwrap_or(3));
 
-        if !SpzGaussiansHeader::SUPPORTED_SH_DEGREES.contains(&degree) {
+        if degree > 3 {
             return Err(SpzGaussiansFromGaussiansError::UnsupportedShDegree { degree });
         }
 
@@ -1075,6 +1086,30 @@ impl SpzGaussians {
                 sh,
             },
         )
+    }
+
+    fn field_bytes(&self, phase: SpzPhase, range: Range<usize>) -> &[u8] {
+        match phase {
+            SpzPhase::Positions => match &self.positions {
+                SpzGaussiansPositions::Float16(v) => bytemuck::cast_slice(&v[range]),
+                SpzGaussiansPositions::FixedPoint24(v) => bytemuck::cast_slice(&v[range]),
+            },
+            SpzPhase::Alphas => &self.alphas[range],
+            SpzPhase::Colors => bytemuck::cast_slice(&self.colors[range]),
+            SpzPhase::Scales => bytemuck::cast_slice(&self.scales[range]),
+            SpzPhase::Rotations => match &self.rotations {
+                SpzGaussiansRotations::QuatFirstThree(v) => bytemuck::cast_slice(&v[range]),
+                SpzGaussiansRotations::QuatSmallestThree(v) => bytemuck::cast_slice(&v[range]),
+            },
+            SpzPhase::Shs => match &self.shs {
+                SpzGaussiansShs::Zero => &[],
+                SpzGaussiansShs::One(v) => bytemuck::cast_slice(&v[range]),
+                SpzGaussiansShs::Two(v) => bytemuck::cast_slice(&v[range]),
+                SpzGaussiansShs::Three(v) => bytemuck::cast_slice(&v[range]),
+                SpzGaussiansShs::Four(v) => bytemuck::cast_slice(&v[range]),
+            },
+            SpzPhase::Done => &[],
+        }
     }
 }
 
@@ -1619,9 +1654,105 @@ impl<R: Read> BatchRead for SpzBatchReader<R> {
     }
 }
 
-/// Bounded-work writer for an existing SPZ model. After an I/O error, discard the writer.
+// V4 puts compressed sizes before the frames, so buffer compressed output until
+// finish rather than requiring Seek or compressing the input a second time.
+struct V4Writer<W: Write> {
+    writer: W,
+    header: SpzGaussiansHeader,
+    encoder: Option<Box<StreamingEncoder<Vec<u8>>>>,
+    frames: Vec<(Vec<u8>, u64)>,
+}
+
+impl<W: Write> V4Writer<W> {
+    fn write_field(&mut self, bytes: &[u8], field_size: usize, last: bool) -> io::Result<()> {
+        if self.encoder.is_none() {
+            let mut encoder = Box::new(StreamingEncoder::new(
+                Vec::new(),
+                CompressionLevel::from_level(12),
+            ));
+            encoder.set_pledged_content_size(field_size as u64)?;
+            self.encoder = Some(encoder);
+        }
+
+        self.encoder.as_mut().unwrap().write_all(bytes)?;
+
+        if last {
+            let frame = self.encoder.take().unwrap().finish()?;
+            self.frames.push((frame, field_size as u64));
+        }
+
+        Ok(())
+    }
+
+    fn finish(mut self) -> io::Result<W> {
+        let mut header = [0u8; 32];
+        header[..4].copy_from_slice(&SpzGaussiansHeader::MAGIC.to_le_bytes());
+        header[4..8].copy_from_slice(&4u32.to_le_bytes());
+        header[8..12].copy_from_slice(&self.header.as_pod().num_points.to_le_bytes());
+        header[12] = self.header.sh_degree().get();
+        header[13] = self.header.fractional_bits();
+        // Extension records are not retained by the reader, so do not advertise them.
+        header[14] = u8::from(self.header.is_antialiased());
+        header[15] = self.frames.len() as u8;
+        header[16..20].copy_from_slice(&32u32.to_le_bytes());
+        self.writer.write_all(&header)?;
+
+        for (frame, uncompressed_size) in &self.frames {
+            self.writer.write_all(&(frame.len() as u64).to_le_bytes())?;
+            self.writer.write_all(&uncompressed_size.to_le_bytes())?;
+        }
+
+        for (frame, _) in self.frames {
+            self.writer.write_all(&frame)?;
+        }
+
+        Ok(self.writer)
+    }
+}
+
+enum SpzEncoder<W: Write> {
+    Gzip(GzEncoder<W>),
+    V4(V4Writer<W>),
+}
+
+impl<W: Write> SpzEncoder<W> {
+    fn new(writer: W, header: SpzGaussiansHeader) -> io::Result<Self> {
+        if header.version() == 4 {
+            Ok(Self::V4(V4Writer {
+                writer,
+                header,
+                encoder: None,
+                frames: Vec::new(),
+            }))
+        } else {
+            let mut encoder = GzEncoder::new(writer, flate2::Compression::default());
+            encoder.write_all(bytemuck::bytes_of(header.as_pod()))?;
+            Ok(Self::Gzip(encoder))
+        }
+    }
+
+    fn write_field(&mut self, bytes: &[u8], field_size: usize, last: bool) -> io::Result<()> {
+        match self {
+            Self::Gzip(encoder) => encoder.write_all(bytes),
+            Self::V4(writer) => writer.write_field(bytes, field_size, last),
+        }
+    }
+
+    fn finish(self) -> io::Result<W> {
+        match self {
+            Self::Gzip(encoder) => encoder.finish(),
+            Self::V4(writer) => writer.finish(),
+        }
+    }
+}
+
+/// Bounded-work writer for an existing legacy gzip or v4 ZSTD SPZ model.
+///
+/// V4 compression is incremental, but compressed frames are buffered in memory
+/// until [`BatchWrite::finish`] writes the header, TOC and frames to the output.
+/// No Seek support is required. After an I/O error, discard the writer.
 pub struct SpzBatchWriter<'a, W: Write> {
-    encoder: GzEncoder<W>,
+    encoder: SpzEncoder<W>,
     gaussians: &'a SpzGaussians,
     phase: SpzPhase,
     completed: usize,
@@ -1629,8 +1760,6 @@ pub struct SpzBatchWriter<'a, W: Write> {
 
 impl<'a, W: Write> SpzBatchWriter<'a, W> {
     pub fn new(writer: W, gaussians: &'a SpzGaussians) -> std::io::Result<Self> {
-        gaussians.header.ensure_writable()?;
-
         let count = gaussians.len();
 
         if gaussians.positions.len() != count
@@ -1653,8 +1782,7 @@ impl<'a, W: Write> SpzBatchWriter<'a, W> {
             ));
         }
 
-        let mut encoder = GzEncoder::new(writer, flate2::Compression::default());
-        encoder.write_all(bytemuck::bytes_of(gaussians.header.as_pod()))?;
+        let encoder = SpzEncoder::new(writer, gaussians.header)?;
 
         let mut phase = SpzPhase::Positions;
         let mut completed = 0;
@@ -1687,48 +1815,13 @@ impl<W: Write> BatchWrite for SpzBatchWriter<'_, W> {
         }
 
         let end = self.completed + max_items.get().min(self.gaussians.len() - self.completed);
-        let start = self.completed;
-        let encoder = &mut self.encoder;
-
-        match self.phase {
-            SpzPhase::Positions => match &self.gaussians.positions {
-                SpzGaussiansPositions::Float16(v) => {
-                    encoder.write_all(bytemuck::cast_slice(&v[start..end]))?
-                }
-                SpzGaussiansPositions::FixedPoint24(v) => {
-                    encoder.write_all(bytemuck::cast_slice(&v[start..end]))?
-                }
-            },
-            SpzPhase::Alphas => encoder.write_all(&self.gaussians.alphas[start..end])?,
-            SpzPhase::Colors => {
-                encoder.write_all(bytemuck::cast_slice(&self.gaussians.colors[start..end]))?
-            }
-            SpzPhase::Scales => {
-                encoder.write_all(bytemuck::cast_slice(&self.gaussians.scales[start..end]))?
-            }
-            SpzPhase::Rotations => match &self.gaussians.rotations {
-                SpzGaussiansRotations::QuatFirstThree(v) => {
-                    encoder.write_all(bytemuck::cast_slice(&v[start..end]))?
-                }
-                SpzGaussiansRotations::QuatSmallestThree(v) => {
-                    encoder.write_all(bytemuck::cast_slice(&v[start..end]))?
-                }
-            },
-            SpzPhase::Shs => match &self.gaussians.shs {
-                SpzGaussiansShs::Zero => unreachable!(),
-                SpzGaussiansShs::One(v) => {
-                    encoder.write_all(bytemuck::cast_slice(&v[start..end]))?
-                }
-                SpzGaussiansShs::Two(v) => {
-                    encoder.write_all(bytemuck::cast_slice(&v[start..end]))?
-                }
-                SpzGaussiansShs::Three(v) => {
-                    encoder.write_all(bytemuck::cast_slice(&v[start..end]))?
-                }
-                SpzGaussiansShs::Four(_) => unreachable!("v4 writing is unsupported"),
-            },
-            SpzPhase::Done => unreachable!(),
-        }
+        let bytes = self.gaussians.field_bytes(self.phase, self.completed..end);
+        let field_size = self
+            .gaussians
+            .field_bytes(self.phase, 0..self.gaussians.len())
+            .len();
+        self.encoder
+            .write_field(bytes, field_size, end == self.gaussians.len())?;
 
         self.completed = end;
         self.phase
@@ -1749,7 +1842,7 @@ impl<W: Write> BatchWrite for SpzBatchWriter<'_, W> {
 /// The fields are not validated.
 #[derive(Debug, Clone)]
 pub struct SpzGaussiansFromGaussianSliceOptions {
-    /// Version to use.
+    /// Version to use. Defaults to 3; version 4 supports SH degree 4.
     pub version: u32,
 
     /// SH degree to use.
@@ -1761,7 +1854,7 @@ pub struct SpzGaussiansFromGaussianSliceOptions {
     /// Whether to use antialiased encoding.
     pub antialiased: bool,
 
-    /// The quantization bits for each SH degree.
+    /// The quantization bits for SH degrees 1 through 3. Degree 4 reuses the degree-3 setting.
     pub sh_quantize_bits: [u32; 3],
 }
 

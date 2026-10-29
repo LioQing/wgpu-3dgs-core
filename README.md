@@ -28,12 +28,6 @@ V4 extension records are validated and skipped, not interpreted or retained.
 ZSTD decoding uses a pure-Rust implementation with a 128 MiB maximum window.
 V4 fractional-bit counts above 30 are rejected to keep fixed-point conversion valid.
 
-Writing remains limited to versions 1 to 3 and SH degrees 0 to 3, with version 3
-still the default. Writing a model loaded from v4 returns an error. Explicitly
-convert its Gaussians to a legacy SPZ model to export it, truncating SH degree 4
-with `convert_sh_degree` first if needed. The `read_decompressed`, `read_header`,
-`read_gaussians`, and `write_decompressed` helpers use only the legacy layout.
-
 ## Examples
 
 See the [examples](https://github.com/LioQing/wgpu-3dgs-core/tree/master/examples) directory for usage examples.

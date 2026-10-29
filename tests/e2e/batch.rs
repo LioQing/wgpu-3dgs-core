@@ -220,8 +220,8 @@ fn test_ply_batch_writer_from_iter_should_accept_a_ply_stream() {
 
 #[test]
 fn test_spz_batch_when_versions_and_sh_degrees_vary_should_round_trip() {
-    for version in 1..=3 {
-        for degree in 0..=3 {
+    for version in 1..=4 {
+        for degree in 0..=if version == 4 { 4 } else { 3 } {
             let original = SpzGaussians::from_gaussians_with_options(
                 given::runtime_gaussians(degree),
                 &SpzGaussiansFromGaussianSliceOptions {

@@ -645,7 +645,7 @@ impl IterGaussian for InternalGaussians {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GaussianToSpzOptions {
     /// The quantization bits for SH degrees 1 through 3, in order.
-    /// In-memory degree-4 conversion reuses the degree-3 setting. V4 file writing is unsupported.
+    /// Degree-4 conversion reuses the degree-3 setting.
     pub sh_quantize_bits: [u32; 3],
 }
 
