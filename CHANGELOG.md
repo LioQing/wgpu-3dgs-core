@@ -6,7 +6,7 @@ Please also check out the [`wgpu-3dgs-viewer` changelog](https://github.com/LioQ
 
 ### Added
 
-- 📦 Add [SPZ v4 support](README.md#spz-support) for whole-model and batch reading/writing, with ZSTD compression and SH degrees 0 to 4. Version 3 remains the default.
+- 📦 Add SPZ v4 support for whole-model and batch reading/writing, with ZSTD compression and SH degrees 0 to 4.
 - 🔢 Add native and GPU support for SH degrees 0 to 4. [#45](https://github.com/LioQing/wgpu-3dgs-core/pull/45)
 - 🔄 Add `InternalGaussians::from_gaussians` and `PlyGaussians::from_gaussians` for inferred-degree conversion, and `convert_sh_degree` for truncation or zero-extension. [#45](https://github.com/LioQing/wgpu-3dgs-core/pull/45)
 - 📥 Add `PlyGaussianStream::from_header` and typed streaming through `GaussiansStream::into_typed`. [#45](https://github.com/LioQing/wgpu-3dgs-core/pull/45)
@@ -29,6 +29,7 @@ Please also check out the [`wgpu-3dgs-viewer` changelog](https://github.com/LioQ
 
 ### Breaking Changes
 
+- Default new SPZ models to version 4, including inferred-degree constructors and source conversions, provide explicit options to use legacy versions.
 - Add `Four` variants to the SPZ SH field enums. Exhaustive downstream matches must handle degree 4.
 - Change `GaussianToSpzOptions::sh_bits` and `sh_bucket_size` to accept `SpzGaussianShDegree` instead of `u8`. Returns `None` for degree 0 and unchanged results for degrees 1 through 3. [#49](https://github.com/LioQing/wgpu-3dgs-core/pull/49)
 - Change `PlyGaussians::read_gaussians` to return a complete collection, retaining the SH degree for empty files. [#45](https://github.com/LioQing/wgpu-3dgs-core/pull/45)

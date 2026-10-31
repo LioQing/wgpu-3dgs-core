@@ -269,7 +269,14 @@ fn test_spz_batch_when_versions_and_sh_degrees_vary_should_round_trip() {
 
 #[test]
 fn test_spz_batch_when_gzip_trailer_is_truncated_should_return_error() {
-    let original = given::spz_gaussians();
+    let original = SpzGaussians::from_gaussians_with_options(
+        given::gaussians(),
+        &SpzGaussiansFromGaussianSliceOptions {
+            version: 3,
+            ..Default::default()
+        },
+    )
+    .unwrap();
     let mut bytes = Vec::new();
     original.write_to(&mut bytes).unwrap();
     bytes.truncate(bytes.len() - 4);

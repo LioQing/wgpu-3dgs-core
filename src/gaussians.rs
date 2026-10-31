@@ -4,7 +4,7 @@ use crate::{
     AnyGaussian, Gaussian, GaussianShDegree, GaussiansFromIterError, InternalGaussians,
     IterGaussian, PlyGaussians, PlyGaussiansFromIterError, ReadIterGaussian, ShDegree,
     ShDegreeMismatchError, SpzGaussianShDegree, SpzGaussians, SpzGaussiansFromGaussianSliceOptions,
-    SpzGaussiansFromGaussiansError, ToAnyGaussian, WriteIterGaussian,
+    SpzGaussiansFromGaussiansError, SpzGaussiansHeader, ToAnyGaussian, WriteIterGaussian,
 };
 
 /// A discriminant representation of [`Gaussians`].
@@ -67,8 +67,8 @@ impl Gaussians {
     ///
     /// Existing SPZ storage is returned unchanged. Other representations use default
     /// encoding options with the model's degree, encoding is lossy.
-    /// Default version-3 encoding supports SH degrees 0 to 3. For degree 4, use
-    /// [`Self::into_spz_with_options`] with version 4. Existing v4 SPZ storage is retained.
+    /// Default version-4 encoding supports SH degrees 0 to 4. Use
+    /// [`Self::into_spz_with_options`] to explicitly select a legacy version (1 to 3).
     pub fn into_spz(self) -> Result<SpzGaussians, SpzGaussiansFromGaussiansError> {
         if let Self::Spz(spz) = self {
             return Ok(spz);
@@ -76,7 +76,6 @@ impl Gaussians {
 
         let degree = self.sh_degree().get();
         let sh_degree = SpzGaussianShDegree::new(degree)
-            .filter(|degree| degree.get() <= 3)
             .ok_or(SpzGaussiansFromGaussiansError::UnsupportedShDegree { degree })?;
 
         self.into_spz_with_options(&SpzGaussiansFromGaussianSliceOptions {
@@ -96,7 +95,7 @@ impl Gaussians {
     ) -> Result<SpzGaussians, SpzGaussiansFromGaussiansError> {
         let degree = self.sh_degree().get();
 
-        if !crate::SpzGaussiansHeader::SUPPORTED_SH_DEGREES.contains(&degree)
+        if !SpzGaussiansHeader::SUPPORTED_SH_DEGREES.contains(&degree)
             || (degree == 4 && options.version != 4)
         {
             return Err(SpzGaussiansFromGaussiansError::UnsupportedShDegree { degree });
@@ -154,15 +153,15 @@ impl Gaussians {
             .map(Gaussians::Ply)
             .map_err(Into::into),
             GaussiansSource::Spz => {
-                let sh_degree = crate::SpzGaussianShDegree::new(degree.get())
-                    .filter(|degree| degree.get() <= 3)
-                    .ok_or(SpzGaussiansFromGaussiansError::UnsupportedShDegree {
+                let sh_degree = SpzGaussianShDegree::new(degree.get()).ok_or(
+                    SpzGaussiansFromGaussiansError::UnsupportedShDegree {
                         degree: degree.get(),
-                    })?;
+                    },
+                )?;
 
                 SpzGaussians::from_gaussians_with_options(
                     iter,
-                    &crate::SpzGaussiansFromGaussianSliceOptions {
+                    &SpzGaussiansFromGaussianSliceOptions {
                         sh_degree,
                         ..Default::default()
                     },

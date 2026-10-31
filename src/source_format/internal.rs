@@ -645,7 +645,13 @@ impl IterGaussian for InternalGaussians {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GaussianToSpzOptions {
     /// The quantization bits for SH degrees 1 through 3, in order.
-    /// Degree-4 conversion reuses the degree-3 setting.
+    ///
+    /// Degree-4 conversion reuses the third setting to preserve this library's three-entry API.
+    /// This is a local encoding choice, not an SPZ format requirement.
+    ///
+    /// Upstream instead uses `sh1Bits` for degree-1 coefficients and `shRestBits` for all higher
+    /// bands, see
+    /// [`PackOptions`](https://github.com/nianticlabs/spz/blob/v3.0.0/src/cc/load-spz.h#L140-L142).
     pub sh_quantize_bits: [u32; 3],
 }
 

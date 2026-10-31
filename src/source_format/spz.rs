@@ -326,7 +326,7 @@ pub struct SpzGaussianShDegree(u8);
 impl SpzGaussianShDegree {
     /// Create a new SPZ Gaussian SH degree.
     ///
-    /// Returns [`None`] if the degree is not in the range of [`SpzGaussiansHeader::SUPPORTED_READ_SH_DEGREES`].
+    /// Returns [`None`] if the degree is not in the range of [`SpzGaussiansHeader::SUPPORTED_SH_DEGREES`].
     pub const fn new(sh_deg: u8) -> Option<Self> {
         match sh_deg {
             0..=4 => Some(Self(sh_deg)),
@@ -338,7 +338,7 @@ impl SpzGaussianShDegree {
     ///
     /// # Safety
     ///
-    /// The degree must be in the range of [`SpzGaussiansHeader::SUPPORTED_READ_SH_DEGREES`].
+    /// The degree must be in the range of [`SpzGaussiansHeader::SUPPORTED_SH_DEGREES`].
     pub const unsafe fn new_unchecked(sh_deg: u8) -> Self {
         Self(sh_deg)
     }
@@ -363,8 +363,8 @@ impl SpzGaussianShDegree {
 
 impl Default for SpzGaussianShDegree {
     fn default() -> Self {
-        // SAFETY: 3 is in the range of [0, 3].
-        unsafe { Self::new_unchecked(3) }
+        // SAFETY: 4 is in the range of [0, 4].
+        unsafe { Self::new_unchecked(4) }
     }
 }
 
@@ -478,17 +478,11 @@ impl SpzGaussiansHeader {
     /// The magic number for SPZ Gaussians files.
     pub const MAGIC: u32 = 0x5053474e; // "NGSP"
 
-    /// The SPZ versions supported by constructors and writers.
+    /// The SPZ versions supported by readers, constructors, and writers.
     pub const SUPPORTED_VERSIONS: RangeInclusive<u32> = 1..=4;
 
-    /// The SPZ versions supported by file readers.
-    pub const SUPPORTED_READ_VERSIONS: RangeInclusive<u32> = 1..=4;
-
-    /// The SH degrees supported by constructors and writers (degree 4 requires version 4).
+    /// The SH degrees supported by readers, constructors, and writers (degree 4 requires version 4).
     pub const SUPPORTED_SH_DEGREES: RangeInclusive<u8> = 0..=4;
-
-    /// The SH degrees supported by readers (degree 4 requires a v4 container).
-    pub const SUPPORTED_READ_SH_DEGREES: RangeInclusive<u8> = 0..=4;
 
     /// Create a [`SpzGaussiansHeader`].
     ///
@@ -563,9 +557,11 @@ impl SpzGaussiansHeader {
         Ok(Self(pod))
     }
 
-    /// Create a default version-3 [`SpzGaussiansHeader`] from number of points.
+    /// Create a default version-4 [`SpzGaussiansHeader`] from number of points.
+    ///
+    /// Use [`Self::new`] to explicitly select a legacy version (1 to 3).
     pub fn default(num_points: u32) -> Result<Self, std::io::Error> {
-        Self::new(3, num_points, SpzGaussianShDegree::default(), 12, false)
+        Self::new(4, num_points, SpzGaussianShDegree::default(), 12, false)
     }
 
     /// Get common metadata as a [`SpzGaussiansHeaderPod`].
@@ -902,9 +898,9 @@ impl SpzGaussians {
         Ok(())
     }
 
-    /// Convert from an iterator of [`ToAnyGaussian`]s using version 3 and SH degrees 0 to 3.
+    /// Convert from an iterator of [`ToAnyGaussian`]s using version 4 and SH degrees 0 to 4.
     ///
-    /// Use [`Self::from_gaussians_with_options`] with version 4 for SH degree 4.
+    /// Use [`Self::from_gaussians_with_options`] to explicitly select a legacy version (1 to 3).
     pub fn from_gaussians<T: ToAnyGaussian>(
         gaussians: impl IntoIterator<Item = T>,
     ) -> Result<Self, SpzGaussiansFromGaussiansError> {
@@ -913,10 +909,6 @@ impl SpzGaussians {
             .peek()
             .map(|g| g.to_any_gaussian().sh_degree().get())
             .unwrap_or(T::SH_DEGREE.unwrap_or(3));
-
-        if degree > 3 {
-            return Err(SpzGaussiansFromGaussiansError::UnsupportedShDegree { degree });
-        }
 
         let sh_degree = SpzGaussianShDegree::new(degree)
             .ok_or(SpzGaussiansFromGaussiansError::UnsupportedShDegree { degree })?;
@@ -1842,7 +1834,7 @@ impl<W: Write> BatchWrite for SpzBatchWriter<'_, W> {
 /// The fields are not validated.
 #[derive(Debug, Clone)]
 pub struct SpzGaussiansFromGaussianSliceOptions {
-    /// Version to use. Defaults to 3; version 4 supports SH degree 4.
+    /// Version to use. Defaults to 4; legacy versions 1 to 3 must be selected explicitly.
     pub version: u32,
 
     /// SH degree to use.
@@ -1854,7 +1846,14 @@ pub struct SpzGaussiansFromGaussianSliceOptions {
     /// Whether to use antialiased encoding.
     pub antialiased: bool,
 
-    /// The quantization bits for SH degrees 1 through 3. Degree 4 reuses the degree-3 setting.
+    /// The quantization bits for SH degrees 1 through 3, in order.
+    ///
+    /// Degree-4 conversion reuses the third setting to preserve this library's three-entry API.
+    /// This is a local encoding choice, not an SPZ format requirement.
+    ///
+    /// Upstream instead uses `sh1Bits` for degree-1 coefficients and `shRestBits` for all higher
+    /// bands, see
+    /// [`PackOptions`](https://github.com/nianticlabs/spz/blob/v3.0.0/src/cc/load-spz.h#L140-L142).
     pub sh_quantize_bits: [u32; 3],
 }
 

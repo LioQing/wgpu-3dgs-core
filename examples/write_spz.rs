@@ -50,15 +50,9 @@ fn main() {
         },
     ];
 
-    // Alternatively, use `SpzGaussians::from_gaussians` for default options.
-    let gaussians = gs::SpzGaussians::from_gaussians_with_options(
-        gaussians.as_slice(),
-        &gs::SpzGaussiansFromGaussianSliceOptions {
-            version: 4,
-            ..Default::default()
-        },
-    )
-    .expect("valid options");
+    // Version 4 is the default. Use `from_gaussians_with_options` for legacy versions.
+    let gaussians =
+        gs::SpzGaussians::from_gaussians(gaussians.as_slice()).expect("valid gaussians");
 
     println!("Header: {:?}", gaussians.header);
 
