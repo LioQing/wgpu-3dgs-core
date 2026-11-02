@@ -232,23 +232,29 @@ fn test_spz_batch_when_versions_and_sh_degrees_vary_should_round_trip() {
             )
             .unwrap();
             let writer = SpzBatchWriter::new(Vec::new(), &original).unwrap();
+
             assert_eq!(
                 writer.finish().unwrap_err().kind(),
                 ErrorKind::UnexpectedEof
             );
-            let mut writer = SpzBatchWriter::new(Vec::new(), &original).unwrap();
 
+            let mut writer = SpzBatchWriter::new(Vec::new(), &original).unwrap();
             let mut previous = 0;
+
             while !BatchWrite::progress(&writer).done {
                 let progress = writer.step(one()).unwrap();
+
                 assert_eq!(progress.completed_units, previous + 1);
+
                 previous = progress.completed_units;
             }
 
             assert_eq!(writer.phase(), SpzPhase::Done);
+
             let bytes = writer.finish().unwrap();
 
             let reader = SpzBatchReader::new(bytes.as_slice()).unwrap();
+
             assert_eq!(reader.header(), &original.header);
             assert_eq!(
                 reader.finish().unwrap_err().kind(),
@@ -257,11 +263,15 @@ fn test_spz_batch_when_versions_and_sh_degrees_vary_should_round_trip() {
 
             let mut reader = SpzBatchReader::new(bytes.as_slice()).unwrap();
             previous = 0;
+
             while !BatchRead::progress(&reader).done {
                 let progress = reader.step(one()).unwrap();
+
                 assert_eq!(progress.completed_units, previous + 1);
+
                 previous = progress.completed_units;
             }
+
             assert_eq!(reader.finish().unwrap(), original);
         }
     }
@@ -282,9 +292,11 @@ fn test_spz_batch_when_gzip_trailer_is_truncated_should_return_error() {
     bytes.truncate(bytes.len() - 4);
 
     let mut reader = SpzBatchReader::new(bytes.as_slice()).unwrap();
+
     while !BatchRead::progress(&reader).done {
         reader.step(one()).unwrap();
     }
+
     assert!(reader.finish().is_err());
 }
 

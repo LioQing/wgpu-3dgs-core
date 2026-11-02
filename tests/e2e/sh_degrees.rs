@@ -562,12 +562,14 @@ fn test_gaussian_conversions_when_degrees_mismatch_should_require_explicit_conve
 fn test_gaussian_conversions_when_input_is_invalid_should_preserve_validation_details() {
     let high = given::gaussian_for_sh_degree::<ShDegree4>(0);
     let low = high.convert_sh_degree::<ShDegree1>();
+
     for version in 1..=3 {
         let options = SpzGaussiansFromGaussianSliceOptions {
             version,
             sh_degree: SpzGaussianShDegree::new(4).unwrap(),
             ..Default::default()
         };
+
         assert_matches!(
             SpzGaussians::from_gaussians_with_options([high], &options),
             Err(SpzGaussiansFromGaussiansError::Header(_))
@@ -577,6 +579,7 @@ fn test_gaussian_conversions_when_input_is_invalid_should_preserve_validation_de
             Err(SpzGaussiansFromGaussiansError::UnsupportedShDegree { degree: 4 })
         );
     }
+
     for source in [GaussiansSource::Internal, GaussiansSource::Ply] {
         assert_matches!(
             Gaussians::from_gaussians_iter(
