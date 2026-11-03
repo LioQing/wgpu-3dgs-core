@@ -50,7 +50,7 @@ fn main() {
         },
     ];
 
-    // Version 4 is the default. Use `from_gaussians_with_options` for legacy versions.
+    // Version 4 is the default. Use `from_gaussians_with_options` for more options.
     let gaussians =
         gs::SpzGaussians::from_gaussians(gaussians.as_slice()).expect("valid gaussians");
 

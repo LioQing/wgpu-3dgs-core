@@ -17,6 +17,10 @@ use crate::{
     WriteIterGaussian, source_format,
 };
 
+fn invalid_data(message: impl Into<String>) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, message.into())
+}
+
 macro_rules! gaussian_field {
     (
         #[docname = $docname:literal]
@@ -478,10 +482,10 @@ impl SpzGaussiansHeader {
     /// The magic number for SPZ Gaussians files.
     pub const MAGIC: u32 = 0x5053474e; // "NGSP"
 
-    /// The SPZ versions supported by readers, constructors, and writers.
+    /// The supported SPZ versions.
     pub const SUPPORTED_VERSIONS: RangeInclusive<u32> = 1..=4;
 
-    /// The SH degrees supported by readers, constructors, and writers (degree 4 requires version 4).
+    /// The supported SH degrees.
     pub const SUPPORTED_SH_DEGREES: RangeInclusive<u8> = 0..=4;
 
     /// Create a [`SpzGaussiansHeader`].
@@ -529,20 +533,17 @@ impl SpzGaussiansHeader {
             ));
         }
 
-        let supported_sh_degrees = if pod.version == 4 {
-            Self::SUPPORTED_SH_DEGREES
-        } else {
-            0..=3
-        };
+        if !Self::SUPPORTED_SH_DEGREES.contains(&pod.sh_degree.get()) {
+            return Err(invalid_data(format!(
+                "Unsupported SPZ SH degree: {}, expected one of {:?}",
+                pod.sh_degree.get(),
+                Self::SUPPORTED_SH_DEGREES
+            )));
+        }
 
-        if !supported_sh_degrees.contains(&pod.sh_degree.get()) {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!(
-                    "Unsupported SPZ SH degree: {}, expected one of {:?}",
-                    pod.sh_degree.get(),
-                    supported_sh_degrees
-                ),
+        if pod.version < 4 && pod.sh_degree.get() == 4 {
+            return Err(invalid_data(
+                "SPZ versions 1 to 3 don't support SH degree 4",
             ));
         }
 
@@ -1241,10 +1242,6 @@ fn spz_progress(header: &SpzGaussiansHeader, phase: SpzPhase, completed: usize) 
     }
 }
 
-fn invalid_data(message: impl Into<String>) -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidData, message.into())
-}
-
 #[derive(Clone, Copy)]
 struct StreamInfo {
     compressed_size: u64,
@@ -1834,7 +1831,7 @@ impl<W: Write> BatchWrite for SpzBatchWriter<'_, W> {
 /// The fields are not validated.
 #[derive(Debug, Clone)]
 pub struct SpzGaussiansFromGaussianSliceOptions {
-    /// Version to use. Defaults to 4; legacy versions 1 to 3 must be selected explicitly.
+    /// Version to use.
     pub version: u32,
 
     /// SH degree to use.

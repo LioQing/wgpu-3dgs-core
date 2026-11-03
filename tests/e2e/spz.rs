@@ -967,7 +967,7 @@ fn test_sh_gaussians_header_try_from_pod_when_magic_is_incorrect_should_return_e
 
 #[test]
 fn test_spz_gaussians_header_when_sh_degree_is_invalid_should_return_error() {
-    let invalid_degree: SpzGaussianShDegree = bytemuck::cast(4u8);
+    let invalid_degree: SpzGaussianShDegree = bytemuck::cast(5u8);
     let pod = SpzGaussiansHeaderPod {
         magic: SpzGaussiansHeader::MAGIC,
         version: 3,
@@ -1773,7 +1773,12 @@ fn test_spz_gaussians_header_when_degree_is_four_and_version_is_legacy_should_re
     let degree = SpzGaussianShDegree::new(4).unwrap();
 
     for version in 1..=3 {
-        assert!(SpzGaussiansHeader::new(version, 0, degree, 12, false).is_err());
+        let error = SpzGaussiansHeader::new(version, 0, degree, 12, false).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::InvalidData);
+        assert_eq!(
+            error.to_string(),
+            "SPZ versions 1 to 3 don't support SH degree 4"
+        );
     }
 }
 
