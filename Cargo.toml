@@ -68,6 +68,8 @@ log = "0.4"
 oneshot = { version = "0.2", features = ["async", "std"] }
 paste = "1.0"
 ply-rs = "0.1"
+ruzstd = "0.9.1"
+structured-zstd = { version = "0.2.6", default-features = false, features = ["std"] }
 thiserror = "2.0"
 wgpu = "30.0"
 wesl = "0.4"

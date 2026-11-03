@@ -8,7 +8,7 @@ use crate::{AnyGaussian, Gaussian};
 /// A supported Gaussian spherical harmonics degree for storage and rendering.
 ///
 /// Supports degrees 0 through 4. SPZ uses [`crate::SpzGaussianShDegree`] instead,
-/// which supports degrees 0 through 3.
+/// with degree 4 supported when reading v4 containers.
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GaussianShDegree(u8);
