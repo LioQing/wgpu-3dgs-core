@@ -1,7 +1,6 @@
 use assert_matches::assert_matches;
-use glam::*;
 use std::{
-    io::{self, ErrorKind, Read, Write},
+    io::{ErrorKind, Read, Write},
     num::NonZeroUsize,
 };
 use wgpu_3dgs_core::{
@@ -25,6 +24,21 @@ const ASSERT_GAUSSIAN_OPTIONS: assert::GaussianOptions = assert::GaussianOptions
     sh_epsilon: 1e-1,
     scale_epsilon: 1.0,
 };
+
+// Wire-layout constants are independent of the production container implementation.
+const V4_HEADER_SIZE: usize = 32;
+const V4_TOC_ENTRY_SIZE: usize = 16;
+const V4_MAGIC_OFFSET: usize = 0;
+const V4_VERSION_OFFSET: usize = 4;
+const V4_NUM_POINTS_OFFSET: usize = 8;
+const V4_SH_DEGREE_OFFSET: usize = 12;
+const V4_FRACTIONAL_BITS_OFFSET: usize = 13;
+const V4_FLAGS_OFFSET: usize = 14;
+const V4_STREAM_COUNT_OFFSET: usize = 15;
+const V4_TOC_OFFSET: usize = 16;
+const V4_RESERVED_OFFSET: usize = 20;
+const V4_EXTENSION_FLAG: u8 = 0x2;
+const ZSTD_BLOCK_SIZE: usize = 128 * 1024;
 
 fn given_spz_gaussian_and_header(
     num_point: u32,
@@ -63,9 +77,7 @@ fn given_spz_gaussian_and_header(
     )
 }
 
-fn test_spz_gaussians_buffer_round_trip_with_options_should_preserve_count(
-    options: &SpzGaussiansFromGaussianSliceOptions,
-) {
+fn assert_spz_buffer_round_trip(options: &SpzGaussiansFromGaussianSliceOptions) {
     let from_options = SpzGaussians::from_gaussians_with_options(
         given::runtime_gaussians(options.sh_degree.get()),
         options,
@@ -76,26 +88,23 @@ fn test_spz_gaussians_buffer_round_trip_with_options_should_preserve_count(
     from_options.write_to(&mut buffer).unwrap();
     let spz_gaussians_read = SpzGaussians::read_from(&mut buffer.as_slice()).unwrap();
 
-    assert_eq!(from_options.len(), spz_gaussians_read.len());
+    assert_eq!(spz_gaussians_read, from_options);
 }
 
-fn test_spz_gaussians_from_gaussians_with_options_and_iter_should_be_equal(
-    options: &SpzGaussiansFromGaussianSliceOptions,
-    mut assertion: impl FnMut(SpzGaussianRef, &Gaussian, &SpzGaussiansHeader),
-) {
-    let gaussians = given::gaussians();
-    let from_options = SpzGaussians::from_gaussians_with_options(
-        given::runtime_gaussians(options.sh_degree.get()),
-        options,
-    )
-    .unwrap();
+fn assert_spz_native_round_trip(options: &SpzGaussiansFromGaussianSliceOptions) {
+    let gaussians = given::runtime_gaussians(options.sh_degree.get());
+    let from_options = SpzGaussians::from_gaussians_with_options(&gaussians, options).unwrap();
 
-    for (a, b) in from_options.iter().zip(gaussians.iter()) {
-        assertion(a, b, &from_options.header);
+    assert_eq!(from_options.len(), gaussians.len());
+
+    for (packed, expected) in from_options.iter().zip(&gaussians) {
+        let restored = AnyGaussian::from_spz(packed, &from_options.header).unwrap();
+
+        assert::gaussian(&restored, expected, &ASSERT_GAUSSIAN_OPTIONS);
     }
 }
 
-fn sh_degree_gaussians(degree: u8) -> SpzGaussians {
+fn given_spz_v4_gaussians(degree: u8) -> SpzGaussians {
     SpzGaussians::from_gaussians_with_options(
         given::runtime_gaussians(degree),
         &SpzGaussiansFromGaussianSliceOptions {
@@ -108,15 +117,11 @@ fn sh_degree_gaussians(degree: u8) -> SpzGaussians {
     .unwrap()
 }
 
-fn spz_buffer(degree: u8) -> Vec<u8> {
+fn given_spz_v4_buffer(degree: u8) -> Vec<u8> {
     let mut bytes = Vec::new();
-    sh_degree_gaussians(degree).write_to(&mut bytes).unwrap();
+    given_spz_v4_gaussians(degree).write_to(&mut bytes).unwrap();
 
     bytes
-}
-
-fn read(mut bytes: &[u8]) -> io::Result<SpzGaussians> {
-    SpzGaussians::read_from(&mut bytes)
 }
 
 fn set_u32(bytes: &mut [u8], offset: usize, value: u32) {
@@ -128,14 +133,14 @@ fn set_u64(bytes: &mut [u8], offset: usize, value: u64) {
 }
 
 fn replace_frame(mut bytes: Vec<u8>, index: usize, frame: &[u8]) -> Vec<u8> {
-    let mut start = 32 + usize::from(bytes[15]) * 16;
+    let mut start = V4_HEADER_SIZE + usize::from(bytes[V4_STREAM_COUNT_OFFSET]) * V4_TOC_ENTRY_SIZE;
 
     for stream in 0..index {
-        let toc = 32 + stream * 16;
+        let toc = V4_HEADER_SIZE + stream * V4_TOC_ENTRY_SIZE;
         start += u64::from_le_bytes(bytes[toc..toc + 8].try_into().unwrap()) as usize;
     }
 
-    let toc = 32 + index * 16;
+    let toc = V4_HEADER_SIZE + index * V4_TOC_ENTRY_SIZE;
     let old_size = u64::from_le_bytes(bytes[toc..toc + 8].try_into().unwrap()) as usize;
 
     set_u64(&mut bytes, toc, frame.len() as u64);
@@ -148,7 +153,7 @@ fn replace_frame(mut bytes: Vec<u8>, index: usize, frame: &[u8]) -> Vec<u8> {
 // 128 KiB window. This is independent of the production reader and its decoder.
 fn raw_frame(data: &[u8]) -> Vec<u8> {
     let mut frame = vec![0x28, 0xb5, 0x2f, 0xfd, 0, 0x38];
-    let blocks = data.chunks(128 * 1024);
+    let blocks = data.chunks(ZSTD_BLOCK_SIZE);
     let block_count = blocks.len();
 
     for (index, block) in blocks.enumerate() {
@@ -161,58 +166,15 @@ fn raw_frame(data: &[u8]) -> Vec<u8> {
 }
 
 fn with_extension(mut bytes: Vec<u8>, extension: &[u8]) -> Vec<u8> {
-    bytes[14] |= 0x2;
-    set_u32(&mut bytes, 16, 32 + extension.len() as u32);
-    bytes.splice(32..32, extension.iter().copied());
+    bytes[V4_FLAGS_OFFSET] |= V4_EXTENSION_FLAG;
+    set_u32(
+        &mut bytes,
+        V4_TOC_OFFSET,
+        (V4_HEADER_SIZE + extension.len()) as u32,
+    );
+    bytes.splice(V4_HEADER_SIZE..V4_HEADER_SIZE, extension.iter().copied());
 
     bytes
-}
-
-// Deliberately neither BufRead nor Seek, and short reads split the magic/header/TOC.
-struct ShortRead<'a>(&'a [u8]);
-
-impl Read for ShortRead<'_> {
-    fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
-        let count = out.len().min(3);
-
-        self.0.read(&mut out[..count])
-    }
-}
-
-// Deliberately neither Read nor Seek, with short writes exercising write_all.
-#[derive(Default)]
-struct ShortWrite(Vec<u8>);
-
-impl Write for ShortWrite {
-    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        let count = bytes.len().min(3);
-        self.0.extend_from_slice(&bytes[..count]);
-
-        Ok(count)
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        Ok(())
-    }
-}
-
-struct FailingWrite(usize);
-
-impl Write for FailingWrite {
-    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        if self.0 == 0 {
-            return Err(io::Error::new(ErrorKind::BrokenPipe, "test write failure"));
-        }
-
-        let count = bytes.len().min(self.0);
-        self.0 -= count;
-
-        Ok(count)
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        Ok(())
-    }
 }
 
 #[test]
@@ -265,6 +227,14 @@ fn test_spz_phase_name_should_round_trip_through_from_str() {
 }
 
 #[test]
+fn test_spz_phase_from_str_when_phase_is_unknown_should_return_error() {
+    assert_matches!(
+        "unknown".parse::<SpzPhase>(),
+        Err(wgpu_3dgs_core::SpzPhaseFromStrError::InvalidSpzPhase(name)) if name == "unknown"
+    );
+}
+
+#[test]
 fn test_spz_color_round_trip_should_preserve_all_byte_values() {
     let (mut spz, header) = given_spz_gaussian_and_header(1, &Default::default());
     for value in 0..=255 {
@@ -290,13 +260,13 @@ fn test_spz_gaussian_pod_len_and_is_empty_should_be_correct() {
 #[test]
 fn test_bundled_spz_model_should_use_version_four_and_support_whole_model_and_batch_reads() {
     let bytes = include_bytes!("../../examples/model.spz");
-    let model = read(bytes).unwrap();
+    let model = SpzGaussians::read_from(&mut bytes.as_slice()).unwrap();
 
     assert_eq!(model.header.version(), 4);
     assert_eq!(model.len(), 9);
     assert_eq!(model.sh_degree().get(), 3);
 
-    let mut reader = SpzBatchReader::new(ShortRead(bytes)).unwrap();
+    let mut reader = SpzBatchReader::new(given::ShortRead(bytes)).unwrap();
 
     while !reader.progress().done {
         reader.step(NonZeroUsize::new(1).unwrap()).unwrap();
@@ -313,11 +283,7 @@ fn test_spz_gaussians_file_round_trip_should_be_equal() {
     spz_gaussians.write_to_file(&path).unwrap();
     let spz_gaussians_read = SpzGaussians::read_from_file(&path).unwrap();
 
-    assert_eq!(spz_gaussians.len(), spz_gaussians_read.len());
-
-    for (a, b) in spz_gaussians.iter().zip(spz_gaussians_read.iter()) {
-        assert_eq!(a, b);
-    }
+    assert_eq!(spz_gaussians_read, spz_gaussians);
 }
 
 #[test]
@@ -328,11 +294,7 @@ fn test_spz_gaussians_buffer_round_trip_should_be_equal() {
     spz_gaussians.write_to(&mut buffer).unwrap();
     let spz_gaussians_read = SpzGaussians::read_from(&mut buffer.as_slice()).unwrap();
 
-    assert_eq!(spz_gaussians.len(), spz_gaussians_read.len());
-
-    for (a, b) in spz_gaussians.iter().zip(spz_gaussians_read.iter()) {
-        assert_eq!(a, b);
-    }
+    assert_eq!(spz_gaussians_read, spz_gaussians);
 }
 
 #[test]
@@ -412,6 +374,7 @@ fn test_spz_decompressed_reads_when_header_or_fields_are_truncated_should_return
         given::gaussians(),
         &SpzGaussiansFromGaussianSliceOptions {
             version: 3,
+            sh_degree: SpzGaussianShDegree::new(3).expect("valid SH degree"),
             ..Default::default()
         },
     )
@@ -433,7 +396,7 @@ fn test_spz_decompressed_reads_when_header_or_fields_are_truncated_should_return
         original.colors.len() * 3,
         original.scales.len() * 3,
         original.len() * 4,      // version 3: smallest-three rotations
-        original.len() * 15 * 3, // default SH degree 3
+        original.len() * 15 * 3, // SH degree 3
     ];
     let mut end = header_size;
     for length in field_lengths {
@@ -499,47 +462,42 @@ fn test_spz_default_constructors_should_use_version_four_and_preserve_all_sh_deg
 
             assert_eq!(&bytes[..4], &SpzGaussiansHeader::MAGIC.to_le_bytes());
             assert_eq!(u32::from_le_bytes(bytes[4..8].try_into().unwrap()), 4);
-            assert_eq!(read(&bytes).unwrap(), expected);
+            assert_eq!(
+                SpzGaussians::read_from(&mut bytes.as_slice()).unwrap(),
+                expected
+            );
         }
     }
 }
 
 #[test]
-fn test_spz_gaussians_buffer_round_trip_when_versions_vary_should_preserve_count() {
+fn test_spz_gaussians_buffer_round_trip_when_versions_vary_should_preserve_model() {
     for version in SpzGaussiansHeader::SUPPORTED_VERSIONS {
-        println!("Version: {version}");
-        test_spz_gaussians_buffer_round_trip_with_options_should_preserve_count(
-            &SpzGaussiansFromGaussianSliceOptions {
-                version,
-                ..Default::default()
-            },
-        );
+        assert_spz_buffer_round_trip(&SpzGaussiansFromGaussianSliceOptions {
+            version,
+            sh_degree: SpzGaussianShDegree::new(3).expect("valid SH degree"),
+            ..Default::default()
+        });
     }
 }
 
 #[test]
-fn test_spz_gaussians_buffer_round_trip_when_sh_degrees_vary_should_preserve_count() {
+fn test_spz_gaussians_buffer_round_trip_when_sh_degrees_vary_should_preserve_model() {
     for sh_degree in SpzGaussiansHeader::SUPPORTED_SH_DEGREES {
-        println!("SH Degree: {sh_degree}");
-        test_spz_gaussians_buffer_round_trip_with_options_should_preserve_count(
-            &SpzGaussiansFromGaussianSliceOptions {
-                sh_degree: SpzGaussianShDegree::new(sh_degree).expect("valid SH degree"),
-                ..Default::default()
-            },
-        );
+        assert_spz_buffer_round_trip(&SpzGaussiansFromGaussianSliceOptions {
+            sh_degree: SpzGaussianShDegree::new(sh_degree).expect("valid SH degree"),
+            ..Default::default()
+        });
     }
 }
 
 #[test]
-fn test_spz_gaussians_buffer_round_trip_when_fractional_bits_vary_should_preserve_count() {
+fn test_spz_gaussians_buffer_round_trip_when_fractional_bits_vary_should_preserve_model() {
     for fractional_bits in [8, 12, 16] {
-        println!("Fractional Bits: {fractional_bits}");
-        test_spz_gaussians_buffer_round_trip_with_options_should_preserve_count(
-            &SpzGaussiansFromGaussianSliceOptions {
-                fractional_bits,
-                ..Default::default()
-            },
-        );
+        assert_spz_buffer_round_trip(&SpzGaussiansFromGaussianSliceOptions {
+            fractional_bits,
+            ..Default::default()
+        });
     }
 }
 
@@ -567,83 +525,88 @@ fn test_spz_gaussians_from_iter_and_iter_iter_gaussian_should_be_equal() {
 }
 
 #[test]
-fn test_spz_gaussians_from_gaussians_with_options_and_iter_when_versions_should_be_equal() {
+fn test_spz_gaussians_iter_and_iter_gaussian_when_sh_degree_is_zero_should_report_remaining_count()
+{
     for version in SpzGaussiansHeader::SUPPORTED_VERSIONS {
-        println!("Version: {version}");
-        test_spz_gaussians_from_gaussians_with_options_and_iter_should_be_equal(
-            &SpzGaussiansFromGaussianSliceOptions {
-                version,
-                ..Default::default()
-            },
-            |spz_gaussian_ref, gaussian, header| {
-                let gaussian_from_spz =
-                    wgpu_3dgs_core::AnyGaussian::from_spz(spz_gaussian_ref, header)
-                        .unwrap()
-                        .convert_sh_degree::<wgpu_3dgs_core::ShDegree3>();
-                assert::gaussian(&gaussian_from_spz, gaussian, &ASSERT_GAUSSIAN_OPTIONS);
-            },
-        );
-    }
-}
+        for count in [0, 2] {
+            let gaussians = given::runtime_gaussians(0)
+                .into_iter()
+                .take(count)
+                .collect::<Vec<_>>();
+            let model = SpzGaussians::from_gaussians_with_options(
+                &gaussians,
+                &SpzGaussiansFromGaussianSliceOptions {
+                    version,
+                    sh_degree: SpzGaussianShDegree::new(0).expect("valid SH degree"),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            let mut packed = model.iter();
+            let mut native = model.iter_gaussian();
 
-#[test]
-fn test_spz_gaussians_from_gaussians_with_options_and_iter_when_sh_degrees_should_be_equal() {
-    for sh_degree in SpzGaussiansHeader::SUPPORTED_SH_DEGREES {
-        println!("SH Degree: {sh_degree}");
-        test_spz_gaussians_from_gaussians_with_options_and_iter_should_be_equal(
-            &SpzGaussiansFromGaussianSliceOptions {
-                sh_degree: SpzGaussianShDegree::new(sh_degree).expect("valid SH degree"),
-                ..Default::default()
-            },
-            |spz_gaussian_ref, gaussian, header| {
-                let gaussian_from_spz =
-                    wgpu_3dgs_core::AnyGaussian::from_spz(spz_gaussian_ref, header)
-                        .unwrap()
-                        .convert_sh_degree::<wgpu_3dgs_core::ShDegree3>();
-                assert::gaussian(
-                    &gaussian_from_spz,
-                    &Gaussian {
-                        sh: gaussian
-                            .sh
-                            .iter()
-                            .take(header.sh_num_coefficients())
-                            .cloned()
-                            .chain(std::iter::repeat(Vec3::ZERO))
-                            .take(15)
-                            .collect::<Vec<_>>()
-                            .try_into()
-                            .expect("SH coefficient with 15 elements"),
-                        ..*gaussian
-                    },
-                    &ASSERT_GAUSSIAN_OPTIONS,
+            assert_eq!(packed.len(), count);
+            assert_eq!(native.len(), count);
+
+            for remaining in (0..count).rev() {
+                assert_matches!(
+                    packed.next(),
+                    Some(SpzGaussianRef {
+                        sh: SpzGaussianShRef::Zero,
+                        ..
+                    })
                 );
-            },
-        );
+                assert_matches!(native.next(), Some(AnyGaussian::Zero(_)));
+                assert_eq!(packed.size_hint(), (remaining, Some(remaining)));
+                assert_eq!(native.size_hint(), (remaining, Some(remaining)));
+                assert_eq!(packed.len(), remaining);
+                assert_eq!(native.len(), remaining);
+            }
+
+            assert!(packed.next().is_none());
+            assert!(native.next().is_none());
+            assert!(packed.next().is_none());
+            assert!(native.next().is_none());
+        }
     }
 }
 
 #[test]
-fn test_spz_gaussians_from_gaussians_and_with_options_iter_when_fractional_bits_should_be_equal() {
+fn test_spz_gaussians_from_gaussians_with_options_when_versions_vary_should_preserve_attributes() {
+    for version in SpzGaussiansHeader::SUPPORTED_VERSIONS {
+        assert_spz_native_round_trip(&SpzGaussiansFromGaussianSliceOptions {
+            version,
+            sh_degree: SpzGaussianShDegree::new(3).expect("valid SH degree"),
+            ..Default::default()
+        });
+    }
+}
+
+#[test]
+fn test_spz_gaussians_from_gaussians_with_options_when_sh_degrees_vary_should_preserve_attributes()
+{
+    for sh_degree in SpzGaussiansHeader::SUPPORTED_SH_DEGREES {
+        assert_spz_native_round_trip(&SpzGaussiansFromGaussianSliceOptions {
+            sh_degree: SpzGaussianShDegree::new(sh_degree).expect("valid SH degree"),
+            ..Default::default()
+        });
+    }
+}
+
+#[test]
+fn test_spz_gaussians_from_gaussians_with_options_when_fractional_bits_vary_should_preserve_attributes()
+ {
     for fractional_bits in [8, 12, 16] {
-        println!("Fractional Bits: {fractional_bits}");
-        test_spz_gaussians_from_gaussians_with_options_and_iter_should_be_equal(
-            &SpzGaussiansFromGaussianSliceOptions {
-                fractional_bits,
-                ..Default::default()
-            },
-            |spz_gaussian_ref, gaussian, header| {
-                let gaussian_from_spz =
-                    wgpu_3dgs_core::AnyGaussian::from_spz(spz_gaussian_ref, header)
-                        .unwrap()
-                        .convert_sh_degree::<wgpu_3dgs_core::ShDegree3>();
-                assert::gaussian(&gaussian_from_spz, gaussian, &ASSERT_GAUSSIAN_OPTIONS);
-            },
-        );
+        assert_spz_native_round_trip(&SpzGaussiansFromGaussianSliceOptions {
+            fractional_bits,
+            ..Default::default()
+        });
     }
 }
 
 #[test]
-fn test_spz_gaussians_from_gaussians_with_options_and_iter_when_sh_quantize_bits_should_be_equal() {
+fn test_spz_gaussians_from_gaussians_with_options_when_sh_quantize_bits_vary_should_preserve_attributes()
+ {
     for sh_quantize_bits in [
         [0; 3],
         [4; 3],
@@ -653,20 +616,10 @@ fn test_spz_gaussians_from_gaussians_with_options_and_iter_when_sh_quantize_bits
         [2, 4, 6],
         [4, 5, 5],
     ] {
-        println!("SH Quantize Bits: {:?}", sh_quantize_bits);
-        test_spz_gaussians_from_gaussians_with_options_and_iter_should_be_equal(
-            &SpzGaussiansFromGaussianSliceOptions {
-                sh_quantize_bits,
-                ..Default::default()
-            },
-            |spz_gaussian_ref, gaussian, header| {
-                let gaussian_from_spz =
-                    wgpu_3dgs_core::AnyGaussian::from_spz(spz_gaussian_ref, header)
-                        .unwrap()
-                        .convert_sh_degree::<wgpu_3dgs_core::ShDegree3>();
-                assert::gaussian(&gaussian_from_spz, gaussian, &ASSERT_GAUSSIAN_OPTIONS);
-            },
-        );
+        assert_spz_native_round_trip(&SpzGaussiansFromGaussianSliceOptions {
+            sh_quantize_bits,
+            ..Default::default()
+        });
     }
 }
 
@@ -676,6 +629,7 @@ fn test_spz_gaussians_from_gaussians_with_options_when_header_version_is_invalid
     let gaussians = given::gaussians();
     let options = wgpu_3dgs_core::SpzGaussiansFromGaussianSliceOptions {
         version: 999,
+        sh_degree: SpzGaussianShDegree::new(3).expect("valid SH degree"),
         ..Default::default()
     };
 
@@ -690,7 +644,7 @@ fn test_spz_gaussians_from_gaussians_with_options_when_header_version_is_invalid
 }
 
 #[test]
-fn test_spz_gaussians_from_empty_iter_should_use_header_variants() {
+fn test_spz_gaussians_from_iter_when_input_is_empty_should_use_header_variants() {
     for version in SpzGaussiansHeader::SUPPORTED_VERSIONS {
         for degree in SpzGaussiansHeader::SUPPORTED_SH_DEGREES {
             if version < 4 && degree == 4 {
@@ -752,11 +706,12 @@ fn test_spz_gaussians_from_empty_iter_should_use_header_variants() {
 
     let collected = SpzGaussians::from_gaussians(std::iter::empty::<Gaussian>()).unwrap();
     assert!(collected.is_empty());
-    assert_eq!(collected.shs.degree(), SpzGaussianShDegree::default());
+    assert_eq!(collected.shs.degree().get(), 3);
 }
 
 #[test]
-fn test_spz_gaussians_from_empty_iter_when_header_count_is_nonzero_should_return_count_mismatch() {
+fn test_spz_gaussians_from_iter_when_input_is_empty_and_header_count_is_nonzero_should_return_count_mismatch()
+ {
     let (_, header) = given_spz_gaussian_and_header(2, &Default::default());
 
     assert_matches!(
@@ -916,6 +871,10 @@ fn test_spz_gaussians_from_iter_when_header_sh_degree_mismatched_should_return_e
         ),
         (
             SpzGaussianSh::Three([[0; 3]; 15]),
+            SpzGaussianShDegree::new(4).expect("valid SH degree"),
+        ),
+        (
+            SpzGaussianSh::Four([[0; 3]; 24]),
             SpzGaussianShDegree::new(0).expect("valid SH degree"),
         ),
     ] {
@@ -937,15 +896,15 @@ fn test_spz_gaussians_from_iter_when_header_sh_degree_mismatched_should_return_e
             result,
             Err(SpzGaussiansFromIterError::ShDegreeMismatch {
                 sh_degree,
-                header_sh_degree,
+                header_sh_degree: actual_header_sh_degree,
             })
-            if sh_degree == sh.degree() && header_sh_degree == header_sh_degree
+            if sh_degree == sh.degree() && actual_header_sh_degree == header_sh_degree
         );
     }
 }
 
 #[test]
-fn test_sh_gaussians_header_try_from_pod_when_magic_is_incorrect_should_return_error() {
+fn test_spz_gaussians_header_try_from_pod_when_magic_is_incorrect_should_return_error() {
     let pod = SpzGaussiansHeaderPod {
         magic: 0,
         version: 1,
@@ -997,6 +956,23 @@ fn test_spz_gaussian_sh_degree_should_be_correct() {
     assert_eq!(SpzGaussianSh::One([[0; 3]; 3]).degree().get(), 1);
     assert_eq!(SpzGaussianSh::Two([[0; 3]; 8]).degree().get(), 2);
     assert_eq!(SpzGaussianSh::Three([[0; 3]; 15]).degree().get(), 3);
+    assert_eq!(SpzGaussianSh::Four([[0; 3]; 24]).degree().get(), 4);
+}
+
+#[test]
+fn test_spz_gaussian_sh_degree_num_coefficients_should_be_correct() {
+    for (degree, expected) in [(0, 0), (1, 3), (2, 8), (3, 15), (4, 24)] {
+        let degree = SpzGaussianShDegree::new(degree).expect("valid SH degree");
+
+        assert_eq!(degree.num_coefficients(), expected);
+    }
+}
+
+#[test]
+fn test_spz_gaussian_sh_degree_when_degree_is_invalid_should_return_none() {
+    for degree in 5..=u8::MAX {
+        assert_eq!(SpzGaussianShDegree::new(degree), None);
+    }
 }
 
 #[test]
@@ -1005,6 +981,7 @@ fn test_spz_gaussian_sh_ref_degree_should_be_correct() {
     assert_eq!(SpzGaussianShRef::One(&[[0; 3]; 3]).degree().get(), 1);
     assert_eq!(SpzGaussianShRef::Two(&[[0; 3]; 8]).degree().get(), 2);
     assert_eq!(SpzGaussianShRef::Three(&[[0; 3]; 15]).degree().get(), 3);
+    assert_eq!(SpzGaussianShRef::Four(&[[0; 3]; 24]).degree().get(), 4);
 }
 
 #[test]
@@ -1013,22 +990,62 @@ fn test_spz_gaussians_shs_degree_should_be_correct() {
     assert_eq!(SpzGaussiansShs::One(vec![]).degree().get(), 1);
     assert_eq!(SpzGaussiansShs::Two(vec![]).degree().get(), 2);
     assert_eq!(SpzGaussiansShs::Three(vec![]).degree().get(), 3);
+    assert_eq!(SpzGaussiansShs::Four(vec![]).degree().get(), 4);
 }
 
 #[test]
 fn test_spz_gaussian_sh_iter_should_be_correct() {
-    let sh = SpzGaussianSh::One([[1, 2, 3], [4, 5, 6], [7, 8, 9]]);
-    let coeffs: Vec<_> = sh.iter().collect();
-    assert_eq!(coeffs, vec![&[1, 2, 3], &[4, 5, 6], &[7, 8, 9]]);
+    for (sh, count) in [
+        (SpzGaussianSh::Zero, 0),
+        (SpzGaussianSh::One(std::array::from_fn(|i| [i as u8; 3])), 3),
+        (SpzGaussianSh::Two(std::array::from_fn(|i| [i as u8; 3])), 8),
+        (
+            SpzGaussianSh::Three(std::array::from_fn(|i| [i as u8; 3])),
+            15,
+        ),
+        (
+            SpzGaussianSh::Four(std::array::from_fn(|i| [i as u8; 3])),
+            24,
+        ),
+    ] {
+        assert_eq!(
+            sh.iter().copied().collect::<Vec<_>>(),
+            (0..count).map(|i| [i as u8; 3]).collect::<Vec<_>>()
+        );
+    }
 }
 
 #[test]
 fn test_spz_gaussian_sh_iter_mut_should_be_correct() {
-    let mut sh = SpzGaussianSh::One([[0; 3]; 3]);
-    for coeff in sh.iter_mut() {
-        *coeff = [1, 1, 1];
+    for (mut sh, count) in [
+        (SpzGaussianSh::Zero, 0),
+        (SpzGaussianSh::One([[0; 3]; 3]), 3),
+        (SpzGaussianSh::Two([[0; 3]; 8]), 8),
+        (SpzGaussianSh::Three([[0; 3]; 15]), 15),
+        (SpzGaussianSh::Four([[0; 3]; 24]), 24),
+    ] {
+        for coeff in sh.iter_mut() {
+            *coeff = [1, 2, 3];
+        }
+
+        assert_eq!(
+            sh.iter().copied().collect::<Vec<_>>(),
+            vec![[1, 2, 3]; count]
+        );
     }
-    assert_eq!(sh, SpzGaussianSh::One([[1, 1, 1]; 3]));
+}
+
+#[test]
+fn test_spz_gaussian_sh_when_degree_is_four_should_preserve_mutated_coefficients() {
+    let mut sh = SpzGaussianSh::Four([[128; 3]; 24]);
+
+    sh.iter_mut().last().unwrap()[2] = 255;
+
+    let mut expected = [[128; 3]; 24];
+    expected[23][2] = 255;
+
+    assert_eq!(sh, SpzGaussianSh::Four(expected));
+    assert_eq!(sh.iter().copied().collect::<Vec<_>>(), expected);
 }
 
 #[test]
@@ -1089,6 +1106,12 @@ fn test_spz_gaussians_shs_len_and_is_empty_should_be_correct() {
 
     assert_eq!(SpzGaussiansShs::Three(vec![[[0; 3]; 15]]).len(), 1);
     assert!(!SpzGaussiansShs::Three(vec![[[0; 3]; 15]]).is_empty());
+
+    assert_eq!(SpzGaussiansShs::Four(vec![]).len(), 0);
+    assert!(SpzGaussiansShs::Four(vec![]).is_empty());
+
+    assert_eq!(SpzGaussiansShs::Four(vec![[[0; 3]; 24]]).len(), 1);
+    assert!(!SpzGaussiansShs::Four(vec![[[0; 3]; 24]]).is_empty());
 }
 
 #[test]
@@ -1116,10 +1139,10 @@ fn test_spz_gaussian_as_ref_and_ref_to_inner_owned_should_be_equal() {
 #[test]
 fn test_spz_v4_round_trip_should_preserve_attributes_and_all_sh_degrees() {
     for degree in 0..=4 {
-        let original = sh_degree_gaussians(degree);
+        let original = given_spz_v4_gaussians(degree);
         let mut bytes = Vec::new();
         original.write_to(&mut bytes).unwrap();
-        let model = read(&bytes).unwrap();
+        let model = SpzGaussians::read_from(&mut bytes.as_slice()).unwrap();
 
         assert_eq!(model, original);
         assert_eq!(model.header.version(), 4);
@@ -1128,8 +1151,12 @@ fn test_spz_v4_round_trip_should_preserve_attributes_and_all_sh_degrees() {
         assert!(model.header.is_antialiased());
         assert_eq!(model.sh_degree().get(), degree);
 
-        for (gaussian, expected) in model.iter_gaussian().zip(given::runtime_gaussians(degree)) {
-            assert::gaussian(&gaussian, &expected, &ASSERT_GAUSSIAN_OPTIONS);
+        let expected = given::runtime_gaussians(degree);
+
+        assert_eq!(model.iter_gaussian().len(), expected.len());
+
+        for (gaussian, expected) in model.iter_gaussian().zip(&expected) {
+            assert::gaussian(&gaussian, expected, &ASSERT_GAUSSIAN_OPTIONS);
         }
 
         for packed in model.iter() {
@@ -1147,11 +1174,11 @@ fn test_spz_v4_round_trip_should_preserve_attributes_and_all_sh_degrees() {
 #[test]
 fn test_spz_v4_batch_reads_when_input_has_short_reads_and_no_seek_should_respect_item_budget() {
     for degree in 0..=4 {
-        let bytes = spz_buffer(degree);
-        let expected = sh_degree_gaussians(degree);
+        let bytes = given_spz_v4_buffer(degree);
+        let expected = given_spz_v4_gaussians(degree);
 
         for budget in [1, 2, 4096] {
-            let mut reader = SpzBatchReader::new(ShortRead(&bytes)).unwrap();
+            let mut reader = SpzBatchReader::new(given::ShortRead(&bytes)).unwrap();
 
             assert_eq!(reader.header(), &expected.header);
 
@@ -1160,18 +1187,31 @@ fn test_spz_v4_batch_reads_when_input_has_short_reads_and_no_seek_should_respect
             while !reader.progress().done {
                 let progress = reader.step(NonZeroUsize::new(budget).unwrap()).unwrap();
 
+                assert!(progress.completed_units > completed);
                 assert!(progress.completed_units - completed <= budget);
 
                 completed = progress.completed_units;
             }
 
+            let progress = reader.progress();
+
+            assert_eq!(completed, progress.total_units);
+            assert_eq!(
+                reader.step(NonZeroUsize::new(1).unwrap()).unwrap(),
+                progress
+            );
             assert_eq!(reader.finish().unwrap(), expected);
         }
 
         let mut reader = GaussiansBatchReader::new(bytes.as_slice(), GaussiansSource::Spz).unwrap();
+        let mut completed = 0;
 
         while !reader.progress().done {
-            reader.step(NonZeroUsize::new(1).unwrap()).unwrap();
+            let progress = reader.step(NonZeroUsize::new(1).unwrap()).unwrap();
+
+            assert_eq!(progress.completed_units, completed + 1);
+
+            completed = progress.completed_units;
         }
 
         assert_matches!(reader.finish().unwrap(), Gaussians::Spz(model) if model == expected);
@@ -1181,8 +1221,8 @@ fn test_spz_v4_batch_reads_when_input_has_short_reads_and_no_seek_should_respect
 #[test]
 fn test_spz_v4_unified_and_file_readers_should_preserve_source_conversions() {
     for degree in 0..=4 {
-        let bytes = spz_buffer(degree);
-        let original = sh_degree_gaussians(degree);
+        let bytes = given_spz_v4_buffer(degree);
+        let original = given_spz_v4_gaussians(degree);
         let unified = Gaussians::read_from(&mut bytes.as_slice(), GaussiansSource::Spz).unwrap();
 
         assert_eq!(unified.sh_degree().get(), degree);
@@ -1195,7 +1235,12 @@ fn test_spz_v4_unified_and_file_readers_should_preserve_source_conversions() {
         let ply = unified.clone().into_ply().unwrap();
 
         assert_eq!(ply.sh_degree().get(), degree);
-        assert_eq!(ply.iter_gaussian().count(), 2);
+        assert_eq!(ply.iter_gaussian().len(), expected.len());
+
+        for (gaussian, expected) in ply.iter_gaussian().zip(&expected) {
+            assert::gaussian(&gaussian, expected, &ASSERT_GAUSSIAN_OPTIONS);
+        }
+
         assert_eq!(unified.clone().into_spz().unwrap(), original);
 
         let options = SpzGaussiansFromGaussianSliceOptions {
@@ -1205,12 +1250,21 @@ fn test_spz_v4_unified_and_file_readers_should_preserve_source_conversions() {
         };
 
         if degree == 4 {
-            assert!(unified.into_spz_with_options(&options).is_err());
+            assert_matches!(
+                unified.into_spz_with_options(&options),
+                Err(SpzGaussiansFromGaussiansError::UnsupportedShDegree { degree: 4 })
+            );
         } else {
             let legacy = unified.into_spz_with_options(&options).unwrap();
 
             assert_eq!(legacy.header.version(), 3);
-            assert!(legacy.write_to(&mut Vec::new()).is_ok());
+            let mut bytes = Vec::new();
+            legacy.write_to(&mut bytes).unwrap();
+
+            assert_eq!(
+                SpzGaussians::read_from(&mut bytes.as_slice()).unwrap(),
+                legacy
+            );
         }
 
         let path = given::temp_file_path(".spz");
@@ -1222,72 +1276,205 @@ fn test_spz_v4_unified_and_file_readers_should_preserve_source_conversions() {
 
 #[test]
 fn test_spz_v4_reads_when_extensions_are_present_should_skip_them_without_changing_gaussians() {
-    let original = spz_buffer(4);
+    let original = given_spz_v4_buffer(4);
     let extension = [0xfe, 0xca, 0xad, 0xde, 3, 0, 0, 0, 10, 20, 30];
-    let model = read(&with_extension(original.clone(), &extension)).unwrap();
-
-    assert_eq!(
-        model.iter().collect::<Vec<_>>(),
-        read(&original).unwrap().iter().collect::<Vec<_>>()
-    );
-
     let mut two_records = extension.to_vec();
     two_records.extend_from_slice(&[1, 2, 3, 4, 0, 0, 0, 0]);
 
-    assert!(read(&with_extension(original, &two_records)).is_ok());
+    for extension in [extension.as_slice(), two_records.as_slice()] {
+        let bytes = with_extension(original.clone(), extension);
+        let model = SpzGaussians::read_from(&mut bytes.as_slice()).unwrap();
+        let mut expected = given_spz_v4_gaussians(4);
+        let mut pod = *expected.header.as_pod();
+        pod.flags |= V4_EXTENSION_FLAG;
+        expected.header = SpzGaussiansHeader::try_from_pod(pod).unwrap();
+
+        assert_eq!(model, expected);
+    }
 }
 
 #[test]
-fn test_spz_v4_reads_when_headers_toc_or_extensions_are_malformed_should_return_error() {
-    let original = spz_buffer(3);
-    let mut cases = Vec::new();
+fn test_spz_v4_reads_when_header_is_malformed_should_return_error() {
+    let original = given_spz_v4_buffer(3);
 
-    for (offset, value) in [(0, 0), (4, 3), (4, 5), (16, 0), (16, 31)] {
+    for (name, offset, value, expected) in [
+        ("magic", V4_MAGIC_OFFSET, 0, "unrecognized SPZ container"),
+        (
+            "legacy version",
+            V4_VERSION_OFFSET,
+            3,
+            "unsupported SPZ plaintext header version",
+        ),
+        (
+            "unsupported version",
+            V4_VERSION_OFFSET,
+            5,
+            "unsupported SPZ plaintext header version",
+        ),
+        (
+            "zero TOC offset",
+            V4_TOC_OFFSET,
+            0,
+            "SPZ v4 TOC overlaps the header",
+        ),
+        (
+            "overlapping TOC",
+            V4_TOC_OFFSET,
+            V4_HEADER_SIZE as u32 - 1,
+            "SPZ v4 TOC overlaps the header",
+        ),
+    ] {
         let mut bytes = original.clone();
         set_u32(&mut bytes, offset, value);
-        cases.push(bytes);
+
+        let error = SpzGaussians::read_from(&mut bytes.as_slice()).unwrap_err();
+
+        assert_eq!(error.kind(), ErrorKind::InvalidData, "{name}");
+        assert_eq!(error.to_string(), expected, "{name}");
     }
 
-    for (offset, value) in [
-        (12, 5),
-        (13, 31),
-        (14, 0x80),
-        (15, 5),
-        (15, 7),
-        (20, 1),
-        (31, 1),
+    for (name, offset, value, expected) in [
+        (
+            "SH degree",
+            V4_SH_DEGREE_OFFSET,
+            5,
+            "unsupported SPZ v4 SH degree",
+        ),
+        (
+            "fractional bits",
+            V4_FRACTIONAL_BITS_OFFSET,
+            31,
+            "SPZ v4 fractional bits must not exceed 30",
+        ),
+        (
+            "flags",
+            V4_FLAGS_OFFSET,
+            0x80,
+            "unsupported SPZ v4 flags or reserved bytes",
+        ),
+        (
+            "missing stream",
+            V4_STREAM_COUNT_OFFSET,
+            5,
+            "SPZ v4 stream count does not match attributes",
+        ),
+        (
+            "extra stream",
+            V4_STREAM_COUNT_OFFSET,
+            7,
+            "SPZ v4 stream count does not match attributes",
+        ),
+        (
+            "first reserved byte",
+            V4_RESERVED_OFFSET,
+            1,
+            "unsupported SPZ v4 flags or reserved bytes",
+        ),
+        (
+            "last reserved byte",
+            V4_HEADER_SIZE - 1,
+            1,
+            "unsupported SPZ v4 flags or reserved bytes",
+        ),
     ] {
         let mut bytes = original.clone();
         bytes[offset] = value;
-        cases.push(bytes);
-    }
 
-    for (offset, value) in [(32, 0), (32, u64::MAX), (40, 1), (40, u64::MAX)] {
+        let error = SpzGaussians::read_from(&mut bytes.as_slice()).unwrap_err();
+
+        assert_eq!(error.kind(), ErrorKind::InvalidData, "{name}");
+        assert_eq!(error.to_string(), expected, "{name}");
+    }
+}
+
+#[test]
+fn test_spz_v4_reads_when_toc_is_malformed_should_return_error() {
+    let original = given_spz_v4_buffer(3);
+
+    for (name, offset, value, expected) in [
+        (
+            "zero compressed size",
+            V4_HEADER_SIZE,
+            0,
+            "SPZ v4 TOC attribute size mismatch",
+        ),
+        (
+            "overflowing compressed size",
+            V4_HEADER_SIZE,
+            u64::MAX,
+            "SPZ v4 compressed size overflow",
+        ),
+        (
+            "incorrect uncompressed size",
+            V4_HEADER_SIZE + 8,
+            1,
+            "SPZ v4 TOC attribute size mismatch",
+        ),
+        (
+            "oversized uncompressed size",
+            V4_HEADER_SIZE + 8,
+            u64::MAX,
+            "SPZ v4 TOC attribute size mismatch",
+        ),
+    ] {
         let mut bytes = original.clone();
         set_u64(&mut bytes, offset, value);
-        cases.push(bytes);
+
+        let error = SpzGaussians::read_from(&mut bytes.as_slice()).unwrap_err();
+
+        assert_eq!(error.kind(), ErrorKind::InvalidData, "{name}");
+        assert_eq!(error.to_string(), expected, "{name}");
     }
+}
 
-    cases.push(with_extension(original.clone(), &[1, 2, 3]));
-    cases.push(with_extension(original.clone(), &[1, 0, 0, 0, 9, 0, 0, 0]));
+#[test]
+fn test_spz_v4_reads_when_extensions_are_malformed_should_return_error() {
+    let original = given_spz_v4_buffer(3);
 
-    let mut no_flag = with_extension(original, &[1, 0, 0, 0, 0, 0, 0, 0]);
-    no_flag[14] &= !0x2;
-    cases.push(no_flag);
+    let mut no_flag = with_extension(original.clone(), &[1, 0, 0, 0, 0, 0, 0, 0]);
+    no_flag[V4_FLAGS_OFFSET] &= !V4_EXTENSION_FLAG;
 
-    for (index, bytes) in cases.iter().enumerate() {
-        assert!(read(bytes).is_err(), "malformed case {index}");
+    for (name, bytes, expected) in [
+        (
+            "truncated record",
+            with_extension(original.clone(), &[1, 2, 3]),
+            "truncated SPZ v4 extension record",
+        ),
+        (
+            "oversized record",
+            with_extension(original, &[1, 0, 0, 0, 9, 0, 0, 0]),
+            "SPZ v4 extension exceeds header zone",
+        ),
+        (
+            "missing flag",
+            no_flag,
+            "SPZ v4 extension zone without extension flag",
+        ),
+    ] {
+        let error = SpzGaussians::read_from(&mut bytes.as_slice()).unwrap_err();
+
+        assert_eq!(error.kind(), ErrorKind::InvalidData, "{name}");
+        assert_eq!(error.to_string(), expected, "{name}");
     }
 }
 
 #[test]
 fn test_spz_v4_reads_when_data_is_truncated_or_has_trailing_bytes_should_return_error() {
     for degree in [0, 3, 4] {
-        let original = spz_buffer(degree);
+        let original = given_spz_v4_buffer(degree);
+        let data_offset =
+            V4_HEADER_SIZE + usize::from(original[V4_STREAM_COUNT_OFFSET]) * V4_TOC_ENTRY_SIZE;
 
         for length in 0..original.len() {
-            assert!(
-                read(&original[..length]).is_err(),
+            let error = SpzGaussians::read_from(&mut &original[..length]).unwrap_err();
+
+            assert_eq!(
+                error.kind(),
+                if length < data_offset {
+                    ErrorKind::UnexpectedEof
+                } else {
+                    ErrorKind::InvalidData
+                },
                 "SH{degree}, truncation {length}"
             );
         }
@@ -1295,38 +1482,61 @@ fn test_spz_v4_reads_when_data_is_truncated_or_has_trailing_bytes_should_return_
         let mut extra = original.clone();
         extra.push(0);
 
-        assert!(read(&extra).is_err());
+        let error = SpzGaussians::read_from(&mut extra.as_slice()).unwrap_err();
+
+        assert_eq!(error.kind(), ErrorKind::InvalidData);
+        assert_eq!(error.to_string(), "extra SPZ v4 container data");
     }
 }
 
 #[test]
 fn test_spz_v4_reads_when_frame_boundaries_or_sizes_are_invalid_should_return_error() {
-    let original = spz_buffer(3);
-    let start = 32 + usize::from(original[15]) * 16;
-    let compressed_size = u64::from_le_bytes(original[32..40].try_into().unwrap()) as usize;
+    let original = given_spz_v4_buffer(3);
+    let start = V4_HEADER_SIZE + usize::from(original[V4_STREAM_COUNT_OFFSET]) * V4_TOC_ENTRY_SIZE;
+    let compressed_size = u64::from_le_bytes(
+        original[V4_HEADER_SIZE..V4_HEADER_SIZE + 8]
+            .try_into()
+            .unwrap(),
+    ) as usize;
 
     let mut corrupt = original.clone();
     corrupt[start] = 0;
 
-    assert!(read(&corrupt).is_err());
+    assert_eq!(
+        SpzGaussians::read_from(&mut corrupt.as_slice())
+            .unwrap_err()
+            .kind(),
+        ErrorKind::InvalidData
+    );
 
     // Extend the first TOC range with bytes that are not part of its frame.
     let mut padded = original.clone();
-    set_u64(&mut padded, 32, compressed_size as u64 + 1);
+    set_u64(&mut padded, V4_HEADER_SIZE, compressed_size as u64 + 1);
     padded.insert(start + compressed_size, 0);
 
-    assert!(read(&padded).is_err());
+    let error = SpzGaussians::read_from(&mut padded.as_slice()).unwrap_err();
+
+    assert_eq!(error.kind(), ErrorKind::InvalidData);
+    assert_eq!(
+        error.to_string(),
+        "SPZ v4 frame does not consume its TOC entry"
+    );
 
     // Shorten its TOC range, preventing the decoder from reading the next stream.
     let mut short = original;
-    set_u64(&mut short, 32, compressed_size as u64 - 1);
+    set_u64(&mut short, V4_HEADER_SIZE, compressed_size as u64 - 1);
 
-    assert!(read(&short).is_err());
+    assert_eq!(
+        SpzGaussians::read_from(&mut short.as_slice())
+            .unwrap_err()
+            .kind(),
+        ErrorKind::InvalidData
+    );
 }
 
 #[test]
 fn test_spz_v4_reads_when_checksum_is_invalid_should_return_error() {
-    let original = sh_degree_gaussians(3);
+    let original = given_spz_v4_gaussians(3);
     let mut positions = Vec::new();
     original.positions.write_to(&mut positions).unwrap();
 
@@ -1335,13 +1545,16 @@ fn test_spz_v4_reads_when_checksum_is_invalid_should_return_error() {
         positions.as_slice(),
         ruzstd::encoding::CompressionLevel::Fastest,
     );
-    let bytes = replace_frame(spz_buffer(3), 0, &frame);
+    let bytes = replace_frame(given_spz_v4_buffer(3), 0, &frame);
 
-    assert_eq!(read(&bytes).unwrap(), original);
+    assert_eq!(
+        SpzGaussians::read_from(&mut bytes.as_slice()).unwrap(),
+        original
+    );
 
     *frame.last_mut().unwrap() ^= 1;
-    let corrupt = replace_frame(spz_buffer(3), 0, &frame);
-    let error = read(&corrupt).unwrap_err();
+    let corrupt = replace_frame(given_spz_v4_buffer(3), 0, &frame);
+    let error = SpzGaussians::read_from(&mut corrupt.as_slice()).unwrap_err();
 
     assert_eq!(error.kind(), ErrorKind::InvalidData);
     assert!(error.to_string().contains("checksum"));
@@ -1349,7 +1562,7 @@ fn test_spz_v4_reads_when_checksum_is_invalid_should_return_error() {
 
 #[test]
 fn test_spz_v4_finish_when_final_frame_checksum_is_invalid_should_return_error() {
-    let original = sh_degree_gaussians(0);
+    let original = given_spz_v4_gaussians(0);
     let mut rotations = Vec::new();
     original.rotations.write_to(&mut rotations).unwrap();
 
@@ -1357,9 +1570,12 @@ fn test_spz_v4_finish_when_final_frame_checksum_is_invalid_should_return_error()
         rotations.as_slice(),
         ruzstd::encoding::CompressionLevel::Fastest,
     );
-    let mut bytes = replace_frame(spz_buffer(0), 4, &frame);
+    let mut bytes = replace_frame(given_spz_v4_buffer(0), 4, &frame);
 
-    assert_eq!(read(&bytes).unwrap(), original);
+    assert_eq!(
+        SpzGaussians::read_from(&mut bytes.as_slice()).unwrap(),
+        original
+    );
 
     *bytes.last_mut().unwrap() ^= 1;
 
@@ -1371,53 +1587,145 @@ fn test_spz_v4_finish_when_final_frame_checksum_is_invalid_should_return_error()
 
     let error = reader.finish().unwrap_err();
 
+    assert_eq!(error.kind(), ErrorKind::InvalidData);
     assert!(error.to_string().contains("checksum"));
 }
 
 #[test]
 fn test_spz_v4_finish_when_batch_is_incomplete_should_return_error() {
-    assert!(
-        SpzBatchReader::new(spz_buffer(0).as_slice())
+    assert_eq!(
+        SpzBatchReader::new(given_spz_v4_buffer(0).as_slice())
             .unwrap()
             .finish()
-            .is_err()
+            .unwrap_err()
+            .kind(),
+        ErrorKind::UnexpectedEof
     );
 }
 
 #[test]
-fn test_spz_v3_and_v4_should_decode_smallest_three_rotations_in_the_same_order() {
-    let mut model = sh_degree_gaussians(3);
-    let expected = model.iter_gaussian().collect::<Vec<_>>();
+fn test_spz_smallest_three_rotation_should_match_wire_component_order() {
+    use wgpu_3dgs_core::glam::Quat;
 
-    model.header = SpzGaussiansHeader::new(
-        3,
-        2,
-        model.header.sh_degree(),
-        model.header.fractional_bits(),
-        true,
+    // Largest component is w. Stored x, y, z have magnitudes 181, 90, 45,
+    // with the sign bit set only for y. x occupies the highest stored ten bits.
+    let rotation = SpzGaussianRotation::QuatSmallestThree(
+        ((3u32 << 30) | (181 << 20) | (602 << 10) | 45).to_le_bytes(),
+    );
+    let expected = Quat::from_xyzw(
+        0.25,
+        -0.125,
+        0.0625,
+        (1.0f32 - 0.25f32.powi(2) - 0.125f32.powi(2) - 0.0625f32.powi(2)).sqrt(),
+    );
+
+    for version in [3, 4] {
+        let (mut packed, header) = given_spz_gaussian_and_header(
+            1,
+            &SpzGaussiansFromGaussianSliceOptions {
+                version,
+                sh_degree: SpzGaussianShDegree::new(0).unwrap(),
+                ..Default::default()
+            },
+        );
+        packed.rotation = rotation.clone();
+        let restored =
+            Gaussian::<wgpu_3dgs_core::ShDegree0>::from_spz(packed.as_ref(), &header).unwrap();
+
+        assert!(restored.rot.abs_diff_eq(expected, 1e-3));
+        assert_eq!(
+            restored
+                .to_spz(&header, &Default::default())
+                .unwrap()
+                .rotation,
+            rotation
+        );
+    }
+}
+
+#[test]
+fn test_gaussian_spz_round_trip_when_positions_and_rotations_are_negative_should_preserve_geometry()
+{
+    use wgpu_3dgs_core::{
+        ShDegree0,
+        glam::{Quat, Vec3},
+    };
+
+    for version in SpzGaussiansHeader::SUPPORTED_VERSIONS {
+        let (_, header) = given_spz_gaussian_and_header(
+            1,
+            &SpzGaussiansFromGaussianSliceOptions {
+                version,
+                sh_degree: SpzGaussianShDegree::new(0).unwrap(),
+                ..Default::default()
+            },
+        );
+
+        for rotation in [
+            [-0.9, 0.1, -0.2, 0.3],
+            [0.1, -0.9, 0.2, -0.3],
+            [-0.2, 0.1, -0.9, 0.3],
+            [0.1, -0.2, 0.3, -0.9],
+        ] {
+            let original = Gaussian::<ShDegree0> {
+                pos: Vec3::new(-1.25, -0.0625, 2.5),
+                rot: Quat::from_array(rotation).normalize(),
+                ..given::gaussian_for_sh_degree(0)
+            };
+            let packed = original.to_spz(&header, &Default::default()).unwrap();
+            let restored = Gaussian::<ShDegree0>::from_spz(packed.as_ref(), &header).unwrap();
+
+            assert_eq!(restored.pos, original.pos);
+            assert!((restored.rot.dot(original.rot).abs() - 1.0).abs() < 1e-3);
+        }
+    }
+}
+
+#[test]
+fn test_spz_reads_when_gzip_contains_extra_model_data_should_return_error() {
+    let original = SpzGaussians::from_gaussians_with_options(
+        given::gaussians(),
+        &SpzGaussiansFromGaussianSliceOptions {
+            version: 3,
+            sh_degree: SpzGaussianShDegree::new(3).unwrap(),
+            ..Default::default()
+        },
     )
     .unwrap();
+    let mut decompressed = Vec::new();
+    original.write_decompressed(&mut decompressed).unwrap();
+    decompressed.push(0);
+    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    encoder.write_all(&decompressed).unwrap();
+    let bytes = encoder.finish().unwrap();
 
-    let mut gzip = Vec::new();
-    model.write_to(&mut gzip).unwrap();
+    let error = SpzGaussians::read_from(&mut bytes.as_slice()).unwrap_err();
 
-    assert_eq!(
-        read(&gzip).unwrap().iter_gaussian().collect::<Vec<_>>(),
-        expected
-    );
+    assert_eq!(error.kind(), ErrorKind::InvalidData);
+    assert_eq!(error.to_string(), "extra SPZ data");
+}
+
+#[test]
+#[should_panic(expected = "validated SPZ degree")]
+fn test_spz_iter_gaussian_when_sh_degree_disagrees_with_header_should_panic() {
+    let mut model = given::spz_gaussians();
+    model.shs = SpzGaussiansShs::One(vec![[[128; 3]; 3]; model.len()]);
+
+    model.iter_gaussian().next();
 }
 
 #[test]
 fn test_spz_v4_reads_when_frame_content_size_is_unknown_should_require_exact_attribute_sizes() {
+    let expected = given_spz_v4_gaussians(3);
     let mut positions = Vec::new();
-    sh_degree_gaussians(3)
-        .positions
-        .write_to(&mut positions)
-        .unwrap();
-    let original = spz_buffer(3);
+    expected.positions.write_to(&mut positions).unwrap();
+    let original = given_spz_v4_buffer(3);
     let valid = replace_frame(original.clone(), 0, &raw_frame(&positions));
 
-    assert_eq!(read(&valid).unwrap(), read(&original).unwrap());
+    assert_eq!(
+        SpzGaussians::read_from(&mut valid.as_slice()).unwrap(),
+        expected
+    );
 
     for length in [positions.len() - 1, positions.len() + 1] {
         let mut payload = positions.to_vec();
@@ -1425,27 +1733,85 @@ fn test_spz_v4_reads_when_frame_content_size_is_unknown_should_require_exact_att
 
         let bytes = replace_frame(original.clone(), 0, &raw_frame(&payload));
 
-        assert!(read(&bytes).is_err());
+        let error = SpzGaussians::read_from(&mut bytes.as_slice()).unwrap_err();
+
+        assert_eq!(error.kind(), ErrorKind::InvalidData);
+        assert_eq!(
+            error.to_string(),
+            if length < positions.len() {
+                "SPZ v4 attribute shorter than its declared size"
+            } else {
+                "SPZ v4 attribute exceeds its declared size"
+            }
+        );
     }
 
     let mut oversized_window = raw_frame(&positions);
     oversized_window[5] = 0xff;
 
-    assert!(read(&replace_frame(original, 0, &oversized_window)).is_err());
+    let bytes = replace_frame(original, 0, &oversized_window);
+
+    assert_eq!(
+        SpzGaussians::read_from(&mut bytes.as_slice())
+            .unwrap_err()
+            .kind(),
+        ErrorKind::InvalidData
+    );
 }
 
 #[test]
 fn test_spz_v4_batch_reads_when_frames_have_multiple_zstd_blocks_should_decode_all_gaussians() {
     let count = 20_000u32;
-    let mut bytes = spz_buffer(0);
-    bytes.truncate(32);
-    set_u32(&mut bytes, 8, count);
+    let mut bytes = given_spz_v4_buffer(0);
+    bytes.truncate(V4_HEADER_SIZE);
+    set_u32(&mut bytes, V4_NUM_POINTS_OFFSET, count);
 
-    let frames = [9, 1, 3, 3, 4].map(|width| {
-        let size = count as usize * width;
-        let frame = raw_frame(&vec![0; size]);
+    let header = SpzGaussiansHeader::new(
+        4,
+        count,
+        SpzGaussianShDegree::new(0).expect("valid SH degree"),
+        12,
+        true,
+    )
+    .unwrap();
+    let points = (0..count).map(|index| SpzGaussian {
+        position: SpzGaussianPosition::FixedPoint24(std::array::from_fn(|axis| {
+            (index * 3 + axis as u32).to_le_bytes()[..3]
+                .try_into()
+                .unwrap()
+        })),
+        alpha: index.wrapping_mul(7) as u8,
+        color: [index as u8, (index >> 8) as u8, 37],
+        scale: [53, index.wrapping_mul(11) as u8, 97],
+        rotation: SpzGaussianRotation::QuatSmallestThree([
+            index as u8,
+            (index >> 8) as u8,
+            0x20,
+            0x40,
+        ]),
+        sh: SpzGaussianSh::Zero,
+    });
+    let expected = SpzGaussians::from_iter(header, points).unwrap();
+    let SpzGaussiansPositions::FixedPoint24(positions) = &expected.positions else {
+        panic!("v4 positions");
+    };
+    let SpzGaussiansRotations::QuatSmallestThree(rotations) = &expected.rotations else {
+        panic!("v4 rotations");
+    };
+    let fields: [&[u8]; 5] = [
+        bytemuck::cast_slice(positions),
+        &expected.alphas,
+        bytemuck::cast_slice(&expected.colors),
+        bytemuck::cast_slice(&expected.scales),
+        bytemuck::cast_slice(rotations),
+    ];
+
+    assert!(fields[0].len() > ZSTD_BLOCK_SIZE);
+
+    let frames = fields.map(|field| {
+        let frame = raw_frame(field);
         bytes.extend_from_slice(&(frame.len() as u64).to_le_bytes());
-        bytes.extend_from_slice(&(size as u64).to_le_bytes());
+        bytes.extend_from_slice(&(field.len() as u64).to_le_bytes());
 
         frame
     });
@@ -1454,28 +1820,33 @@ fn test_spz_v4_batch_reads_when_frames_have_multiple_zstd_blocks_should_decode_a
         bytes.extend_from_slice(&frame);
     }
 
-    let mut reader = SpzBatchReader::new(ShortRead(&bytes)).unwrap();
+    let mut reader = SpzBatchReader::new(given::ShortRead(&bytes)).unwrap();
+    let mut completed = 0;
 
     while !reader.progress().done {
-        reader.step(NonZeroUsize::new(127).unwrap()).unwrap();
+        let progress = reader.step(NonZeroUsize::new(127).unwrap()).unwrap();
+
+        assert!(progress.completed_units > completed);
+        assert!(progress.completed_units - completed <= 127);
+
+        completed = progress.completed_units;
     }
 
     let model = reader.finish().unwrap();
 
-    assert_eq!(model.len(), count as usize);
-    assert!(model.alphas.iter().all(|&value| value == 0));
+    assert_eq!(model, expected);
     assert_eq!(model.iter_gaussian().count(), count as usize);
 }
 
 #[test]
 fn test_spz_v4_batch_reads_when_model_is_empty_should_retain_degree_without_frames() {
     for degree in 0..=4 {
-        let mut bytes = spz_buffer(degree);
-        bytes.truncate(32);
-        set_u32(&mut bytes, 8, 0);
-        bytes[15] = 0;
+        let mut bytes = given_spz_v4_buffer(degree);
+        bytes.truncate(V4_HEADER_SIZE);
+        set_u32(&mut bytes, V4_NUM_POINTS_OFFSET, 0);
+        bytes[V4_STREAM_COUNT_OFFSET] = 0;
 
-        let reader = SpzBatchReader::new(ShortRead(&bytes)).unwrap();
+        let reader = SpzBatchReader::new(given::ShortRead(&bytes)).unwrap();
 
         assert!(reader.progress().done);
 
@@ -1489,13 +1860,43 @@ fn test_spz_v4_batch_reads_when_model_is_empty_should_retain_degree_without_fram
 
 #[test]
 fn test_spz_decompressed_io_when_version_is_four_should_fail_without_emitting_bytes() {
-    let model = sh_degree_gaussians(4);
+    let model = given_spz_v4_gaussians(4);
     let mut output = Vec::new();
 
-    assert!(model.write_decompressed(&mut output).is_err());
+    let error = model.write_decompressed(&mut output).unwrap_err();
+
+    assert_eq!(error.kind(), ErrorKind::InvalidInput);
+    assert_eq!(
+        error.to_string(),
+        "SPZ v4 does not use the legacy decompressed layout"
+    );
     assert!(output.is_empty());
-    assert!(SpzGaussians::read_gaussians(&mut &[][..], model.header).is_err());
-    assert!(SpzGaussians::read_decompressed(&mut spz_buffer(0).as_slice()).is_err());
+
+    let mut input = b"unread body".as_slice();
+    let error = SpzGaussians::read_gaussians(&mut input, model.header).unwrap_err();
+
+    assert_eq!(error.kind(), ErrorKind::InvalidInput);
+    assert_eq!(
+        error.to_string(),
+        "SPZ v4 does not use the legacy decompressed layout"
+    );
+    assert_eq!(input, b"unread body");
+
+    // A valid in-memory header isolates layout rejection from wire-header validation.
+    let bytes = bytemuck::bytes_of(model.header.as_pod());
+
+    for result in [
+        SpzGaussians::read_header(&mut &bytes[..]).map(|_| ()),
+        SpzGaussians::read_decompressed(&mut &bytes[..]).map(|_| ()),
+    ] {
+        let error = result.unwrap_err();
+
+        assert_eq!(error.kind(), ErrorKind::InvalidInput);
+        assert_eq!(
+            error.to_string(),
+            "SPZ v4 does not use the legacy decompressed layout"
+        );
+    }
 }
 
 #[test]
@@ -1509,34 +1910,32 @@ fn test_spz_gaussians_header_should_default_to_version_four_and_support_legacy_m
 }
 
 #[test]
-fn test_spz_gaussian_sh_when_degree_is_four_should_preserve_mutated_coefficients() {
-    let mut sh = SpzGaussianSh::Four([[128; 3]; 24]);
-
-    assert_eq!(sh.degree().get(), 4);
-    assert_eq!(sh.degree().num_coefficients(), 24);
-
-    sh.iter_mut().last().unwrap()[2] = 255;
-
-    assert_eq!(sh.iter().last().unwrap(), &[128, 128, 255]);
-    assert!(SpzGaussianShDegree::new(5).is_none());
-    assert!(SpzGaussiansShs::Four(Vec::new()).is_empty());
-}
-
-#[test]
 fn test_spz_v4_writes_should_preserve_field_layout_and_emit_exact_toc_ranges() {
     for degree in 0..=4 {
-        let original = sh_degree_gaussians(degree);
+        let original = given_spz_v4_gaussians(degree);
         let mut bytes = Vec::new();
         original.write_to(&mut bytes).unwrap();
 
-        assert_eq!(read(&bytes).unwrap(), original);
         assert_eq!(
-            &bytes[..15],
-            &bytemuck::bytes_of(original.header.as_pod())[..15]
+            SpzGaussians::read_from(&mut bytes.as_slice()).unwrap(),
+            original
         );
-        assert_eq!(bytes[15], if degree == 0 { 5 } else { 6 });
-        assert_eq!(&bytes[16..20], &32u32.to_le_bytes());
-        assert_eq!(&bytes[20..32], &[0; 12]);
+        assert_eq!(
+            &bytes[..V4_STREAM_COUNT_OFFSET],
+            &bytemuck::bytes_of(original.header.as_pod())[..V4_STREAM_COUNT_OFFSET]
+        );
+        assert_eq!(
+            bytes[V4_STREAM_COUNT_OFFSET],
+            if degree == 0 { 5 } else { 6 }
+        );
+        assert_eq!(
+            &bytes[V4_TOC_OFFSET..V4_RESERVED_OFFSET],
+            &(V4_HEADER_SIZE as u32).to_le_bytes()
+        );
+        assert_eq!(
+            &bytes[V4_RESERVED_OFFSET..V4_HEADER_SIZE],
+            &[0; V4_HEADER_SIZE - V4_RESERVED_OFFSET]
+        );
 
         let SpzGaussiansPositions::FixedPoint24(positions) = &original.positions else {
             panic!("v4 positions");
@@ -1559,7 +1958,8 @@ fn test_spz_v4_writes_should_preserve_field_layout_and_emit_exact_toc_ranges() {
             bytemuck::cast_slice(rotations),
             shs,
         ];
-        let mut offset = 32 + usize::from(bytes[15]) * 16;
+        let mut offset =
+            V4_HEADER_SIZE + usize::from(bytes[V4_STREAM_COUNT_OFFSET]) * V4_TOC_ENTRY_SIZE;
 
         // Parse the wire layout separately from the production container reader.
         for (index, field) in fields
@@ -1567,11 +1967,11 @@ fn test_spz_v4_writes_should_preserve_field_layout_and_emit_exact_toc_ranges() {
             .filter(|field| !field.is_empty())
             .enumerate()
         {
-            let toc = 32 + index * 16;
+            let toc = V4_HEADER_SIZE + index * V4_TOC_ENTRY_SIZE;
             let compressed_size =
                 u64::from_le_bytes(bytes[toc..toc + 8].try_into().unwrap()) as usize;
             let uncompressed_size =
-                u64::from_le_bytes(bytes[toc + 8..toc + 16].try_into().unwrap());
+                u64::from_le_bytes(bytes[toc + 8..toc + V4_TOC_ENTRY_SIZE].try_into().unwrap());
 
             assert_eq!(uncompressed_size, field.len() as u64);
 
@@ -1596,12 +1996,12 @@ fn test_spz_v4_writes_should_preserve_field_layout_and_emit_exact_toc_ranges() {
 #[test]
 fn test_spz_v4_batch_writes_when_output_has_short_writes_and_no_seek_should_respect_item_budgets() {
     for degree in 0..=4 {
-        let original = sh_degree_gaussians(degree);
+        let original = given_spz_v4_gaussians(degree);
         let mut expected = Vec::new();
         original.write_to(&mut expected).unwrap();
 
         for budget in [1, 2, 4096] {
-            let mut writer = SpzBatchWriter::new(ShortWrite::default(), &original).unwrap();
+            let mut writer = SpzBatchWriter::new(given::ShortWrite::default(), &original).unwrap();
             let mut completed = 0;
 
             while !writer.progress().done {
@@ -1623,7 +2023,7 @@ fn test_spz_v4_batch_writes_when_output_has_short_writes_and_no_seek_should_resp
         }
 
         let unified = Gaussians::from(original.clone());
-        let mut writer = GaussiansBatchWriter::new(ShortWrite::default(), &unified).unwrap();
+        let mut writer = GaussiansBatchWriter::new(given::ShortWrite::default(), &unified).unwrap();
 
         while !writer.progress().done {
             writer.step(NonZeroUsize::new(1).unwrap()).unwrap();
@@ -1643,13 +2043,7 @@ fn test_spz_v4_native_and_unified_conversions_should_write_all_sh_degrees() {
             antialiased: true,
             ..Default::default()
         };
-        let native = if degree == 4 {
-            (0..2)
-                .map(|seed| AnyGaussian::Four(given::gaussian_for_sh_degree(seed)))
-                .collect()
-        } else {
-            given::runtime_gaussians(degree)
-        };
+        let native = given::runtime_gaussians(degree);
         let original = SpzGaussians::from_gaussians_with_options(&native, &options).unwrap();
         let path = given::temp_file_path(".spz");
         original.write_to_file(&path).unwrap();
@@ -1667,7 +2061,10 @@ fn test_spz_v4_native_and_unified_conversions_should_write_all_sh_degrees() {
             let mut bytes = Vec::new();
             converted.write_to(&mut bytes).unwrap();
 
-            assert_eq!(read(&bytes).unwrap(), original);
+            assert_eq!(
+                SpzGaussians::read_from(&mut bytes.as_slice()).unwrap(),
+                original
+            );
         }
     }
 }
@@ -1684,87 +2081,108 @@ fn test_spz_v4_batch_writes_when_model_is_empty_should_emit_only_the_header_for_
             },
         )
         .unwrap();
-        let writer = SpzBatchWriter::new(ShortWrite::default(), &original).unwrap();
+        let writer = SpzBatchWriter::new(given::ShortWrite::default(), &original).unwrap();
 
         assert!(writer.progress().done);
 
         let bytes = writer.finish().unwrap().0;
 
-        assert_eq!(bytes.len(), 32);
-        assert_eq!(bytes[15], 0);
-        assert_eq!(read(&bytes).unwrap(), original);
+        assert_eq!(bytes.len(), V4_HEADER_SIZE);
+        assert_eq!(bytes[V4_STREAM_COUNT_OFFSET], 0);
+        assert_eq!(
+            SpzGaussians::read_from(&mut bytes.as_slice()).unwrap(),
+            original
+        );
     }
 }
 
 #[test]
 fn test_spz_v4_writes_when_extensions_were_discarded_should_clear_extension_flag() {
-    let mut original = read(&with_extension(spz_buffer(4), &[1, 0, 0, 0, 0, 0, 0, 0])).unwrap();
+    let extended = with_extension(given_spz_v4_buffer(4), &[1, 0, 0, 0, 0, 0, 0, 0]);
+    let original = SpzGaussians::read_from(&mut extended.as_slice()).unwrap();
     let mut bytes = Vec::new();
     original.write_to(&mut bytes).unwrap();
 
-    assert_eq!(bytes[14], 1);
-    assert_eq!(&bytes[16..20], &32u32.to_le_bytes());
+    assert_eq!(bytes[V4_FLAGS_OFFSET] & V4_EXTENSION_FLAG, 0);
+    assert_eq!(bytes[V4_FLAGS_OFFSET], 1);
+    assert_eq!(
+        &bytes[V4_TOC_OFFSET..V4_RESERVED_OFFSET],
+        &(V4_HEADER_SIZE as u32).to_le_bytes()
+    );
 
-    original.header = SpzGaussiansHeader::new(4, 2, original.header.sh_degree(), 12, true).unwrap();
-
-    assert_eq!(read(&bytes).unwrap(), original);
+    assert_eq!(
+        SpzGaussians::read_from(&mut bytes.as_slice()).unwrap(),
+        given_spz_v4_gaussians(4)
+    );
 }
 
 #[test]
 fn test_spz_v4_writes_when_fields_are_mismatched_should_return_error_without_emitting_bytes() {
-    let original = sh_degree_gaussians(4);
+    let original = given_spz_v4_gaussians(4);
     let mut cases = Vec::new();
 
     let mut model = original.clone();
     model.header.set_num_points(1);
-    cases.push(model);
+    cases.push(("header count", model));
 
     let mut model = original.clone();
     model.alphas.pop();
-    cases.push(model);
+    cases.push(("alpha count", model));
 
     let mut model = original.clone();
     model.colors.push([0; 3]);
-    cases.push(model);
+    cases.push(("color count", model));
 
     let mut model = original.clone();
     model.scales.clear();
-    cases.push(model);
+    cases.push(("scale count", model));
 
     let mut model = original.clone();
     model.positions = SpzGaussiansPositions::FixedPoint24(Vec::new());
-    cases.push(model);
+    cases.push(("position count", model));
 
     let mut model = original.clone();
     model.positions = SpzGaussiansPositions::Float16(vec![[0; 3]; 2]);
-    cases.push(model);
+    cases.push(("position variant", model));
 
     let mut model = original.clone();
     model.rotations = SpzGaussiansRotations::QuatSmallestThree(Vec::new());
-    cases.push(model);
+    cases.push(("rotation count", model));
 
     let mut model = original.clone();
     model.rotations = SpzGaussiansRotations::QuatFirstThree(vec![[0; 3]; 2]);
-    cases.push(model);
+    cases.push(("rotation variant", model));
 
     let mut model = original.clone();
     model.shs = SpzGaussiansShs::Four(vec![[[0; 3]; 24]]);
-    cases.push(model);
+    cases.push(("SH count", model));
 
     let mut model = original;
     model.shs = SpzGaussiansShs::Three(vec![[[0; 3]; 15]; 2]);
-    cases.push(model);
+    cases.push(("SH degree", model));
 
-    for model in cases {
+    for (name, model) in cases {
         let mut bytes = Vec::new();
+        let error = model.write_to(&mut bytes).unwrap_err();
 
+        assert_eq!(error.kind(), ErrorKind::InvalidInput, "{name}");
         assert_eq!(
-            model.write_to(&mut bytes).unwrap_err().kind(),
-            ErrorKind::InvalidInput
+            error.to_string(),
+            "SPZ field lengths or variants do not match header",
+            "{name}"
         );
-        assert!(bytes.is_empty());
-        assert!(SpzBatchWriter::new(&mut bytes, &model).is_err());
-        assert!(bytes.is_empty());
+        assert!(bytes.is_empty(), "{name}");
+        let error = SpzBatchWriter::new(&mut bytes, &model)
+            .err()
+            .expect("mismatched fields should fail");
+
+        assert_eq!(error.kind(), ErrorKind::InvalidInput, "{name}");
+        assert_eq!(
+            error.to_string(),
+            "SPZ field lengths or variants do not match header",
+            "{name}"
+        );
+        assert!(bytes.is_empty(), "{name}");
     }
 }
 
@@ -1787,7 +2205,9 @@ fn test_spz_v4_header_when_fractional_bits_are_at_supported_limits_should_succee
     let degree = SpzGaussianShDegree::new(4).unwrap();
 
     for fractional_bits in [0, 30] {
-        assert!(SpzGaussiansHeader::new(4, 0, degree, fractional_bits, false).is_ok());
+        let header = SpzGaussiansHeader::new(4, 0, degree, fractional_bits, false).unwrap();
+
+        assert_eq!(header.fractional_bits(), fractional_bits);
     }
 }
 
@@ -1796,7 +2216,13 @@ fn test_spz_v4_header_when_fractional_bits_are_out_of_range_should_return_error(
     let degree = SpzGaussianShDegree::new(4).unwrap();
 
     for fractional_bits in [31, 255] {
-        assert!(SpzGaussiansHeader::new(4, 0, degree, fractional_bits, false).is_err());
+        let error = SpzGaussiansHeader::new(4, 0, degree, fractional_bits, false).unwrap_err();
+
+        assert_eq!(error.kind(), ErrorKind::InvalidData);
+        assert_eq!(
+            error.to_string(),
+            "invalid SPZ v4 fractional bits, flags or reserved byte"
+        );
     }
 }
 
@@ -1807,24 +2233,40 @@ fn test_spz_v4_header_when_flags_or_reserved_bytes_are_invalid_should_return_err
         .unwrap()
         .as_pod();
 
-    for pod in [
-        SpzGaussiansHeaderPod { flags: 0x80, ..pod },
-        SpzGaussiansHeaderPod { reserved: 1, ..pod },
+    for (name, pod) in [
+        ("flags", SpzGaussiansHeaderPod { flags: 0x80, ..pod }),
+        (
+            "reserved byte",
+            SpzGaussiansHeaderPod { reserved: 1, ..pod },
+        ),
     ] {
-        assert!(SpzGaussiansHeader::try_from_pod(pod).is_err());
+        let error = SpzGaussiansHeader::try_from_pod(pod).unwrap_err();
+
+        assert_eq!(error.kind(), ErrorKind::InvalidData, "{name}");
+        assert_eq!(
+            error.to_string(),
+            "invalid SPZ v4 fractional bits, flags or reserved byte",
+            "{name}"
+        );
     }
 }
 
 #[test]
 fn test_spz_v4_writes_when_output_fails_should_propagate_error() {
-    let original = sh_degree_gaussians(4);
+    let original = given_spz_v4_gaussians(4);
     let mut complete = Vec::new();
     original.write_to(&mut complete).unwrap();
 
-    for limit in [0, 31, 32, 127, complete.len() - 1] {
+    for limit in [
+        0,
+        V4_HEADER_SIZE - 1,
+        V4_HEADER_SIZE,
+        127,
+        complete.len() - 1,
+    ] {
         assert_eq!(
             original
-                .write_to(&mut FailingWrite(limit))
+                .write_to(&mut given::FailingWrite(limit))
                 .unwrap_err()
                 .kind(),
             ErrorKind::BrokenPipe
@@ -1834,7 +2276,7 @@ fn test_spz_v4_writes_when_output_fails_should_propagate_error() {
 
 #[test]
 fn test_spz_v4_batch_writer_finish_when_incomplete_should_return_error_without_writing() {
-    let original = sh_degree_gaussians(4);
+    let original = given_spz_v4_gaussians(4);
     let mut bytes = Vec::new();
     let mut writer = SpzBatchWriter::new(&mut bytes, &original).unwrap();
     writer.step(NonZeroUsize::new(1).unwrap()).unwrap();
@@ -1848,7 +2290,7 @@ fn test_spz_v4_batch_writer_finish_when_incomplete_should_return_error_without_w
 
 #[test]
 fn test_spz_v4_writes_when_attributes_span_multiple_blocks_should_compress_and_round_trip() {
-    let original = sh_degree_gaussians(4);
+    let original = given_spz_v4_gaussians(4);
     let point = original.iter().next().unwrap().to_inner_owned();
     let mut header = original.header;
     header.set_num_points(20_000);
@@ -1865,5 +2307,8 @@ fn test_spz_v4_writes_when_attributes_span_multiple_blocks_should_compress_and_r
         bytes.len() < 20_000,
         "repetitive fields should be compressed"
     );
-    assert_eq!(read(&bytes).unwrap(), model);
+    assert_eq!(
+        SpzGaussians::read_from(&mut bytes.as_slice()).unwrap(),
+        model
+    );
 }

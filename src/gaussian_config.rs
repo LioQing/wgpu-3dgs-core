@@ -269,25 +269,25 @@ pub use ShSingle as GaussianShSingleConfig;
 mod tests {
     use super::*;
 
+    fn assert_same_type<T>(_: T, _: T) {}
+
     #[test]
     fn test_legacy_names_should_remain_usable_as_types_and_values() {
-        fn same_type<T>(_: T, _: T) {}
-
-        same_type(
+        assert_same_type(
             ShSingle::<ShDegree3>(std::marker::PhantomData),
             GaussianShSingleConfig(std::marker::PhantomData),
         );
-        same_type(
+        assert_same_type(
             ShHalf::<ShDegree3>(std::marker::PhantomData),
             GaussianShHalfConfig(std::marker::PhantomData),
         );
-        same_type(
+        assert_same_type(
             ShNorm8::<ShDegree3>(std::marker::PhantomData),
             GaussianShNorm8Config(std::marker::PhantomData),
         );
-        same_type(ShNone, GaussianShNoneConfig);
-        same_type(CovRotScale, GaussianCov3dRotScaleConfig);
-        same_type(CovSingle, GaussianCov3dSingleConfig);
-        same_type(CovHalf, GaussianCov3dHalfConfig);
+        assert_same_type(ShNone, GaussianShNoneConfig);
+        assert_same_type(CovRotScale, GaussianCov3dRotScaleConfig);
+        assert_same_type(CovSingle, GaussianCov3dSingleConfig);
+        assert_same_type(CovHalf, GaussianCov3dHalfConfig);
     }
 }

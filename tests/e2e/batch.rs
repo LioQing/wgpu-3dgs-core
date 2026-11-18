@@ -1,4 +1,8 @@
-use std::{cell::Cell, io::ErrorKind, num::NonZeroUsize};
+use std::{
+    cell::Cell,
+    io::{BufReader, ErrorKind},
+    num::NonZeroUsize,
+};
 
 use wgpu_3dgs_core::{
     BatchRead, BatchWrite, GaussianStream, Gaussians, GaussiansBatchReader, GaussiansBatchWriter,
@@ -55,7 +59,7 @@ fn test_ply_stream_when_reading_batches_and_single_items_should_share_progress()
 }
 
 #[test]
-fn test_ply_batch_when_finish_is_incomplete_should_return_error_and_round_trip() {
+fn test_ply_batch_writer_finish_when_incomplete_should_return_error() {
     let original = given::ply_gaussians();
     let mut bytes = Vec::new();
     let mut writer = PlyBatchWriter::new(&mut bytes, &original).unwrap();
@@ -65,26 +69,56 @@ fn test_ply_batch_when_finish_is_incomplete_should_return_error_and_round_trip()
         writer.finish().unwrap_err().kind(),
         ErrorKind::UnexpectedEof
     );
+}
 
-    let mut writer = PlyBatchWriter::new(Vec::new(), &original).unwrap();
+#[test]
+fn test_ply_batch_should_round_trip_in_bounded_steps() {
+    let original = given::ply_gaussians();
+    let mut writer = PlyBatchWriter::new(given::ShortWrite::default(), &original).unwrap();
+    let mut completed = 0;
+
     while !BatchWrite::progress(&writer).done {
-        writer.step(one()).unwrap();
-    }
-    let bytes = writer.finish().unwrap();
-    let loader = PlyBatchReader::new(bytes.as_slice()).unwrap();
-    assert_eq!(
-        loader.finish().unwrap_err().kind(),
-        ErrorKind::UnexpectedEof
-    );
+        let progress = writer.step(one()).unwrap();
 
-    let mut loader = PlyBatchReader::new(bytes.as_slice()).unwrap();
-    while !BatchRead::progress(&loader).done {
-        loader.step(one()).unwrap();
+        assert_eq!(progress.completed_units, completed + 1);
+
+        completed = progress.completed_units;
     }
+
+    let progress = writer.progress();
+    assert_eq!(writer.step(one()).unwrap(), progress);
+    let bytes = writer.finish().unwrap().0;
+    let mut loader = PlyBatchReader::new(BufReader::new(given::ShortRead(&bytes))).unwrap();
+    completed = 0;
+
+    while !BatchRead::progress(&loader).done {
+        let progress = loader.step(one()).unwrap();
+
+        assert_eq!(progress.completed_units, completed + 1);
+
+        completed = progress.completed_units;
+    }
+
+    let progress = loader.progress();
+    assert_eq!(loader.step(one()).unwrap(), progress);
     assert_eq!(loader.finish().unwrap(), original);
     assert_eq!(
         PlyGaussians::read_from(&mut bytes.as_slice()).unwrap(),
         original
+    );
+}
+
+#[test]
+fn test_ply_batch_reader_finish_when_incomplete_should_return_error() {
+    let original = given::ply_gaussians();
+    let mut bytes = Vec::new();
+    original.write_to(&mut bytes).unwrap();
+    let mut loader = PlyBatchReader::new(bytes.as_slice()).unwrap();
+    assert_eq!(loader.step(one()).unwrap().completed_units, 1);
+
+    assert_eq!(
+        loader.finish().unwrap_err().kind(),
+        ErrorKind::UnexpectedEof
     );
 }
 
@@ -127,7 +161,7 @@ fn test_ply_batch_writer_from_iter_should_pull_only_declared_count_in_steps() {
 
 #[test]
 fn test_ply_batch_writer_from_iter_when_degree_is_invalid_should_fail_before_writing() {
-    for degree in 5..=u8::MAX {
+    for degree in [5, u8::MAX] {
         let mut bytes = Vec::new();
         let error = PlyBatchWriter::from_iter(
             &mut bytes,
@@ -189,6 +223,92 @@ fn test_ply_batch_writer_from_iter_when_item_fails_should_propagate_error() {
         ErrorKind::InvalidData
     );
     assert_eq!(writer.progress().completed_units, 1);
+    assert!(!writer.progress().done);
+}
+
+#[test]
+fn test_ply_batch_writer_from_iter_when_sh_count_mismatches_should_not_write_invalid_record() {
+    let original = given::ply_gaussians();
+    let mut invalid = original.gaussians[1].clone();
+    invalid.sh.pop();
+    let records = [Ok(original.gaussians[0].clone()), Ok(invalid)];
+    let mut bytes = Vec::new();
+    let mut writer = PlyBatchWriter::from_iter(&mut bytes, 2, 3, records.into_iter()).unwrap();
+    let error = writer.step(NonZeroUsize::new(2).unwrap()).unwrap_err();
+
+    assert_eq!(error.kind(), ErrorKind::InvalidInput);
+    assert_eq!(
+        error.to_string(),
+        "PLY Gaussian SH count does not match the degree"
+    );
+    assert_eq!(writer.progress().completed_units, 1);
+    assert!(!writer.progress().done);
+    drop(writer);
+
+    let mut input = bytes.as_slice();
+    let header = PlyGaussians::read_header(&mut input).unwrap();
+    let mut stream = PlyGaussianStream::from_header(&mut input, header);
+
+    assert_eq!(stream.next().unwrap().unwrap(), original.gaussians[0]);
+    drop(stream);
+    assert!(input.is_empty());
+}
+
+#[test]
+fn test_ply_batch_reader_when_record_is_truncated_should_keep_progress_and_return_error() {
+    let original = given::ply_gaussians();
+    let mut bytes = Vec::new();
+    original.write_to(&mut bytes).unwrap();
+    bytes.pop();
+    let mut reader = PlyBatchReader::new(bytes.as_slice()).unwrap();
+
+    assert_eq!(
+        reader
+            .step(NonZeroUsize::new(2).unwrap())
+            .unwrap_err()
+            .kind(),
+        ErrorKind::UnexpectedEof
+    );
+    assert_eq!(reader.progress().completed_units, 1);
+    assert!(!reader.progress().done);
+    assert_eq!(
+        reader.finish().unwrap_err().kind(),
+        ErrorKind::UnexpectedEof
+    );
+}
+
+#[test]
+fn test_ply_batch_writer_when_output_fails_should_propagate_error() {
+    let original = given::ply_gaussians();
+    let mut bytes = Vec::new();
+    original.write_to(&mut bytes).unwrap();
+    let mut body = bytes.as_slice();
+    PlyGaussians::read_header(&mut body).unwrap();
+    let header_size = bytes.len() - body.len();
+
+    for limit in [0, header_size, header_size + 1] {
+        assert_eq!(
+            original
+                .write_to(&mut given::FailingWrite(limit))
+                .unwrap_err()
+                .kind(),
+            ErrorKind::BrokenPipe
+        );
+    }
+
+    let error = PlyBatchWriter::new(given::FailingWrite(0), &original)
+        .err()
+        .expect("header write should fail");
+
+    assert_eq!(error.kind(), ErrorKind::BrokenPipe);
+
+    let mut writer = PlyBatchWriter::new(given::FailingWrite(header_size + 1), &original).unwrap();
+
+    assert_eq!(
+        writer.step(one()).unwrap_err().kind(),
+        ErrorKind::BrokenPipe
+    );
+    assert_eq!(writer.progress().completed_units, 0);
     assert!(!writer.progress().done);
 }
 
@@ -283,6 +403,7 @@ fn test_spz_batch_when_gzip_trailer_is_truncated_should_return_error() {
         given::gaussians(),
         &SpzGaussiansFromGaussianSliceOptions {
             version: 3,
+            sh_degree: SpzGaussianShDegree::new(3).expect("valid SH degree"),
             ..Default::default()
         },
     )
@@ -297,11 +418,14 @@ fn test_spz_batch_when_gzip_trailer_is_truncated_should_return_error() {
         reader.step(one()).unwrap();
     }
 
-    assert!(reader.finish().is_err());
+    assert_eq!(
+        reader.finish().unwrap_err().kind(),
+        ErrorKind::UnexpectedEof
+    );
 }
 
 #[test]
-fn test_ply_batch_when_empty_should_be_already_done() {
+fn test_ply_batch_when_model_is_empty_should_be_already_done() {
     let original = PlyGaussians::try_from(Vec::new()).unwrap();
     let bytes = PlyBatchWriter::new(Vec::new(), &original)
         .unwrap()
@@ -333,7 +457,7 @@ fn test_ply_batch_writer_from_iter_when_count_is_zero_should_not_poll_iterator()
 }
 
 #[test]
-fn test_spz_batch_when_empty_should_be_already_done() {
+fn test_spz_batch_when_model_is_empty_should_be_already_done() {
     let original = SpzGaussians {
         header: SpzGaussiansHeader::new(3, 0, SpzGaussianShDegree::new(0).unwrap(), 12, false)
             .unwrap(),

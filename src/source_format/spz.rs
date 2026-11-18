@@ -1061,13 +1061,20 @@ impl SpzGaussians {
 
     /// Get an iterator over Gaussian references.
     pub fn iter<'a>(&'a self) -> impl ExactSizeIterator<Item = SpzGaussianRef<'a>> + 'a {
+        let shs = match &self.shs {
+            SpzGaussiansShs::Zero => {
+                itertools::Either::Left(std::iter::repeat_n(SpzGaussianShRef::Zero, self.len()))
+            }
+            _ => itertools::Either::Right(self.shs.iter()),
+        };
+
         itertools::izip!(
             self.positions.iter(),
             self.scales.iter(),
             self.rotations.iter(),
             self.alphas.iter(),
             self.colors.iter(),
-            self.shs.iter()
+            shs
         )
         .map(
             |(position, scale, rotation, alpha, color, sh)| SpzGaussianRef {

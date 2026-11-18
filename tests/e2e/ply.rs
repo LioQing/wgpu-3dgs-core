@@ -17,78 +17,6 @@ fn sh_degree_gaussians(degree: u8) -> PlyGaussians {
     PlyGaussians::new(vec![gaussian], degree).unwrap()
 }
 
-fn reordered_buffer(ply: &PlyGaussian, degree: u8, encoding: ply_rs::ply::Encoding) -> Vec<u8> {
-    let mut buffer = Vec::new();
-
-    writeln!(buffer, "ply").unwrap();
-    writeln!(buffer, "format {encoding} 1.0").unwrap();
-    writeln!(buffer, "element vertex 1").unwrap();
-
-    let mut properties: Vec<(String, f32)> = [
-        ("x".to_string(), ply.pos.x),
-        ("z".to_string(), ply.pos.z),
-        ("y".to_string(), ply.pos.y),
-        ("nx".to_string(), ply.normal.x),
-        ("ny".to_string(), ply.normal.y),
-        ("nz".to_string(), ply.normal.z),
-        ("f_dc_0".to_string(), ply.color.x),
-        ("f_dc_1".to_string(), ply.color.y),
-        ("f_dc_2".to_string(), ply.color.z),
-    ]
-    .into();
-    properties.extend(
-        ply.sh
-            .iter()
-            .enumerate()
-            .map(|(i, &v)| (format!("f_rest_{i}"), v)),
-    );
-    properties.extend([
-        ("opacity".to_string(), ply.alpha),
-        ("scale_0".to_string(), ply.scale.x),
-        ("scale_1".to_string(), ply.scale.y),
-        ("scale_2".to_string(), ply.scale.z),
-        ("rot_0".to_string(), ply.rot.w),
-        ("rot_1".to_string(), ply.rot.x),
-        ("rot_2".to_string(), ply.rot.y),
-        ("rot_3".to_string(), ply.rot.z),
-    ]);
-
-    assert_eq!(ply.sh.len(), ((degree as usize + 1).pow(2) - 1) * 3);
-
-    for (name, _) in &properties {
-        writeln!(buffer, "property float {name}").unwrap();
-    }
-
-    writeln!(buffer, "end_header").unwrap();
-
-    match encoding {
-        ply_rs::ply::Encoding::Ascii => {
-            writeln!(
-                buffer,
-                "{}",
-                properties
-                    .iter()
-                    .map(|(_, v)| v.to_string())
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            )
-            .unwrap();
-        }
-        ply_rs::ply::Encoding::BinaryLittleEndian => {
-            for (_, v) in properties {
-                buffer.extend(v.to_le_bytes());
-            }
-        }
-        ply_rs::ply::Encoding::BinaryBigEndian => {
-            for (_, v) in properties {
-                buffer.extend(v.to_be_bytes());
-            }
-        }
-    }
-
-    buffer
-}
-
 fn record_values(ply: &PlyGaussian) -> Vec<f32> {
     ply.pos
         .to_array()
@@ -105,12 +33,12 @@ fn record_values(ply: &PlyGaussian) -> Vec<f32> {
 /// Encode test records with a selectable property layout and normal components.
 ///
 /// `custom` reverses known properties and interleaves unknown properties of every
-/// scalar type. Bits 0, 1, and 2 of `normals` include nx, ny, and nz, respectively.
+/// scalar type. `normals` selects whether nx, ny, and nz are present, respectively.
 fn layout_buffer(
     original: &PlyGaussians,
     encoding: ply_rs::ply::Encoding,
     custom: bool,
-    normals: u8,
+    normals: [bool; 3],
 ) -> Vec<u8> {
     use ply_rs::ply::Encoding;
 
@@ -130,7 +58,7 @@ fn layout_buffer(
 
     let mut properties: Vec<_> = names
         .enumerate()
-        .filter(|(index, _)| !(3..6).contains(index) || normals & (1 << (index - 3)) != 0)
+        .filter(|(index, _)| !(3..6).contains(index) || normals[index - 3])
         .map(|(index, name)| (name, "float", Some(index)))
         .collect();
 
@@ -194,12 +122,17 @@ fn layout_buffer(
 }
 
 #[test]
-fn test_ply_read_layouts_with_small_buffers_should_preserve_records_and_trailing_data() {
+fn test_ply_reads_when_buffers_are_small_should_preserve_records_and_trailing_data() {
     use ply_rs::ply::Encoding;
     use std::{io::BufReader, num::NonZeroUsize};
 
     for degree in 0..=4 {
-        for (custom, normals) in [(false, 7), (true, 7), (true, 0), (true, 1)] {
+        for (custom, normals) in [
+            (false, [true; 3]),
+            (true, [true; 3]),
+            (true, [false; 3]),
+            (true, [true, false, false]),
+        ] {
             let first = sh_degree_gaussians(degree).gaussians.remove(0);
             let mut second = first.clone();
             second.pos += Vec3::new(4.0, -2.0, 0.5);
@@ -210,9 +143,9 @@ fn test_ply_read_layouts_with_small_buffers_should_preserve_records_and_trailing
             let mut original = PlyGaussians::new(vec![first, second], degree).unwrap();
             for gaussian in original.iter_mut() {
                 gaussian.normal = Vec3::new(
-                    if normals & 1 != 0 { 0.25 } else { 0.0 },
-                    if normals & 2 != 0 { -0.5 } else { 0.0 },
-                    if normals & 4 != 0 { 0.75 } else { 0.0 },
+                    if normals[0] { 0.25 } else { 0.0 },
+                    if normals[1] { -0.5 } else { 0.0 },
+                    if normals[2] { 0.75 } else { 0.0 },
                 );
             }
 
@@ -290,7 +223,7 @@ fn test_ply_binary_read_when_custom_or_canonical_should_preserve_float_bits() {
 
     for encoding in [Encoding::BinaryLittleEndian, Encoding::BinaryBigEndian] {
         for custom in [false, true] {
-            let bytes = layout_buffer(&original, encoding, custom, 7);
+            let bytes = layout_buffer(&original, encoding, custom, [true; 3]);
             let actual = PlyGaussians::read_from(&mut bytes.as_slice()).unwrap();
             assert_eq!(
                 record_values(&actual.gaussians[0])
@@ -333,14 +266,19 @@ fn test_ply_binary_read_when_standard_layout_has_extra_property_should_use_full_
 #[test]
 fn test_ply_whole_model_read_when_count_overflows_allocation_should_return_error() {
     let original = sh_degree_gaussians(0);
-    let bytes = layout_buffer(&original, ply_rs::ply::Encoding::Ascii, false, 7);
+    let bytes = layout_buffer(&original, ply_rs::ply::Encoding::Ascii, false, [true; 3]);
     let text = String::from_utf8(bytes).unwrap();
     let text = text.replace(
         "element vertex 1",
         &format!("element vertex {}", usize::MAX),
     );
 
-    assert!(PlyGaussians::read_from(&mut text.as_bytes()).is_err());
+    assert_eq!(
+        PlyGaussians::read_from(&mut text.as_bytes())
+            .unwrap_err()
+            .kind(),
+        std::io::ErrorKind::Other
+    );
 
     // Stream construction still does not allocate storage for the declared model.
     let stream = PlyGaussianStream::new(text.as_bytes()).unwrap();
@@ -362,7 +300,7 @@ fn test_ply_stream_when_record_is_truncated_should_fail_once_and_keep_completed_
             Encoding::BinaryBigEndian,
         ] {
             for custom in [false, true] {
-                let mut bytes = layout_buffer(&original, encoding, custom, 7);
+                let mut bytes = layout_buffer(&original, encoding, custom, [true; 3]);
 
                 if encoding == Encoding::Ascii {
                     // Remove the last token as well as the line ending.
@@ -402,21 +340,32 @@ fn test_ply_ascii_read_should_check_known_values_and_token_counts_but_skip_unkno
     use ply_rs::ply::Encoding;
 
     let original = sh_degree_gaussians(0);
-    let bytes = layout_buffer(&original, Encoding::Ascii, true, 7);
+    let bytes = layout_buffer(&original, Encoding::Ascii, true, [true; 3]);
     let text = String::from_utf8(bytes).unwrap();
     let (header, body) = text.split_once("end_header\n").unwrap();
+    let properties = header
+        .lines()
+        .filter_map(|line| line.strip_prefix("property "))
+        .map(|property| property.split_whitespace().last().unwrap())
+        .collect::<Vec<_>>();
     let mut tokens: Vec<_> = body.split_whitespace().collect();
 
     // Unknown properties are skipped, including float properties.
-    tokens[0] = "ignored";
-    tokens[12] = "ignored_float";
+    tokens[properties
+        .iter()
+        .position(|&name| name == "extra_char")
+        .unwrap()] = "ignored";
+    tokens[properties
+        .iter()
+        .position(|&name| name == "extra_float")
+        .unwrap()] = "ignored_float";
 
     let input = format!("{header}end_header\n{}", tokens.join(" "));
     assert_eq!(
         PlyGaussians::read_from(&mut input.as_bytes()).unwrap(),
         original
     );
-    tokens[1] = "invalid_float";
+    tokens[properties.iter().position(|&name| name == "x").unwrap()] = "invalid_float";
 
     let input = format!("{header}end_header\n{}", tokens.join(" "));
     assert_eq!(
@@ -460,8 +409,8 @@ fn test_ply_color_round_trip_should_preserve_float_precision() {
 fn test_ply_gaussian_from_gaussian_should_equal_to_ply() {
     let gaussian = given::gaussian();
 
-    assert::ply_gaussian_pod(&gaussian.to_ply(), &PlyGaussian::from(&gaussian));
-    assert::ply_gaussian_pod(&gaussian.to_ply(), &PlyGaussian::from(gaussian));
+    assert::ply_gaussian(&gaussian.to_ply(), &PlyGaussian::from(&gaussian));
+    assert::ply_gaussian(&gaussian.to_ply(), &PlyGaussian::from(gaussian));
 }
 
 #[test]
@@ -496,7 +445,7 @@ fn test_ply_round_trip_should_preserve_all_native_degrees() {
         let converted = wgpu_3dgs_core::AnyGaussian::from_ply(&actual.gaussians[0]).unwrap();
 
         assert_eq!(converted.sh_degree().get(), degree);
-        assert::ply_gaussian_pod(&converted.to_ply(), &actual.gaussians[0]);
+        assert::ply_gaussian(&converted.to_ply(), &actual.gaussians[0]);
     }
 }
 
@@ -576,7 +525,7 @@ fn test_ply_stream_from_header_should_preserve_metadata_and_deliver_records() {
 }
 
 #[test]
-fn test_ply_read_when_ascii_or_binary_properties_are_reordered_should_preserve_all_degrees() {
+fn test_ply_read_when_properties_are_reordered_should_preserve_all_degrees() {
     for degree in [1, 2, 3, 4] {
         let original = sh_degree_gaussians(degree);
 
@@ -585,7 +534,7 @@ fn test_ply_read_when_ascii_or_binary_properties_are_reordered_should_preserve_a
             ply_rs::ply::Encoding::BinaryLittleEndian,
             ply_rs::ply::Encoding::BinaryBigEndian,
         ] {
-            let bytes = reordered_buffer(&original.gaussians[0], degree, encoding);
+            let bytes = layout_buffer(&original, encoding, true, [true; 3]);
 
             assert_eq!(
                 PlyGaussians::read_from(&mut bytes.as_slice()).unwrap(),
@@ -640,13 +589,18 @@ fn test_ply_read_header_when_vertex_is_missing_or_sh_is_malformed_should_return_
     );
 
     let original = sh_degree_gaussians(1);
-    let bytes = reordered_buffer(&original.gaussians[0], 1, ply_rs::ply::Encoding::Ascii);
+    let bytes = layout_buffer(&original, ply_rs::ply::Encoding::Ascii, true, [true; 3]);
     let text = String::from_utf8(bytes).unwrap();
 
     for bad in [
         text.replace("property float f_rest_0", "property float f_rest_9"),
         text.replace("property float f_rest_0", "property int f_rest_0"),
         text.replace("property float f_rest_0\n", ""),
+        text.replace("property float nx", "property int nx"),
+        text.replace(
+            "property char extra_char",
+            "property list uchar char extra_char",
+        ),
         text.replace(
             "property float f_rest_0",
             "property list uchar float f_rest_0",
@@ -662,13 +616,11 @@ fn test_ply_read_header_when_vertex_is_missing_or_sh_is_malformed_should_return_
 }
 
 #[test]
-fn test_ply_read_when_missing_value_or_truncated_record_should_error() {
+fn test_ply_read_when_value_is_missing_or_record_is_truncated_should_return_error() {
     let original = sh_degree_gaussians(2);
-    let bytes = reordered_buffer(&original.gaussians[0], 2, ply_rs::ply::Encoding::Ascii);
+    let bytes = layout_buffer(&original, ply_rs::ply::Encoding::Ascii, false, [true; 3]);
     let mut text = String::from_utf8(bytes).unwrap();
-    text.pop();
-
-    let end = text.rfind(' ').unwrap();
+    let end = text.trim_end().rfind(char::is_whitespace).unwrap();
     text.truncate(end);
 
     let result = PlyGaussians::read_from(&mut text.as_bytes());
@@ -698,9 +650,7 @@ fn test_ply_read_when_missing_value_or_truncated_record_should_error() {
 }
 
 #[test]
-fn test_ply_writer_when_sh_mismatches_or_degree_is_invalid_should_return_error() {
-    assert!(PlyGaussians::new(vec![], 5).is_err());
-
+fn test_ply_writer_when_sh_count_mismatches_should_return_error() {
     let mut original = sh_degree_gaussians(4);
     original.gaussians[0].sh.pop();
     let mut bytes = Vec::new();
@@ -712,7 +662,7 @@ fn test_ply_writer_when_sh_mismatches_or_degree_is_invalid_should_return_error()
 }
 
 #[test]
-fn test_ply_file_round_trip_and_collection_constructors_should_preserve_gaussians() {
+fn test_ply_file_round_trip_should_preserve_gaussians() {
     let gaussians = given::ply_gaussians();
     let path = given::temp_file_path(".ply");
 
@@ -721,7 +671,11 @@ fn test_ply_file_round_trip_and_collection_constructors_should_preserve_gaussian
     assert_eq!(PlyGaussians::read_from_file(&path).unwrap(), gaussians);
     assert_eq!(gaussians.len(), 2);
     assert!(!gaussians.is_empty());
+}
 
+#[test]
+fn test_ply_collection_constructors_and_iterators_should_preserve_gaussians() {
+    let gaussians = given::ply_gaussians();
     let from_vec = PlyGaussians::try_from(gaussians.gaussians.clone()).unwrap();
     let mut from_iter = PlyGaussians::from_gaussians(given::gaussians()).unwrap();
 
@@ -733,12 +687,12 @@ fn test_ply_file_round_trip_and_collection_constructors_should_preserve_gaussian
     assert_eq!(from_iter, gaussians);
 
     for (ply, gaussian) in from_iter.iter_mut().zip(gaussians.iter_gaussian()) {
-        assert::ply_gaussian_pod(ply, &gaussian.to_ply());
+        assert::ply_gaussian(ply, &gaussian.to_ply());
     }
 }
 
 #[test]
-fn test_ply_from_iter_should_require_matching_explicit_degree_including_empty_input() {
+fn test_ply_from_iter_should_preserve_explicit_degree_including_empty_input() {
     for degree in 0..=4 {
         let empty = PlyGaussians::from_iter(std::iter::empty(), degree).unwrap();
         assert!(empty.is_empty());
@@ -750,11 +704,22 @@ fn test_ply_from_iter_should_require_matching_explicit_degree_including_empty_in
             original
         );
     }
+}
 
+#[test]
+fn test_ply_from_iter_when_degree_is_invalid_should_return_error() {
     assert_matches!(
         PlyGaussians::from_iter(Vec::new(), 5),
         Err(PlyGaussiansFromIterError::UnsupportedShDegree { degree: 5 })
     );
+    assert_matches!(
+        PlyGaussians::new(Vec::new(), 5),
+        Err(PlyGaussiansFromIterError::UnsupportedShDegree { degree: 5 })
+    );
+}
+
+#[test]
+fn test_ply_from_iter_when_sh_count_mismatches_should_return_error() {
     let records = sh_degree_gaussians(1).gaussians;
     assert_matches!(
         PlyGaussians::from_iter(records, 2),
@@ -766,20 +731,15 @@ fn test_ply_from_iter_should_require_matching_explicit_degree_including_empty_in
 }
 
 #[test]
-fn test_ply_collection_conversions_when_sh_lengths_are_invalid_should_return_error() {
-    for degree in 0..=4 {
-        let original = sh_degree_gaussians(degree);
-        assert_eq!(
-            PlyGaussians::from_iter(original.gaussians.clone(), degree).unwrap(),
-            original
-        );
-    }
-
+fn test_ply_try_from_when_input_is_empty_should_default_to_degree_three() {
     let empty = PlyGaussians::try_from(Vec::new()).unwrap();
 
     assert_eq!(empty.sh_degree, 3);
     assert_eq!(PlyGaussians::from_iter(Vec::new(), 3).unwrap(), empty);
+}
 
+#[test]
+fn test_ply_collection_conversions_when_sh_lengths_are_invalid_should_return_error() {
     let valid = sh_degree_gaussians(2).gaussians.remove(0);
     let mut invalid = valid.clone();
     invalid.sh.pop();
@@ -826,4 +786,29 @@ fn test_ply_collection_conversions_when_sh_lengths_are_invalid_should_return_err
             expected_count: 24
         })
     );
+}
+
+#[test]
+fn test_ply_ascii_read_when_body_is_missing_should_return_unexpected_eof() {
+    let original = sh_degree_gaussians(0);
+    let bytes = layout_buffer(&original, ply_rs::ply::Encoding::Ascii, false, [true; 3]);
+    let text = String::from_utf8(bytes).unwrap();
+    let (header, _) = text.split_once("end_header\n").unwrap();
+    let input = format!("{header}end_header\n");
+
+    assert_eq!(
+        PlyGaussians::read_from(&mut input.as_bytes())
+            .unwrap_err()
+            .kind(),
+        std::io::ErrorKind::UnexpectedEof
+    );
+}
+
+#[test]
+#[should_panic(expected = "validated PLY coefficients")]
+fn test_ply_iter_gaussian_when_sh_count_is_mutated_to_invalid_count_should_panic() {
+    let mut model = given::ply_gaussians();
+    model.gaussians[0].sh.pop();
+
+    model.iter_gaussian().next();
 }

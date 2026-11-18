@@ -591,8 +591,8 @@ mod tests {
         ($name:ident, $pod_type:ty, true) => {
             paste::paste! {
                 #[test]
-                #[should_panic]
-                fn [<test_ $name _into_gaussian_should_panic>]() {
+                #[should_panic(expected = "Cannot convert from Cov3d")]
+                fn [<test_ $name _into_gaussian_when_covariance_is_unrecoverable_should_panic>]() {
                     let pod = <$pod_type>::from_gaussian(&Gaussian::<ShDegree3> {
                         rot: Quat::from_xyzw(0.0, 0.0, 0.0, 1.0),
                         pos: Vec3::new(1.0, 2.0, 3.0),
@@ -670,7 +670,7 @@ mod tests {
                 test_pod_from_gaussian!($name, $pod_type, $when_into_gaussian_should_panic);
 
                 #[test]
-                fn [<test_ $name _color_should_be_clamped_and_quantized>]() {
+                fn [<test_ $name _color_when_out_of_range_should_be_clamped_and_quantized>]() {
                     let gaussian = Gaussian::<ShDegree3> {
                         rot: Quat::IDENTITY,
                         pos: Vec3::ZERO,
@@ -731,8 +731,8 @@ mod tests {
         test_pod!(single_single, PackedGaussian<ShSingle, CovSingle>, true);
         test_pod!(single_half, PackedGaussian<ShSingle, CovHalf>, true);
         test_pod!(half_rotscale, PackedGaussian<ShHalf, CovRotScale>, false);
-        test_pod!(test_half_single, PackedGaussian<ShHalf, CovSingle>, true);
-        test_pod!(test_half_half, PackedGaussian<ShHalf, CovHalf>, true);
+        test_pod!(half_single, PackedGaussian<ShHalf, CovSingle>, true);
+        test_pod!(half_half, PackedGaussian<ShHalf, CovHalf>, true);
         test_pod!(norm8_rotscale, PackedGaussian<ShNorm8, CovRotScale>, false);
         test_pod!(norm8_single, PackedGaussian<ShNorm8, CovSingle>, true);
         test_pod!(norm8_half, PackedGaussian<ShNorm8, CovHalf>, true);
@@ -743,7 +743,7 @@ mod tests {
 
     #[test]
     #[allow(deprecated)] // Verify the old public name still resolves to the generic layout.
-    fn test_generic_pod_strides_should_match_existing_shader_layouts() {
+    fn test_packed_gaussian_strides_should_match_existing_shader_layouts() {
         assert_eq!(
             std::mem::size_of::<PackedGaussian<ShSingle, CovRotScale>>(),
             224
