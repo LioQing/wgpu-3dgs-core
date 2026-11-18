@@ -8,7 +8,7 @@ use crate::{AnyGaussian, Gaussian};
 /// A supported Gaussian spherical harmonics degree for storage and rendering.
 ///
 /// Supports degrees 0 through 4.
-/// 
+///
 /// SPZ container uses [`SpzGaussianShDegree`](crate::SpzGaussianShDegree) instead.
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
