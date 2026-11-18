@@ -1,4 +1,57 @@
-use wgpu_3dgs_core::{Gaussian, PlyGaussians, SpzGaussians, glam::*};
+use std::io::{self, Read, Write};
+
+use wgpu_3dgs_core::{AnyGaussian, Gaussian, PlyGaussians, ShDegree, SpzGaussians, glam::*};
+
+/// A non-seekable reader whose short reads split headers and records.
+pub struct ShortRead<'a>(pub &'a [u8]);
+
+impl Read for ShortRead<'_> {
+    fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
+        let count = out.len().min(3);
+
+        self.0.read(&mut out[..count])
+    }
+}
+
+/// A non-seekable writer that exercises `write_all` with short writes.
+#[derive(Default)]
+pub struct ShortWrite(pub Vec<u8>);
+
+impl Write for ShortWrite {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        let count = bytes.len().min(3);
+        self.0.extend_from_slice(&bytes[..count]);
+
+        Ok(count)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+/// A writer that fails after accepting the specified number of bytes.
+pub struct FailingWrite(pub usize);
+
+impl Write for FailingWrite {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        if self.0 == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                "test write failure",
+            ));
+        }
+
+        let count = bytes.len().min(self.0);
+        self.0 -= count;
+
+        Ok(count)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
 
 /// Wrapper for a temporary file that deletes the file on drop.
 pub struct TempFile(std::path::PathBuf);
@@ -92,7 +145,7 @@ pub fn spz_gaussians() -> SpzGaussians {
     SpzGaussians::from_gaussians(gaussians()).unwrap()
 }
 
-pub fn gaussian_for_sh_degree<D: wgpu_3dgs_core::ShDegree>(seed: u32) -> Gaussian<D> {
+pub fn gaussian_for_sh_degree<D: ShDegree>(seed: u32) -> Gaussian<D> {
     let mut gaussian = gaussian_with_seed(seed).convert_sh_degree::<D>();
 
     for (i, sh) in gaussian.sh.as_mut().iter_mut().enumerate() {
@@ -103,18 +156,16 @@ pub fn gaussian_for_sh_degree<D: wgpu_3dgs_core::ShDegree>(seed: u32) -> Gaussia
     gaussian
 }
 
-/// Explicitly convert fixture data to the requested runtime degree.
-pub fn runtime_gaussians(degree: u8) -> Vec<wgpu_3dgs_core::AnyGaussian> {
-    use wgpu_3dgs_core::*;
-
-    gaussians()
+/// Gets fixture data with populated coefficients for the requested runtime degree.
+pub fn runtime_gaussians(degree: u8) -> Vec<AnyGaussian> {
+    [42, 123]
         .into_iter()
-        .map(|g| match degree {
-            0 => AnyGaussian::Zero(g.convert_sh_degree()),
-            1 => AnyGaussian::One(g.convert_sh_degree()),
-            2 => AnyGaussian::Two(g.convert_sh_degree()),
-            3 => AnyGaussian::Three(g),
-            4 => AnyGaussian::Four(g.convert_sh_degree()),
+        .map(|seed| match degree {
+            0 => AnyGaussian::Zero(gaussian_for_sh_degree(seed)),
+            1 => AnyGaussian::One(gaussian_for_sh_degree(seed)),
+            2 => AnyGaussian::Two(gaussian_for_sh_degree(seed)),
+            3 => AnyGaussian::Three(gaussian_for_sh_degree(seed)),
+            4 => AnyGaussian::Four(gaussian_for_sh_degree(seed)),
             _ => panic!("unsupported fixture degree"),
         })
         .collect()

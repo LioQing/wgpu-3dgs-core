@@ -1,6 +1,6 @@
 use wgpu_3dgs_core::{PlyGaussian, ShDegree4, ToAnyGaussian};
 
-pub fn ply_gaussian_pod(a: &PlyGaussian, b: &PlyGaussian) {
+pub fn ply_gaussian(a: &PlyGaussian, b: &PlyGaussian) {
     const EPSILON: f32 = 1e-4;
 
     assert_eq!(a.sh.len(), b.sh.len());

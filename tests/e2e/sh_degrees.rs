@@ -6,7 +6,7 @@ use wgpu_3dgs_core::*;
 
 use crate::common::{assert, given};
 
-fn round_trip<D: ShDegree>()
+fn assert_native_degree_round_trip<D: ShDegree>()
 where
     InternalGaussians: From<Vec<Gaussian<D>>>,
 {
@@ -57,13 +57,31 @@ where
         let mut stream = stream.into_typed::<D>().unwrap();
         let mut batch = Vec::new();
 
+        assert_eq!(stream.total_gaussians(), input.len());
+
         while !stream.progress().done {
-            stream
-                .next_batch(NonZeroUsize::new(1).unwrap(), &mut batch)
-                .unwrap();
+            assert_eq!(
+                stream
+                    .next_batch(NonZeroUsize::new(1).unwrap(), &mut batch)
+                    .unwrap(),
+                1
+            );
+            assert_eq!(stream.progress().completed_units, batch.len());
         }
 
-        assert_eq!(batch.len(), input.len());
+        let expected = input
+            .iter()
+            .map(|g| Gaussian::<D>::from_ply(g).unwrap())
+            .collect::<Vec<_>>();
+
+        assert_eq!(batch, expected);
+        assert!(stream.next().is_none());
+        assert_eq!(
+            stream
+                .next_batch(NonZeroUsize::new(1).unwrap(), &mut batch)
+                .unwrap(),
+            0
+        );
 
         let converted = Gaussians::from_gaussians_iter_with_sh_degree(
             batch.into_iter().map(|g| g.to_any_gaussian()),
@@ -73,41 +91,43 @@ where
         .unwrap();
 
         assert_eq!(converted.sh_degree().get(), D::DEGREE);
-        assert_eq!(converted.len(), input.len());
+        assert_eq!(
+            converted.into_ply().unwrap(),
+            PlyGaussians::from_gaussians(&expected).unwrap()
+        );
     }
 
-    if D::DEGREE <= 3 {
-        let spz = SpzGaussians::from_gaussians(&original).unwrap();
-        let empty = SpzGaussians::from_gaussians(Vec::<Gaussian<D>>::new()).unwrap();
+    let spz = SpzGaussians::from_gaussians(&original).unwrap();
+    let empty = SpzGaussians::from_gaussians(Vec::<Gaussian<D>>::new()).unwrap();
 
-        assert_eq!(spz.header.sh_degree().get(), D::DEGREE);
-        assert_eq!(empty.header.sh_degree().get(), D::DEGREE);
+    assert_eq!(spz.header.version(), 4);
+    assert_eq!(empty.header.version(), 4);
+    assert_eq!(spz.header.sh_degree().get(), D::DEGREE);
+    assert_eq!(empty.header.sh_degree().get(), D::DEGREE);
+    assert_eq!(SpzGaussians::from_gaussians(original.clone()).unwrap(), spz);
+    assert_eq!(
+        SpzGaussians::from_gaussians(Vec::<Gaussian<D>>::new()).unwrap(),
+        empty
+    );
 
-        for spz in spz.iter() {
-            assert_eq!(
-                Gaussian::<D>::from_spz(spz, &empty.header)
-                    .unwrap()
-                    .sh_degree()
-                    .get(),
-                D::DEGREE
-            );
-        }
-    } else {
-        assert!(SpzGaussians::from_gaussians(&original).is_err());
-        assert!(SpzGaussians::from_gaussians(Vec::<Gaussian<D>>::new()).is_err());
+    for (packed, expected) in spz.iter().zip(&original) {
+        let restored = Gaussian::<D>::from_spz(packed, &spz.header).unwrap();
+
+        assert::gaussian(
+            &restored,
+            expected,
+            &assert::GaussianOptions {
+                pos_epsilon: 1e-3,
+                rot_epsilon: 1e-2,
+                color_tolerance: 2,
+                sh_epsilon: 1e-1,
+                scale_epsilon: 1e-1,
+            },
+        );
     }
 }
 
-#[test]
-fn test_native_degrees_should_preserve_storage_and_source_metadata() {
-    round_trip::<ShDegree0>();
-    round_trip::<ShDegree1>();
-    round_trip::<ShDegree2>();
-    round_trip::<ShDegree3>();
-    round_trip::<ShDegree4>();
-}
-
-fn inferred_native_constructors<D: ShDegree>()
+fn assert_inferred_native_constructors<D: ShDegree>()
 where
     InternalGaussians: From<Vec<Gaussian<D>>>,
 {
@@ -118,6 +138,8 @@ where
         let expected_native = InternalGaussians::from(original.clone());
         let expected_ply =
             PlyGaussians::new(original.iter().map(Gaussian::to_ply).collect(), D::DEGREE).unwrap();
+
+        assert_eq!(expected_native.is_empty(), count == 0);
 
         assert_eq!(
             InternalGaussians::from_gaussians(original.clone()).unwrap(),
@@ -162,6 +184,7 @@ where
 
     // Zero-valued coefficients still carry the declared storage degree.
     let mut gaussian = given::gaussian_for_sh_degree::<D>(0);
+    assert!(std::ptr::eq(gaussian.as_ref(), &gaussian));
     gaussian.sh.as_mut().fill(glam::Vec3::ZERO);
     assert_eq!(
         InternalGaussians::from_gaussians([gaussian.to_any_gaussian()])
@@ -178,13 +201,142 @@ where
     );
 }
 
+macro_rules! assert_internal_iterators {
+    ($degree:ty, $variant:ident) => {
+        for count in [0, 1, 3] {
+            let mut expected = (0..count)
+                .map(given::gaussian_for_sh_degree::<$degree>)
+                .collect::<Vec<_>>();
+            let mut model = InternalGaussians::from(expected.clone());
+            let ptr = match &model {
+                InternalGaussians::$variant(stored) => stored.as_ptr(),
+                _ => panic!("unexpected storage degree"),
+            };
+
+            {
+                let mut iter = model.iter();
+                assert_eq!(iter.len(), expected.len());
+                for (index, expected) in expected.iter().enumerate() {
+                    match iter.next().unwrap() {
+                        AnyGaussianRef::$variant(actual) => {
+                            assert!(std::ptr::eq(actual, ptr.wrapping_add(index)));
+                            assert_eq!(actual, expected);
+                        }
+                        _ => panic!("unexpected borrowed degree"),
+                    }
+                    assert_eq!(iter.len(), count as usize - index - 1);
+                }
+                assert!(iter.next().is_none());
+            }
+
+            {
+                let mut iter = model.iter_mut();
+                assert_eq!(iter.len(), expected.len());
+                for (index, expected) in expected.iter_mut().enumerate() {
+                    expected.pos += glam::Vec3::ONE;
+                    expected.color.w = 0.25;
+                    for sh in expected.sh.as_mut() {
+                        *sh += glam::Vec3::ONE;
+                    }
+                    match iter.next().unwrap() {
+                        AnyGaussianMut::$variant(actual) => {
+                            assert!(std::ptr::eq(&*actual, ptr.wrapping_add(index)));
+                            *actual = *expected;
+                        }
+                        _ => panic!("unexpected mutable degree"),
+                    }
+                    assert_eq!(iter.len(), count as usize - index - 1);
+                }
+                assert!(iter.next().is_none());
+            }
+
+            assert_eq!(model, InternalGaussians::from(expected));
+            assert_eq!(model.sh_degree().get(), <$degree>::DEGREE);
+        }
+    };
+}
+
+fn assert_source_conversions<D: ShDegree>()
+where
+    InternalGaussians: From<Vec<Gaussian<D>>>,
+{
+    for original in [
+        (0..3)
+            .map(given::gaussian_for_sh_degree::<D>)
+            .collect::<Vec<_>>(),
+        Vec::new(),
+    ] {
+        let native = Gaussians::from(original);
+        let ply = native.clone().into_ply().unwrap();
+        let mut sources = vec![native, Gaussians::from(ply)];
+
+        let spz = sources[0].clone().into_spz().unwrap();
+        sources.push(Gaussians::from(spz));
+
+        for source in sources {
+            let expected_native = source.iter_gaussian().collect::<Vec<_>>();
+            let native = source.clone().into_internal().unwrap();
+
+            assert_eq!(native.sh_degree().get(), D::DEGREE);
+            assert_eq!(native.iter_gaussian().collect::<Vec<_>>(), expected_native);
+
+            let ply = source.clone().into_ply().unwrap();
+            let expected = match &source {
+                Gaussians::Ply(ply) => ply.clone(),
+                _ => PlyGaussians::new(
+                    source.iter_gaussian().map(|g| g.to_ply()).collect(),
+                    D::DEGREE,
+                )
+                .unwrap(),
+            };
+
+            assert_eq!(ply, expected);
+            assert_eq!(ply.sh_degree, D::DEGREE);
+            assert_eq!(ply.len(), source.len());
+
+            let options = SpzGaussiansFromGaussianSliceOptions {
+                sh_degree: SpzGaussianShDegree::new(D::DEGREE).unwrap(),
+                ..Default::default()
+            };
+            let spz = source.clone().into_spz().unwrap();
+            let expected = match &source {
+                Gaussians::Spz(spz) => spz.clone(),
+                _ => SpzGaussians::from_gaussians_with_options(source.iter_gaussian(), &options)
+                    .unwrap(),
+            };
+
+            assert_eq!(spz, expected);
+            assert_eq!(spz.header.version(), 4);
+            assert_eq!(spz.header.sh_degree().get(), D::DEGREE);
+            assert_eq!(spz.len(), source.len());
+
+            let expected =
+                SpzGaussians::from_gaussians_with_options(source.iter_gaussian(), &options)
+                    .unwrap();
+            let reencoded = source.into_spz_with_options(&options).unwrap();
+
+            assert_eq!(reencoded, expected);
+            assert_eq!(reencoded.header.sh_degree().get(), D::DEGREE);
+        }
+    }
+}
+
+#[test]
+fn test_native_degrees_should_preserve_storage_and_source_metadata() {
+    assert_native_degree_round_trip::<ShDegree0>();
+    assert_native_degree_round_trip::<ShDegree1>();
+    assert_native_degree_round_trip::<ShDegree2>();
+    assert_native_degree_round_trip::<ShDegree3>();
+    assert_native_degree_round_trip::<ShDegree4>();
+}
+
 #[test]
 fn test_inferred_native_constructors_should_preserve_all_degrees_and_typed_empty_input() {
-    inferred_native_constructors::<ShDegree0>();
-    inferred_native_constructors::<ShDegree1>();
-    inferred_native_constructors::<ShDegree2>();
-    inferred_native_constructors::<ShDegree3>();
-    inferred_native_constructors::<ShDegree4>();
+    assert_inferred_native_constructors::<ShDegree0>();
+    assert_inferred_native_constructors::<ShDegree1>();
+    assert_inferred_native_constructors::<ShDegree2>();
+    assert_inferred_native_constructors::<ShDegree3>();
+    assert_inferred_native_constructors::<ShDegree4>();
 }
 
 #[test]
@@ -219,23 +371,22 @@ fn test_inferred_native_constructors_when_degrees_are_mixed_should_return_error(
     for records in [[high, low], [low, high]] {
         let actual_degree = records[1].sh_degree();
         let expected_degree = records[0].sh_degree();
-        assert_eq!(
-            InternalGaussians::from_gaussians(records).unwrap_err(),
-            ShDegreeMismatchError {
-                actual_degree: actual_degree.get(),
-                expected_degree: expected_degree.get(),
-            }
-        );
-        assert_eq!(
-            InternalGaussians::from_gaussians(records).unwrap_err(),
-            ShDegreeMismatchError {
-                actual_degree: actual_degree.get(),
-                expected_degree: expected_degree.get(),
-            }
-        );
+
+        for result in [
+            InternalGaussians::from_gaussians(records),
+            InternalGaussians::from_gaussians(records.iter()),
+        ] {
+            assert_eq!(
+                result.unwrap_err(),
+                ShDegreeMismatchError {
+                    actual_degree: actual_degree.get(),
+                    expected_degree: expected_degree.get(),
+                }
+            );
+        }
         for result in [
             PlyGaussians::from_gaussians(records),
-            PlyGaussians::from_gaussians(records),
+            PlyGaussians::from_gaussians(records.iter()),
         ] {
             assert_matches!(
                 result,
@@ -251,152 +402,35 @@ fn test_inferred_native_constructors_when_degrees_are_mixed_should_return_error(
 
 #[test]
 fn test_internal_iterators_should_borrow_and_mutate_all_storage_degrees() {
-    macro_rules! check {
-        ($degree:ty, $variant:ident) => {
-            for count in [0, 1, 3] {
-                let mut expected = (0..count)
-                    .map(given::gaussian_for_sh_degree::<$degree>)
-                    .collect::<Vec<_>>();
-                let mut model = InternalGaussians::from(expected.clone());
-                let ptr = match &model {
-                    InternalGaussians::$variant(stored) => stored.as_ptr(),
-                    _ => panic!("unexpected storage degree"),
-                };
-
-                {
-                    let mut iter = model.iter();
-                    assert_eq!(iter.len(), expected.len());
-                    for (index, expected) in expected.iter().enumerate() {
-                        match iter.next().unwrap() {
-                            AnyGaussianRef::$variant(actual) => {
-                                assert!(std::ptr::eq(actual, ptr.wrapping_add(index)));
-                                assert_eq!(actual, expected);
-                            }
-                            _ => panic!("unexpected borrowed degree"),
-                        }
-                        assert_eq!(iter.len(), count as usize - index - 1);
-                    }
-                    assert!(iter.next().is_none());
-                }
-
-                {
-                    let mut iter = model.iter_mut();
-                    assert_eq!(iter.len(), expected.len());
-                    for (index, expected) in expected.iter_mut().enumerate() {
-                        expected.pos += glam::Vec3::ONE;
-                        expected.color.w = 0.25;
-                        for sh in expected.sh.as_mut() {
-                            *sh += glam::Vec3::ONE;
-                        }
-                        match iter.next().unwrap() {
-                            AnyGaussianMut::$variant(actual) => {
-                                assert!(std::ptr::eq(&*actual, ptr.wrapping_add(index)));
-                                *actual = *expected;
-                            }
-                            _ => panic!("unexpected mutable degree"),
-                        }
-                        assert_eq!(iter.len(), count as usize - index - 1);
-                    }
-                    assert!(iter.next().is_none());
-                }
-
-                assert_eq!(model, InternalGaussians::from(expected));
-                assert_eq!(model.sh_degree().get(), <$degree>::DEGREE);
-            }
-        };
-    }
-
-    check!(ShDegree0, Zero);
-    check!(ShDegree1, One);
-    check!(ShDegree2, Two);
-    check!(ShDegree3, Three);
-    check!(ShDegree4, Four);
-}
-
-fn source_conversions<D: ShDegree>()
-where
-    InternalGaussians: From<Vec<Gaussian<D>>>,
-{
-    for original in [
-        (0..3)
-            .map(given::gaussian_for_sh_degree::<D>)
-            .collect::<Vec<_>>(),
-        Vec::new(),
-    ] {
-        let native = Gaussians::from(original);
-        let ply = native.clone().into_ply().unwrap();
-        let mut sources = vec![native, Gaussians::from(ply)];
-
-        if D::DEGREE <= 3 {
-            let spz = sources[0].clone().into_spz().unwrap();
-            sources.push(Gaussians::from(spz));
-        }
-
-        for source in sources {
-            let ply = source.clone().into_ply().unwrap();
-            let expected = match &source {
-                Gaussians::Ply(ply) => ply.clone(),
-                _ => PlyGaussians::new(
-                    source.iter_gaussian().map(|g| g.to_ply()).collect(),
-                    D::DEGREE,
-                )
-                .unwrap(),
-            };
-
-            assert_eq!(ply, expected);
-            assert_eq!(ply.sh_degree, D::DEGREE);
-            assert_eq!(ply.len(), source.len());
-
-            if D::DEGREE <= 3 {
-                let options = SpzGaussiansFromGaussianSliceOptions {
-                    sh_degree: SpzGaussianShDegree::new(D::DEGREE).unwrap(),
-                    ..Default::default()
-                };
-                let spz = source.clone().into_spz().unwrap();
-                let expected = match &source {
-                    Gaussians::Spz(spz) => spz.clone(),
-                    _ => {
-                        SpzGaussians::from_gaussians_with_options(source.iter_gaussian(), &options)
-                            .unwrap()
-                    }
-                };
-
-                assert_eq!(spz, expected);
-                assert_eq!(spz.header.sh_degree().get(), D::DEGREE);
-                assert_eq!(spz.len(), source.len());
-
-                let expected =
-                    SpzGaussians::from_gaussians_with_options(source.iter_gaussian(), &options)
-                        .unwrap();
-                let reencoded = source.into_spz_with_options(&options).unwrap();
-
-                assert_eq!(reencoded, expected);
-                assert_eq!(reencoded.header.sh_degree().get(), D::DEGREE);
-            } else {
-                assert_matches!(
-                    source.clone().into_spz(),
-                    Err(SpzGaussiansFromGaussiansError::UnsupportedShDegree { degree: 4 })
-                );
-                assert_matches!(
-                    source.into_spz_with_options(&Default::default()),
-                    Err(SpzGaussiansFromGaussiansError::UnsupportedShDegree { degree: 4 })
-                );
-            }
-        }
-    }
+    assert_internal_iterators!(ShDegree0, Zero);
+    assert_internal_iterators!(ShDegree1, One);
+    assert_internal_iterators!(ShDegree2, Two);
+    assert_internal_iterators!(ShDegree3, Three);
+    assert_internal_iterators!(ShDegree4, Four);
 }
 
 #[test]
 fn test_source_conversions_should_preserve_degrees_including_empty_models() {
-    source_conversions::<ShDegree0>();
-    source_conversions::<ShDegree1>();
-    source_conversions::<ShDegree2>();
-    source_conversions::<ShDegree3>();
-    source_conversions::<ShDegree4>();
+    assert_source_conversions::<ShDegree0>();
+    assert_source_conversions::<ShDegree1>();
+    assert_source_conversions::<ShDegree2>();
+    assert_source_conversions::<ShDegree3>();
+    assert_source_conversions::<ShDegree4>();
 }
 
 #[test]
 fn test_source_conversions_when_source_matches_target_should_return_existing_storage_unchanged() {
+    let native = given::gaussians();
+    let expected = native.clone();
+    let ptr = native.as_ptr();
+    let converted = Gaussians::from(native).into_internal().unwrap();
+    let InternalGaussians::Three(converted) = converted else {
+        panic!("unexpected storage degree");
+    };
+
+    assert_eq!(converted, expected);
+    assert_eq!(converted.as_ptr(), ptr);
+
     let mut ply = given::ply_gaussians();
     ply.gaussians[0].normal = glam::Vec3::X;
     let expected = ply.clone();
@@ -408,10 +442,10 @@ fn test_source_conversions_when_source_matches_target_should_return_existing_sto
 
     let options = SpzGaussiansFromGaussianSliceOptions {
         version: 2,
+        sh_degree: SpzGaussianShDegree::new(3).expect("valid SH degree"),
         fractional_bits: 8,
         antialiased: true,
         sh_quantize_bits: [8; 3],
-        ..Default::default()
     };
     let spz = SpzGaussians::from_gaussians_with_options(given::gaussians(), &options).unwrap();
     let expected = spz.clone();
@@ -420,16 +454,25 @@ fn test_source_conversions_when_source_matches_target_should_return_existing_sto
 
     assert_eq!(converted, expected);
     assert_eq!(converted.alphas.as_ptr(), ptr);
+
+    let upgraded = Gaussians::from(converted)
+        .into_spz_with_options(&SpzGaussiansFromGaussianSliceOptions {
+            sh_degree: SpzGaussianShDegree::new(3).expect("valid SH degree"),
+            ..Default::default()
+        })
+        .unwrap();
+
+    assert_eq!(upgraded.header.version(), 4);
 }
 
 #[test]
 fn test_explicit_spz_conversion_should_reencode_all_sources_with_requested_options() {
     let options = SpzGaussiansFromGaussianSliceOptions {
         version: 2,
+        sh_degree: SpzGaussianShDegree::new(3).expect("valid SH degree"),
         fractional_bits: 8,
         antialiased: true,
         sh_quantize_bits: [8; 3],
-        ..Default::default()
     };
 
     for source in [
@@ -465,7 +508,7 @@ fn test_explicit_spz_conversion_when_options_are_invalid_should_preserve_validat
                 Err(SpzGaussiansFromGaussiansError::ShDegreeMismatch(
                     ShDegreeMismatchError {
                         actual_degree: 1,
-                        expected_degree: 3,
+                        expected_degree: 4,
                     }
                 ))
             );
@@ -478,12 +521,14 @@ fn test_explicit_spz_conversion_when_options_are_invalid_should_preserve_validat
             .clone()
             .into_spz_with_options(&SpzGaussiansFromGaussianSliceOptions {
                 version: 0,
+                sh_degree: SpzGaussianShDegree::new(3).expect("valid SH degree"),
                 ..Default::default()
             }),
         Err(SpzGaussiansFromGaussiansError::Header(_))
     );
     assert_matches!(
         native.into_spz_with_options(&SpzGaussiansFromGaussianSliceOptions {
+            sh_degree: SpzGaussianShDegree::new(3).expect("valid SH degree"),
             sh_quantize_bits: [5, 9, 4],
             ..Default::default()
         }),
@@ -494,21 +539,38 @@ fn test_explicit_spz_conversion_when_options_are_invalid_should_preserve_validat
 }
 
 #[test]
-fn test_gaussian_conversions_when_degrees_mismatch_should_require_explicit_conversion() {
+fn test_gaussian_convert_sh_degree_should_truncate_or_zero_extend_coefficients() {
     let high = given::gaussian_for_sh_degree::<ShDegree4>(0);
     let low = high.convert_sh_degree::<ShDegree1>();
     let promoted = low.convert_sh_degree::<ShDegree4>();
 
     assert_eq!(&promoted.sh[..3], &high.sh[..3]);
     assert!(promoted.sh[3..].iter().all(|v| *v == glam::Vec3::ZERO));
-
-    assert_matches!(
-        Gaussian::<ShDegree3>::from_ply(&high.to_ply()).unwrap_err(),
-        PlyGaussiansFromIterError::ShCountMismatch {
-            actual_count: 72,
-            expected_count: 45,
-        }
+    assert_eq!(low.sh, high.sh[..3]);
+    assert_eq!(promoted.rot, high.rot);
+    assert_eq!(promoted.pos, high.pos);
+    assert_eq!(promoted.color, high.color);
+    assert_eq!(promoted.scale, high.scale);
+    assert_eq!(
+        AnyGaussian::Four(high).convert_sh_degree::<ShDegree1>(),
+        low
     );
+    assert_eq!(
+        AnyGaussian::One(low).convert_sh_degree::<ShDegree4>(),
+        promoted
+    );
+
+    let converted = high.convert_sh_degree::<ShDegree3>();
+    let spz = SpzGaussians::from_gaussians([converted]).unwrap();
+
+    assert_eq!(spz.header.sh_degree().get(), 3);
+    assert_eq!(spz.len(), 1);
+}
+
+#[test]
+fn test_any_gaussian_try_typed_when_degree_mismatches_should_return_error() {
+    let high = given::gaussian_for_sh_degree::<ShDegree4>(0);
+
     assert_eq!(
         AnyGaussian::Four(high)
             .try_typed::<ShDegree3>()
@@ -518,78 +580,46 @@ fn test_gaussian_conversions_when_degrees_mismatch_should_require_explicit_conve
             expected_degree: 3
         },
     );
-    assert!(
-        InternalGaussians::from_iter(
-            [AnyGaussian::Four(high), AnyGaussian::One(low)],
-            GaussianShDegree::new(4).unwrap(),
-        )
-        .is_err()
-    );
-
-    assert!(
-        Gaussians::from_gaussians_iter(
-            [AnyGaussian::Four(high), AnyGaussian::One(low)].into_iter(),
-            GaussiansSource::Ply,
-        )
-        .is_err()
-    );
-
-    assert!(SpzGaussians::from_gaussians_with_options([low], &Default::default()).is_err());
-    assert!(
-        SpzGaussians::from_gaussians_with_options(
-            Vec::<Gaussian<ShDegree1>>::new(),
-            &Default::default()
-        )
-        .is_err()
-    );
-
-    let spz = SpzGaussians::from_gaussians([low]).unwrap();
-
-    assert!(Gaussian::<ShDegree3>::from_spz(spz.iter().next().unwrap(), &spz.header).is_err());
-    assert!(high.to_spz(&spz.header, &Default::default()).is_err());
-    assert!(SpzGaussians::from_gaussians([high.convert_sh_degree::<ShDegree3>()]).is_ok());
-
-    let ply = PlyGaussians::from_iter([high.to_ply()], 4).unwrap();
-    let mut bytes = Vec::new();
-    ply.write_to(&mut bytes).unwrap();
-
-    let stream = GaussiansStream::new(bytes.as_slice(), GaussiansSource::Ply).unwrap();
-
-    assert_eq!(
-        stream.into_typed::<ShDegree3>().err().unwrap(),
-        ShDegreeMismatchError {
-            actual_degree: 4,
-            expected_degree: 3
-        }
-    );
 }
 
 #[test]
-fn test_gaussian_conversions_when_input_is_invalid_should_preserve_validation_details() {
+fn test_spz_conversions_when_degree_four_targets_legacy_version_should_return_error() {
     let high = given::gaussian_for_sh_degree::<ShDegree4>(0);
-    let low = high.convert_sh_degree::<ShDegree1>();
-    let unsupported = SpzGaussians::from_gaussians([high]).unwrap_err();
 
-    assert_matches!(
-        unsupported,
-        SpzGaussiansFromGaussiansError::UnsupportedShDegree { degree: 4 }
+    for version in 1..=3 {
+        let options = SpzGaussiansFromGaussianSliceOptions {
+            version,
+            sh_degree: SpzGaussianShDegree::new(4).unwrap(),
+            ..Default::default()
+        };
+
+        assert_matches!(
+            SpzGaussians::from_gaussians_with_options([high], &options),
+            Err(SpzGaussiansFromGaussiansError::Header(_))
+        );
+        assert_matches!(
+            Gaussians::from(vec![high]).into_spz_with_options(&options),
+            Err(SpzGaussiansFromGaussiansError::UnsupportedShDegree { degree: 4 })
+        );
+    }
+}
+
+#[test]
+fn test_gaussians_from_gaussians_iter_when_degrees_are_mixed_should_return_error() {
+    let high = given::gaussian_for_sh_degree::<ShDegree4>(0).to_any_gaussian();
+    let low = given::gaussian_for_sh_degree::<ShDegree1>(1).to_any_gaussian();
+
+    assert_eq!(
+        InternalGaussians::from_iter([high, low], GaussianShDegree::new(4).unwrap()).unwrap_err(),
+        ShDegreeMismatchError {
+            actual_degree: 1,
+            expected_degree: 4
+        }
     );
-    assert_matches!(
-        SpzGaussians::from_gaussians([high].iter()),
-        Err(SpzGaussiansFromGaussiansError::UnsupportedShDegree { degree: 4 })
-    );
-    assert_matches!(
-        Gaussians::from_gaussians_iter([high].into_iter(), GaussiansSource::Spz),
-        Err(GaussiansFromIterError::Spz(
-            SpzGaussiansFromGaussiansError::UnsupportedShDegree { degree: 4 }
-        ))
-    );
+
     for source in [GaussiansSource::Internal, GaussiansSource::Ply] {
         assert_matches!(
-            Gaussians::from_gaussians_iter(
-                [high.to_any_gaussian(), low.to_any_gaussian()].into_iter(),
-                source,
-            ),
+            Gaussians::from_gaussians_iter([high, low].into_iter(), source,),
             Err(GaussiansFromIterError::ShDegreeMismatch(
                 ShDegreeMismatchError {
                     actual_degree: 1,
@@ -600,15 +630,41 @@ fn test_gaussian_conversions_when_input_is_invalid_should_preserve_validation_de
     }
 
     assert_matches!(
-        PlyGaussians::new(Vec::new(), 5),
-        Err(PlyGaussiansFromIterError::UnsupportedShDegree { degree: 5 })
+        Gaussians::from_gaussians_iter([high, low].into_iter(), GaussiansSource::Spz),
+        Err(GaussiansFromIterError::Spz(
+            SpzGaussiansFromGaussiansError::Gaussian(GaussianToSpzError::ShDegreeMismatch(
+                ShDegreeMismatchError {
+                    actual_degree: 1,
+                    expected_degree: 4
+                }
+            ))
+        ))
     );
-    let mut invalid = low.to_ply();
+}
+
+#[test]
+fn test_gaussian_from_ply_when_sh_count_is_invalid_should_return_error() {
+    let high = given::gaussian_for_sh_degree::<ShDegree4>(0);
+
+    assert_matches!(
+        Gaussian::<ShDegree3>::from_ply(&high.to_ply()),
+        Err(PlyGaussiansFromIterError::ShCountMismatch {
+            actual_count: 72,
+            expected_count: 45,
+        })
+    );
+    let mut invalid = high.convert_sh_degree::<ShDegree1>().to_ply();
     invalid.sh.pop();
     assert_matches!(
         AnyGaussian::from_ply(&invalid),
         Err(PlyGaussiansFromIterError::UnsupportedShCount { count: 8 })
     );
+}
+
+#[test]
+fn test_gaussian_spz_conversions_when_degrees_mismatch_should_return_error() {
+    let high = given::gaussian_for_sh_degree::<ShDegree4>(0);
+    let low = high.convert_sh_degree::<ShDegree1>();
 
     let spz = SpzGaussians::from_gaussians([low]).unwrap();
     assert_matches!(
@@ -627,18 +683,55 @@ fn test_gaussian_conversions_when_input_is_invalid_should_preserve_validation_de
             expected_degree: 3
         })
     );
-    assert_matches!(
-        SpzGaussians::from_gaussians_with_options(
-            Vec::<Gaussian<ShDegree1>>::new(),
-            &Default::default()
-        ),
-        Err(SpzGaussiansFromGaussiansError::ShDegreeMismatch(
-            ShDegreeMismatchError {
-                actual_degree: 1,
-                expected_degree: 3,
-            }
-        ))
+
+    let packed = high
+        .to_spz(
+            &SpzGaussiansHeader::new(4, 1, SpzGaussianShDegree::new(4).unwrap(), 12, false)
+                .unwrap(),
+            &Default::default(),
+        )
+        .unwrap();
+
+    // The header matches the requested type, but the record does not.
+    assert_eq!(
+        Gaussian::<ShDegree1>::from_spz(packed.as_ref(), &spz.header).unwrap_err(),
+        ShDegreeMismatchError {
+            actual_degree: 4,
+            expected_degree: 1
+        }
     );
+    assert_eq!(
+        AnyGaussian::from_spz(packed.as_ref(), &spz.header).unwrap_err(),
+        ShDegreeMismatchError {
+            actual_degree: 4,
+            expected_degree: 1
+        }
+    );
+}
+
+#[test]
+fn test_spz_gaussians_from_gaussians_with_options_when_degree_mismatches_should_reject_empty_and_nonempty_input()
+ {
+    for input in [
+        Vec::new(),
+        vec![given::gaussian_for_sh_degree::<ShDegree1>(0)],
+    ] {
+        assert_matches!(
+            SpzGaussians::from_gaussians_with_options(input, &Default::default()),
+            Err(SpzGaussiansFromGaussiansError::ShDegreeMismatch(
+                ShDegreeMismatchError {
+                    actual_degree: 1,
+                    expected_degree: 4
+                }
+            ))
+        );
+    }
+}
+
+#[test]
+fn test_gaussian_to_spz_when_quantize_bits_are_invalid_should_return_validation_details() {
+    let low = given::gaussian_for_sh_degree::<ShDegree1>(0);
+    let spz = SpzGaussians::from_gaussians([low]).unwrap();
 
     let options = GaussianToSpzOptions {
         sh_quantize_bits: [5, 9, 4],
@@ -667,6 +760,69 @@ fn test_gaussian_conversions_when_input_is_invalid_should_preserve_validation_de
 }
 
 #[test]
+fn test_gaussians_stream_into_typed_when_degree_mismatches_should_reject_empty_and_nonempty_models()
+{
+    for input in [
+        Vec::new(),
+        vec![given::gaussian_for_sh_degree::<ShDegree4>(0)],
+    ] {
+        let ply = PlyGaussians::from_gaussians(input).unwrap();
+        let mut bytes = Vec::new();
+        ply.write_to(&mut bytes).unwrap();
+
+        let stream = GaussiansStream::new(bytes.as_slice(), GaussiansSource::Ply).unwrap();
+
+        assert_eq!(
+            stream.into_typed::<ShDegree3>().err().unwrap(),
+            ShDegreeMismatchError {
+                actual_degree: 4,
+                expected_degree: 3
+            }
+        );
+    }
+}
+
+#[test]
+fn test_typed_gaussians_stream_when_record_is_truncated_should_keep_completed_gaussians_and_fail_once()
+ {
+    let original = vec![
+        given::gaussian_for_sh_degree::<ShDegree4>(0),
+        given::gaussian_for_sh_degree::<ShDegree4>(1),
+    ];
+    let ply = PlyGaussians::from_gaussians(original).unwrap();
+    let mut bytes = Vec::new();
+    ply.write_to(&mut bytes).unwrap();
+    bytes.pop();
+
+    let mut stream = GaussiansStream::new(bytes.as_slice(), GaussiansSource::Ply)
+        .unwrap()
+        .into_typed::<ShDegree4>()
+        .unwrap();
+    let mut out = Vec::new();
+    let error = stream
+        .next_batch(NonZeroUsize::new(3).unwrap(), &mut out)
+        .unwrap_err();
+
+    assert_eq!(error.kind(), std::io::ErrorKind::UnexpectedEof);
+    assert_eq!(
+        out,
+        vec![Gaussian::<ShDegree4>::from_ply(&ply.gaussians[0]).unwrap()]
+    );
+    assert_eq!(stream.total_gaussians(), 2);
+    assert_eq!(stream.progress().completed_units, 1);
+    assert!(!stream.progress().done);
+    assert!(stream.next().is_none());
+    assert_eq!(
+        stream
+            .next_batch(NonZeroUsize::new(1).unwrap(), &mut out)
+            .unwrap(),
+        0
+    );
+    assert_eq!(out.len(), 1);
+    assert!(!stream.progress().done);
+}
+
+#[test]
 fn test_gaussians_when_coefficients_are_zero_or_model_is_empty_should_preserve_declared_degree() {
     let mut gaussian = given::gaussian_for_sh_degree::<ShDegree4>(0);
     gaussian.sh.fill(glam::Vec3::ZERO);
@@ -681,7 +837,7 @@ fn test_gaussians_when_coefficients_are_zero_or_model_is_empty_should_preserve_d
 }
 
 #[test]
-fn test_degree_counts_and_compact_half_strides_should_be_correct() {
+fn test_gaussian_sh_degree_num_coefficients_and_from_coefficient_count_should_agree() {
     for (degree, count) in [0, 3, 8, 15, 24].into_iter().enumerate() {
         let degree = GaussianShDegree::new(degree as u8).unwrap();
 
@@ -694,7 +850,10 @@ fn test_degree_counts_and_compact_half_strides_should_be_correct() {
 
     assert!(GaussianShDegree::from_coefficient_count(16).is_none());
     assert!(GaussianShDegree::new(5).is_none());
+}
 
+#[test]
+fn test_packed_gaussian_half_strides_should_match_compact_storage_degrees() {
     assert_eq!(size_of::<PackedGaussian<ShHalf<ShDegree0>, CovHalf>>(), 32);
     assert_eq!(size_of::<PackedGaussian<ShHalf<ShDegree1>, CovHalf>>(), 48);
     assert_eq!(size_of::<PackedGaussian<ShHalf<ShDegree2>, CovHalf>>(), 80);

@@ -6,7 +6,8 @@ Please also check out the [`wgpu-3dgs-viewer` changelog](https://github.com/LioQ
 
 ### Added
 
-- 🔢 Add native and GPU support for SH degrees 0 to 4. SPZ remains limited to degrees 0 to 3. [#45](https://github.com/LioQing/wgpu-3dgs-core/pull/45)
+- 📦 Add SPZ v4 support for whole-model and batch reading/writing, with ZSTD compression and SH degrees 0 to 4. [#50](https://github.com/LioQing/wgpu-3dgs-core/pull/50)
+- 🔢 Add native and GPU support for SH degrees 0 to 4. [#45](https://github.com/LioQing/wgpu-3dgs-core/pull/45)
 - 🔄 Add `InternalGaussians::from_gaussians` and `PlyGaussians::from_gaussians` for inferred-degree conversion, and `convert_sh_degree` for truncation or zero-extension. [#45](https://github.com/LioQing/wgpu-3dgs-core/pull/45)
 - 📥 Add `PlyGaussianStream::from_header` and typed streaming through `GaussiansStream::into_typed`. [#45](https://github.com/LioQing/wgpu-3dgs-core/pull/45)
 - 🛠️ Add borrowed iteration through `InternalGaussians::iter` and `iter_mut`. [#45](https://github.com/LioQing/wgpu-3dgs-core/pull/45)
@@ -18,6 +19,7 @@ Please also check out the [`wgpu-3dgs-viewer` changelog](https://github.com/LioQ
 
 ### Changed
 
+- 🐛 Fix smallest-three quaternion component order when decoding SPZ v3 and v4 rotations. [#50](https://github.com/LioQing/wgpu-3dgs-core/pull/50)
 - 🔢 Move `GaussianShDegree` to the shared SH degree module, preserving its crate-root re-export and behavior. [#49](https://github.com/LioQing/wgpu-3dgs-core/pull/49)
 - ⚡ Add direct binary PLY record reads for SH degrees 0 to 4, precompute custom property offsets, and reuse ASCII and binary read buffers. [#46](https://github.com/LioQing/wgpu-3dgs-core/pull/47)
 - 🐛 Fix overflow in Gaussian buffer update-range checks. [#45](https://github.com/LioQing/wgpu-3dgs-core/pull/45)
@@ -27,6 +29,8 @@ Please also check out the [`wgpu-3dgs-viewer` changelog](https://github.com/LioQ
 
 ### Breaking Changes
 
+- Default new SPZ models to version 4, including inferred-degree constructors and source conversions, provide explicit options to use legacy versions. [#50](https://github.com/LioQing/wgpu-3dgs-core/pull/50)
+- Add `Four` variants to the SPZ SH field enums. Exhaustive downstream matches must handle degree 4. [#50](https://github.com/LioQing/wgpu-3dgs-core/pull/50)
 - Change `GaussianToSpzOptions::sh_bits` and `sh_bucket_size` to accept `SpzGaussianShDegree` instead of `u8`. Returns `None` for degree 0 and unchanged results for degrees 1 through 3. [#49](https://github.com/LioQing/wgpu-3dgs-core/pull/49)
 - Change `PlyGaussians::read_gaussians` to return a complete collection, retaining the SH degree for empty files. [#45](https://github.com/LioQing/wgpu-3dgs-core/pull/45)
 - Rename `PlyGaussians::try_from_iter` to `from_iter(records, degree)`. `PlyGaussians::new` now returns `PlyGaussiansFromIterError` instead of `std::io::Error`. [#45](https://github.com/LioQing/wgpu-3dgs-core/pull/45)

@@ -171,48 +171,50 @@ fn dispatch_outputs<G: GaussianPod>(ctx: &TestContext, buffer: &GaussiansBuffer<
         .expect("download")
 }
 
+fn assert_gaussian_unpack_stride<G: GaussianPod>() {
+    let ctx = TestContext::new();
+    let gaussians = (0..3)
+        .map(given::gaussian_for_sh_degree::<G::ShDegree>)
+        .collect::<Vec<_>>();
+    let buffer = GaussiansBuffer::<G>::new(&ctx.device, &gaussians);
+    let output = dispatch_outputs(&ctx, &buffer);
+
+    assert_eq!(output.len(), gaussians.len());
+
+    for (gaussian, output) in gaussians.iter().zip(output) {
+        let field = G::ShConfig::from_sh(&gaussian.sh);
+        let expected = G::ShConfig::to_sh(&field);
+
+        assert_eq!(output.pos, gaussian.pos.to_array());
+        assert_eq!(output.degree, G::ShDegree::DEGREE as u32);
+        assert_eq!(output.effective_degree, output.degree);
+        assert!(output.color().abs_diff_eq(gaussian.color, 1e-6));
+
+        for (actual, expected) in output.sh().iter().zip(expected.as_ref()) {
+            assert!(actual.abs_diff_eq(*expected, 1e-6));
+        }
+
+        assert!(
+            output.sh()[G::ShDegree::COEFFICIENT_COUNT..]
+                .iter()
+                .all(|v| *v == Vec3::ZERO)
+        );
+
+        let expected_cov = CovSingle::from_rot_scale(gaussian.rot, gaussian.scale);
+
+        assert!(
+            output
+                .cov3d
+                .iter()
+                .zip(expected_cov)
+                .all(|(a, b)| (a - b).abs() < 0.01)
+        );
+    }
+}
+
 #[test]
 fn test_gaussian_unpack_should_use_correct_stride_for_multiple_gaussians_of_all_degrees() {
-    fn body<G: GaussianPod>() {
-        let ctx = TestContext::new();
-        let gaussians = (0..3)
-            .map(given::gaussian_for_sh_degree::<G::ShDegree>)
-            .collect::<Vec<_>>();
-        let buffer = GaussiansBuffer::<G>::new(&ctx.device, &gaussians);
-        let output = dispatch_outputs(&ctx, &buffer);
-
-        for (gaussian, output) in gaussians.iter().zip(output) {
-            let field = G::ShConfig::from_sh(&gaussian.sh);
-            let expected = G::ShConfig::to_sh(&field);
-
-            assert_eq!(output.pos, gaussian.pos.to_array());
-            assert_eq!(output.degree, G::ShDegree::DEGREE as u32);
-            assert_eq!(output.effective_degree, output.degree);
-            assert!(output.color().abs_diff_eq(gaussian.color, 1e-6));
-
-            for (actual, expected) in output.sh().iter().zip(expected.as_ref()) {
-                assert!(actual.abs_diff_eq(*expected, 1e-6));
-            }
-
-            assert!(
-                output.sh()[G::ShDegree::COEFFICIENT_COUNT..]
-                    .iter()
-                    .all(|v| *v == Vec3::ZERO)
-            );
-
-            let expected_cov = CovSingle::from_rot_scale(gaussian.rot, gaussian.scale);
-
-            assert!(
-                output
-                    .cov3d
-                    .iter()
-                    .zip(expected_cov)
-                    .all(|(a, b)| (a - b).abs() < 0.01)
-            );
-        }
-    }
-
-    crate::for_each_sh_degree_gaussian_pod!(G => body::<G>());
+    crate::for_each_sh_degree_gaussian_pod!(G => assert_gaussian_unpack_stride::<G>());
 }
 
 #[test]

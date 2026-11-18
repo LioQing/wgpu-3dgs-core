@@ -1,5 +1,7 @@
 use assert_matches::assert_matches;
-use wgpu_3dgs_core::{Gaussian, Gaussians, GaussiansSource, IterGaussian, IteratorGaussianExt};
+use wgpu_3dgs_core::{
+    AnyGaussian, Gaussian, Gaussians, GaussiansSource, IterGaussian, IteratorGaussianExt,
+};
 
 use crate::common::{assert, given};
 
@@ -144,6 +146,56 @@ fn test_gaussians_len_and_is_empty_should_be_correct() {
 
         assert_eq!(gaussians.len(), original.len());
         assert_eq!(gaussians.is_empty(), original.is_empty());
+    }
+}
+
+#[test]
+fn test_gaussians_from_gaussians_iter_when_runtime_input_is_empty_should_default_to_degree_three() {
+    for source in [
+        GaussiansSource::Internal,
+        GaussiansSource::Ply,
+        GaussiansSource::Spz,
+    ] {
+        let model =
+            Gaussians::from_gaussians_iter(std::iter::empty::<AnyGaussian>(), source).unwrap();
+
+        assert_eq!(model.source(), source);
+        assert_eq!(model.sh_degree().get(), 3);
+        assert_eq!(model.len(), 0);
+        assert!(model.is_empty());
+    }
+}
+
+#[test]
+fn test_gaussians_iter_gaussian_should_report_remaining_count_for_each_source() {
+    for model in [
+        Gaussians::from(given::gaussians()),
+        Gaussians::from(given::ply_gaussians()),
+        Gaussians::from(given::spz_gaussians()),
+    ] {
+        let expected = model.iter_gaussian().collect::<Vec<_>>();
+        let mut iter = model.iter_gaussian();
+
+        assert_eq!(iter.len(), expected.len());
+        assert_eq!(iter.size_hint(), (expected.len(), Some(expected.len())));
+
+        for (index, expected) in expected.into_iter().enumerate() {
+            assert_eq!(iter.next(), Some(expected));
+            let remaining = model.len() - index - 1;
+
+            assert_eq!(iter.len(), remaining);
+            assert_eq!(iter.size_hint(), (remaining, Some(remaining)));
+        }
+
+        assert!(iter.next().is_none());
+        assert!(iter.next().is_none());
+    }
+}
+
+#[test]
+fn test_gaussians_read_from_when_header_is_invalid_should_propagate_error() {
+    for source in [GaussiansSource::Ply, GaussiansSource::Spz] {
+        assert!(Gaussians::read_from(&mut b"invalid header".as_slice(), source).is_err());
     }
 }
 
